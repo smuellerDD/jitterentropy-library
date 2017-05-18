@@ -1,0 +1,178 @@
+.\" Copyright (c) 2013 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY 3  2013-05-06
+.SH NAME
+jitterentropy \- CPU Jitter Random Number Generator
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy.h>
+.sp
+.BI "int jent_entropy_init(" void ");
+.sp
+.BI "struct rand_data *jent_entropy_collector_alloc(unsigned int " osr ",
+.BI "                                               unsigned int " flags );
+.sp
+.BI "void jent_entropy_collector_free(struct rand_data *" entropy_collector );
+.sp
+.BI "ssize_t jent_read_entropy(struct rand_data *" entropy_collector ",
+.BI "                          char *" data ", size_t " len );
+.sp
+.BI "unsigned int jent_version(" void ");
+.fi
+.SH DESCRIPTION
+The
+.I jitterentropy
+library provides a source of good entropy by collecting CPU
+executing time jitter. The entropy in the CPU execution time
+jitter is magnified by the CPU Jitter Random Number Generator.
+The CPU Jitter Random Number Generator uses the CPU execution
+timing jitter to generate a bit stream which complies with
+different statistical measurements that determine the bit
+stream is random.
+.LP
+The CPU Jitter Random Number Generator delivers entropy which
+follows information theoretical requirements. Based on these
+studies and the implementation, the caller can assume that
+one bit of data extracted from the CPU Jitter Random Number
+Generator holds one bit of entropy.
+.LP
+The CPU Jitter Random Number Generator provides a decentralized
+source of entropy where the caller does not need to rely
+on a centrally maintained source of entropy like
+.IR /dev/random
+or
+.IR /dev/urandom .
+.LP
+.BR jent_entropy_init ()
+initializes the CPU Jitter Random Number Generator. The function
+performs statistical tests to verify that the underlying system
+offers the properties needed for measuring and collecting entropy.
+If the initialization is successful, which implies that the
+statistical tests indicate the underlying system is appropriate,
+the call returns with
+.IR 0 .
+A return code other than
+.IR 0
+indicates a failure where the calling application
+.B MUST NOT
+use the CPU Jitter Random Number Generator.
+.LP
+.BR jent_entropy_collector_alloc ()
+allocates a CPU Jitter entropy collector instance and returns the handle
+to the caller. If the allocation fails, including memory
+constraints, the call returns
+.IR NULL .
+The function requires two arguments, the oversampling rate
+.IR osr
+and a set of flags with
+.IR flags .
+The
+.IR osr
+value defines the amount of oversampling performed by the entropy
+collector. Usually, a caller wants to provide the value 1 here to
+not perform oversampling. The value 0 is converted into a 1 automatically
+by the entropy collector.
+.LP
+The
+.IR flags
+value is either zero or one or more of the following flags.
+.BR JENT_DISABLE_STIR
+disables the use of the stirring function with the newly generated random
+number before it is given to the caller. The stirring function mixes the
+random numbers a bit as a precautionary measure. This function should be
+enabled when using the output of the CPU Jitter RNG directly. On the other
+hand, when using the output to seed a deterministic RNG, the mixing function
+is not needed as the deterministic RNG acts already as cryptographic
+whitening function to the data produced by the CPU Jitter RNG. The stirring
+function is enabled per default. The Von-Neumann
+unbias operation can be disabled using the
+.BR  JENT_DISABLE_UNBIAS
+flag. The Von-Neumann unbias operation is enabled per default. Per default,
+the CPU Jitter entropy collection process performs memory accesses as a
+source of entropy. These memory accesses are mathematically modelled to
+contain entropy. In addition, the CPU state itself delivers entropy which,
+however, depends on the CPU complexity. The memory size is defined with
+the JENT_MEMORY_SIZE macro. If the system is constrained with memory, the flag
+.BR JENT_DISABLE_MEMORY_ACCESS
+disables the allocation of that memory and therefore memory accesses. But
+that also implies that the entropy collection process only relies on the
+complexity of the CPU. Note, if somebody knows all details of that CPU
+complexity, that person may potentially reduce the entropy delivered by the CPU
+complexity. If that person can push the generated entropy below a threshold,
+the CPU Jitter random number generator starts overestimating entropy from the
+noise source. Thus, disabling memory accesses and relying only on the CPU
+complexity should only be done if you really know what you are doing.
+.LP
+.BR jent_entropy_collector_free()
+zeroizes and frees the given CPU Jitter entropy collector instance.
+.LP
+.BR jent_read_entropy ()
+generates a random bit stream and returns it to the caller.
+.IR entropy_collector
+is the CPU Jitter entropy collector instance which shall be used
+to obtain random numbers.
+.IR data
+is the destination memory location where the random bit stream
+is written to. The memory must have already been allocated by the
+caller.
+.IR len
+is a length value provided by the caller indicating the number
+of bytes the CPU Jitter Random Number Generator shall generate.
+The caller can provide any value greater than 0. The caller
+must ensure that
+.IR data
+is at least als big as
+.IR len
+indicates. The function returns the number of bytes generated
+when the request is successfully completed. The return code of
+.IR -1
+indicates the FIPS 140-2 self-test failed, if the FIPS 140-2
+mode is activated. In this case the code will not generate
+any entropy any more for the given entropy collector. The only
+way to reset this condition is to deallocate the entropy
+collector and create a new instance. If the function returns
+the error code
+.IR -2
+then the caller handed in a non-initialized (i.e. NULL value)
+for the entropy collector.
+.LP
+.BR jent_version ()
+returns the version number of the library as an integer value that is
+monotonically increasing.
+.PP
+.SH NOTES
+The CPU Jitter random number generator
+.B MUST NOT
+be compiled with compiler optimizations. A pre-processor check
+enforces this requirement.
+.LP
+The random bit stream generated by
+.BR jent_read_entropy ()
+is NOT processed by a cryptographically secure whitening
+function. Nonetheless, it is believed that the output
+can be used as a source for cryptographically secure
+key material or other cryptographically sensitive data.
+.LP
+In addition to use the generated random bit stream directly
+for cryptographic operations, the output of
+.BR jent_read_entropy ()
+can be used for seeding a deterministic random number generator,
+or perform a post processing with a cryptographically secure
+whitening function.
+.PP
+.SH SEE ALSO
+http://www.chronox.de provides the design description,
+the entropy and statistical analyses as well as a number of
+test cases.
