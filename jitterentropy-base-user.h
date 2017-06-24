@@ -46,7 +46,7 @@
  * Set the following defines as needed for your environment
  */
 /* Compilation for libgcrypt */
-#ifndef LIBGCRYT
+#ifndef LIBGCRYPT
 #undef LIBGCRYPT
 #endif
 
@@ -61,6 +61,7 @@
 #include <string.h>
 #include <asm/types.h>
 #include <sys/types.h>
+
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -86,7 +87,7 @@
 #include <unistd.h>
 #endif
 
-static inline void jent_get_nstime(__u64 *out)
+static inline void jent_get_nstime(uint64_t *out)
 {
 	/* OSX does not have clock_gettime -- taken from
 	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html */
@@ -96,7 +97,7 @@ static inline void jent_get_nstime(__u64 *out)
 	/* clock_gettime() on AIX returns a timer value that increments in
 	 * steps of 1000
 	 */
-	__u64 tmp = 0;
+	uint64_t tmp = 0;
 	timebasestruct_t aixtime;
 	read_real_time(&aixtime, TIMEBASE_SZ);
 	tmp = aixtime.tb_high;
@@ -108,7 +109,7 @@ static inline void jent_get_nstime(__u64 *out)
 	 * we get some nice extra entropy once in a while from the NTP actions
 	 * that we want to use as well... though, we do not rely on that
 	 * extra little entropy */
-	__u64 tmp = 0;
+	uint64_t tmp = 0;
 	struct timespec time;
 	if (clock_gettime(CLOCK_REALTIME, &time) == 0)
 	{
@@ -187,7 +188,7 @@ static inline int jent_fips_enabled(void)
 
 /* note: these helper functions are shamelessly stolen from the kernel :-) */
 
-static inline __u64 rol64(__u64 word, unsigned int shift)
+static inline uint64_t rol64(uint64_t word, unsigned int shift)
 {
 	return (word << shift) | (word >> (64 - shift));
 }

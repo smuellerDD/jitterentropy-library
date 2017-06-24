@@ -1,3 +1,13 @@
+2.1.0:
+ * Convert all __[u|s][32|64] into [uint|int][32|64]_t
+ * Remove all code protected by #if defined(__KERNEL__) && !defined(MODULE)
+ * Add JENT_PRIVATE_COMPILE: Enable flag during compile when
+   compiling a private copy of the Jitter RNG
+ * Remove unused statistical test code
+ * Add FIPS 140-2 continuous self test code
+ * threshold for init-time stuck test configurable with JENT_STUCK_INIT_THRES
+   during compile time
+
 2.0.1:
  * Invcation of stuck test during initalization
 

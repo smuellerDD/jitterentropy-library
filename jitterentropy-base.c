@@ -1,7 +1,7 @@
-﻿/*
+/*
  * Non-physical true random number generator based on timing jitter.
  *
- * Copyright Stephan Mueller <smueller@chronox.de>, 2014
+ * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2017
  *
  * Design
  * ======
@@ -65,10 +65,10 @@
 		      * require consumer to be updated (as long as this number
 		      * is zero, the API is not considered stable and can
 		      * change without a bump of the major version) */
-#define MINVERSION 0 /* API compatible, ABI may change, functional
+#define MINVERSION 1 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 1 /* API / ABI compatible, no functional changes, no
+#define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
 /**
@@ -84,6 +84,7 @@
  *
  * Return: Version number of kcapi library
  */
+JENT_PRIVATE_STATIC
 unsigned int jent_version(void)
 {
 	unsigned int version = 0;
@@ -107,11 +108,11 @@ unsigned int jent_version(void)
  *
  * @return Newly calculated loop counter
  */
-static __u64 jent_loop_shuffle(struct rand_data *ec,
-			       unsigned int bits, unsigned int min)
+static uint64_t jent_loop_shuffle(struct rand_data *ec,
+				  unsigned int bits, unsigned int min)
 {
-	__u64 time = 0;
-	__u64 shuffle = 0;
+	uint64_t time = 0;
+	uint64_t shuffle = 0;
 	unsigned int i = 0;
 	unsigned int mask = (1<<bits) - 1;
 
@@ -167,15 +168,15 @@ static __u64 jent_loop_shuffle(struct rand_data *ec,
  *
  * @return Number of loops the folding operation is performed
  */
-static __u64 jent_lfsr_time(struct rand_data *ec, __u64 time,
-			    __u64 loop_cnt)
+static uint64_t jent_lfsr_time(struct rand_data *ec, uint64_t time,
+			       uint64_t loop_cnt)
 {
 	unsigned int i;
-	__u64 j = 0;
-	__u64 new = 0;
+	uint64_t j = 0;
+	uint64_t new = 0;
 #define MAX_FOLD_LOOP_BIT 4
 #define MIN_FOLD_LOOP_BIT 0
-	__u64 fold_loop_cnt =
+	uint64_t fold_loop_cnt =
 		jent_loop_shuffle(ec, MAX_FOLD_LOOP_BIT, MIN_FOLD_LOOP_BIT);
 
 	/*
@@ -187,7 +188,7 @@ static __u64 jent_lfsr_time(struct rand_data *ec, __u64 time,
 	for (j = 0; j < fold_loop_cnt; j++) {
 		new = ec->data;
 		for (i = 1; (DATA_SIZE_BITS) >= i; i++) {
-			__u64 tmp = time << (DATA_SIZE_BITS - i);
+			uint64_t tmp = time << (DATA_SIZE_BITS - i);
 
 			tmp = tmp >> (DATA_SIZE_BITS - 1);
 
@@ -243,13 +244,13 @@ static __u64 jent_lfsr_time(struct rand_data *ec, __u64 time,
  *
  * @return Number of memory access operations
  */
-static unsigned int jent_memaccess(struct rand_data *ec, __u64 loop_cnt)
+static unsigned int jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
 	unsigned int wrap = 0;
-	__u64 i = 0;
+	uint64_t i = 0;
 #define MAX_ACC_LOOP_BIT 7
 #define MIN_ACC_LOOP_BIT 0
-	__u64 acc_loop_cnt =
+	uint64_t acc_loop_cnt =
 		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
 
 	if (NULL == ec || NULL == ec->mem)
@@ -302,10 +303,10 @@ static unsigned int jent_memaccess(struct rand_data *ec, __u64 loop_cnt)
  * 	0 jitter measurement not stuck (good bit)
  * 	1 jitter measurement stuck (reject bit)
  */
-static int jent_stuck(struct rand_data *ec, __u64 current_delta)
+static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
-	__s64 delta2 = ec->last_delta - current_delta;
-	__s64 delta3 = delta2 - ec->last_delta2;
+	int64_t delta2 = ec->last_delta - current_delta;
+	int64_t delta3 = delta2 - ec->last_delta2;
 
 	ec->last_delta = current_delta;
 	ec->last_delta2 = delta2;
@@ -332,8 +333,8 @@ static int jent_stuck(struct rand_data *ec, __u64 current_delta)
  */
 static int jent_measure_jitter(struct rand_data *ec)
 {
-	__u64 time = 0;
-	__u64 current_delta = 0;
+	uint64_t time = 0;
+	uint64_t current_delta = 0;
 	int stuck;
 
 	/* Invoke one noise source before time measurement to add variations */
@@ -392,8 +393,8 @@ static void jent_stir_pool(struct rand_data *entropy_collector)
 	 * with two 32 bit variables
 	 */
 	union c {
-		__u64 u64;
-		__u32 u32[2];
+		uint64_t uint64;
+		uint32_t uint32[2];
 	};
 	/*
 	 * This constant is derived from the first two 32 bit initialization
@@ -418,10 +419,10 @@ static void jent_stir_pool(struct rand_data *entropy_collector)
 	 * as we do not rely on the specific numbers. We just pick the SHA-1
 	 * constants as they have a good mix of bit set and unset.
 	 */
-	constant.u32[1] = 0x67452301;
-	constant.u32[0] = 0xefcdab89;
-	mixer.u32[1] = 0x98badcfe;
-	mixer.u32[0] = 0x10325476;
+	constant.uint32[1] = 0x67452301;
+	constant.uint32[0] = 0xefcdab89;
+	mixer.uint32[1] = 0x98badcfe;
+	mixer.uint32[0] = 0x10325476;
 
 	for (i = 0; i < DATA_SIZE_BITS; i++) {
 		/*
@@ -429,12 +430,12 @@ static void jent_stir_pool(struct rand_data *entropy_collector)
 		 * the constant into the mixer value when that bit is set
 		 */
 		if ((entropy_collector->data >> i) & 1)
-			mixer.u64 ^= constant.u64;
+			mixer.uint64 ^= constant.uint64;
 		else
-			throw_away.u64 ^= constant.u64;
-		mixer.u64 = rol64(mixer.u64, 1);
+			throw_away.uint64 ^= constant.uint64;
+		mixer.uint64 = rol64(mixer.uint64, 1);
 	}
-	entropy_collector->data ^= mixer.u64;
+	entropy_collector->data ^= mixer.uint64;
 }
 
 /**
@@ -452,14 +453,9 @@ static void jent_gen_entropy(struct rand_data *ec)
 	jent_measure_jitter(ec);
 
 	while (1) {
-		__u64 prev_data = ec->data;
-
 		/* If a stuck measurement is received, repeat measurement */
 		if (jent_measure_jitter(ec))
 			continue;
-
-		/* statistics testing only */
-		jent_bit_count(ec, prev_data);
 
 		/*
 		 * We multiply the loop value with ->osr to obtain the
@@ -470,6 +466,41 @@ static void jent_gen_entropy(struct rand_data *ec)
 	}
 	if (ec->stir)
 		jent_stir_pool(ec);
+}
+
+/**
+ * The continuous test required by FIPS 140-2 -- the function automatically
+ * primes the test if needed.
+ *
+ * Return:
+ * 0 if FIPS test passed
+ * < 0 if FIPS test failed
+ */
+static int jent_fips_test(struct rand_data *ec)
+{
+	if (ec->fips_enabled == -1)
+		return 0;
+
+	if (ec->fips_enabled == 0) {
+		if (!jent_fips_enabled()) {
+			ec->fips_enabled = -1;
+			return 0;
+		} else
+			ec->fips_enabled = 1;
+	}
+
+	/* prime the FIPS test */
+	if (!ec->old_data) {
+		ec->old_data = ec->data;
+		jent_gen_entropy(ec);
+	}
+
+	if (ec->data == ec->old_data)
+		return -1;
+
+	ec->old_data = ec->data;
+
+	return 0;
 }
 
 /**
@@ -492,8 +523,10 @@ static void jent_gen_entropy(struct rand_data *ec)
  * @return number of bytes returned when request is fulfilled or an error
  *
  * The following error codes can occur:
- * 	-1	entropy_collector is NULL
+ *	-1	entropy_collector is NULL
+ *	-2	FIPS test failed
  */
+JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 {
 	char *p = data;
@@ -504,7 +537,11 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 
 	while (0 < len) {
 		size_t tocopy;
+
 		jent_gen_entropy(ec);
+		if (jent_fips_test(ec))
+			return -2;
+
 		if ((DATA_SIZE_BITS / 8) < len)
 			tocopy = (DATA_SIZE_BITS / 8);
 		else
@@ -535,14 +572,12 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 #endif
 	return orig_len;
 }
-#if defined(__KERNEL__) && !defined(MODULE)
-EXPORT_SYMBOL(jent_read_entropy);
-#endif
 
 /***************************************************************************
  * Initialization logic
  ***************************************************************************/
 
+JENT_PRIVATE_STATIC
 struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 					       unsigned int flags)
 {
@@ -583,10 +618,8 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 
 	return entropy_collector;
 }
-#if defined(__KERNEL__) && !defined(MODULE)
-EXPORT_SYMBOL(jent_entropy_collector_alloc);
-#endif
 
+JENT_PRIVATE_STATIC
 void jent_entropy_collector_free(struct rand_data *entropy_collector)
 {
 	if (NULL != entropy_collector) {
@@ -597,15 +630,13 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 		jent_zfree(entropy_collector, sizeof(struct rand_data));
 	}
 }
-#if defined(__KERNEL__) && !defined(MODULE)
-EXPORT_SYMBOL(jent_entropy_collector_free);
-#endif
 
+JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
 {
 	int i;
-	__u64 delta_sum = 0;
-	__u64 old_delta = 0;
+	uint64_t delta_sum = 0;
+	uint64_t old_delta = 0;
 	int time_backwards = 0;
 	int count_mod = 0;
 	int count_stuck = 0;
@@ -636,9 +667,9 @@ int jent_entropy_init(void)
 #define TESTLOOPCOUNT 300
 #define CLEARCACHE 100
 	for (i = 0; (TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
-		__u64 time = 0;
-		__u64 time2 = 0;
-		__u64 delta = 0;
+		uint64_t time = 0;
+		uint64_t time2 = 0;
+		uint64_t delta = 0;
 		unsigned int lowdelta = 0;
 		int stuck;
 
@@ -727,14 +758,11 @@ int jent_entropy_init(void)
 	 * If we have more than 90% stuck results, then this Jitter RNG is
 	 * likely to not work well.
 	 */
-	if ((TESTLOOPCOUNT/10 * 9) < count_stuck)
+	if (JENT_STUCK_INIT_THRES(TESTLOOPCOUNT) < count_stuck)
 		return ESTUCK;
 
 	return 0;
 }
-#if defined(__KERNEL__) && !defined(MODULE)
-EXPORT_SYMBOL(jent_entropy_init);
-#endif
 
 /***************************************************************************
  * Statistical test logic not compiled for regular operation
@@ -742,49 +770,15 @@ EXPORT_SYMBOL(jent_entropy_init);
 
 #ifdef CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT
 /*
- * Statistical tests: invoke the entropy collector and sample time results
- * for it, the random data is never returned - every call to this function
- * generates one random number.
- * This function is only meant for statistical analysis purposes and not
- * for general use
- */
-void jent_gen_entropy_stat(struct rand_data *entropy_collector,
-	       		   struct entropy_stat *stat)
-{
-	/* caller is allowed to set the entropy collection loop to a fixed
-	 * value -- we still call shuffle for the time measurements */
-	jent_init_statistic(entropy_collector);
-	jent_gen_entropy(entropy_collector);
-	jent_calc_statistic(entropy_collector, stat, DATA_SIZE_BITS);
-}
-
-/*
- * Statistical test: obtain the distribution of the LFSR state value from
- * jent_lfsr_time
- */
-void jent_lfsr_time_stat(struct rand_data *ec, __u64 *fold, __u64 *loop_cnt)
-{
-	__u64 time = 0;
-	__u64 time2 = 0;
-	jent_get_nstime(&time);
-	jent_memaccess(ec, 0);
-	/* implement the priming logic */
-	jent_lfsr_time(ec, time, 0);
-	jent_get_nstime(&time2);
-	time2 = time2 - time;
-	*loop_cnt = jent_lfsr_time(ec, time2, 0);
-	*fold = ec->data;
-}
-
-/*
  * Statistical test: return the time duration for the folding operation. If min
- * is set, perform the given number of foldings. Otherwise, allow the
- * loop count shuffling to define the number of foldings.
+ * is set, perform the given number of LFSR ops. Otherwise, allow the
+ * loop count shuffling to define the number of LFSR ops.
  */
-__u64 jent_lfsr_var_stat(struct rand_data *ec, unsigned int min)
+JENT_PRIVATE_STATIC
+uint64_t jent_lfsr_var_stat(struct rand_data *ec, unsigned int min)
 {
-	__u64 time = 0;
-	__u64 time2 = 0;
+	uint64_t time = 0;
+	uint64_t time2 = 0;
 
 	jent_get_nstime(&time);
 	jent_memaccess(ec, min);
