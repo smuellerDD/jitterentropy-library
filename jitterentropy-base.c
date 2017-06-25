@@ -82,7 +82,7 @@
  * The result of this function can be used in comparing the version number
  * in a calling program if version-specific calls need to be make.
  *
- * Return: Version number of kcapi library
+ * Return: Version number of jitterentropy library
  */
 JENT_PRIVATE_STATIC
 unsigned int jent_version(void)
