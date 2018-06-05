@@ -1,3 +1,6 @@
+2.1.1:
+ * Fix implementation of mathematical properties.
+
 2.1.0:
  * Convert all __[u|s][32|64] into [uint|int][32|64]_t
  * Remove all code protected by #if defined(__KERNEL__) && !defined(MODULE)
