@@ -32,7 +32,10 @@ LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
 .PHONY: all scan install clean distclean
 
-all: $(NAME)
+all: $(NAME) $(NAME)-static
+
+$(NAME)-static: $(OBJS)
+	$(AR) rcs lib$(NAME).a $(OBJS)
 
 $(NAME): $(OBJS)
 	$(CC) -shared -Wl,-soname,lib$(NAME).so.$(LIBMAJOR) -o lib$(NAME).so.$(LIBVERSION) $(OBJS) $(LDFLAGS)
@@ -51,5 +54,6 @@ clean:
 	@- $(RM) $(NAME)
 	@- $(RM) $(OBJS)
 	@- $(RM) lib$(NAME).so*
+	@- $(RM) lib$(NAME).a
 
 distclean: clean
