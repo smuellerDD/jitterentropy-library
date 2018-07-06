@@ -44,11 +44,13 @@ scan:	$(OBJS)
 	scan-build --use-analyzer=/usr/bin/clang $(CC) -shared -Wl,-soname,lib$(NAME).so.$(LIBMAJOR) -o lib$(NAME).so.$(LIBVERSION) $(OBJS) $(LDFLAGS)
 
 install:
-	install -m 644 doc/$(NAME).3 $(PREFIX)/share/man/man3/
-	gzip -9 $(PREFIX)/share/man/man3/$(NAME).3
-	install -m 0755 -s lib$(NAME).so.$(LIBVERSION) $(PREFIX)/$(LIBDIR)/
-	$(RM) $(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
-	ln -s lib$(NAME).so.$(LIBVERSION) $(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
+	install -m 644 doc/$(NAME).3 $(DESTDIR)$(PREFIX)/share/man/man3/
+	gzip -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
+	install -m 0755 -s lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/
+	$(RM) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
+	ln -s lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
 
 clean:
 	@- $(RM) $(NAME)
