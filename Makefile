@@ -30,7 +30,7 @@ CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
 LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
-.PHONY: all scan install clean distclean
+.PHONY: all scan install clean distclean check
 
 all: $(NAME) $(NAME)-static
 
