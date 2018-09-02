@@ -1,9 +1,9 @@
 # Compile Noise Source as user space application
 
-CC=gcc
+CC ?= gcc
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
 #Hardening
-CFLAGS +=-fstack-protector-strong -fwrapv --param ssp-buffer-size=4
+CFLAGS +=-fstack-protector-all -fwrapv --param ssp-buffer-size=4
 LDFLAGS +=-Wl,-z,relro,-z,now
 
 # Change as necessary
