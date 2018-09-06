@@ -1,3 +1,8 @@
+2.1.2:
+ * Add static library compilation thanks to Neil Horman
+ * Initialize variable ec to satisfy valgrind as suggested by Steve Grubb
+ * Add cross-compilation support suggested by Lonnie Abelbeck
+
 2.1.1:
  * Fix implementation of mathematical properties.
 
