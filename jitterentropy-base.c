@@ -68,7 +68,7 @@
 #define MINVERSION 1 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 1 /* API / ABI compatible, no functional changes, no
+#define PATCHLEVEL 2 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
 /**
