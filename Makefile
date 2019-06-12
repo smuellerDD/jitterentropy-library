@@ -52,6 +52,7 @@ install:
 	gzip -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
 	install -m 0755 -s lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(INCDIR)
 	install -m 0644 jitterentropy.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 	install -m 0644 jitterentropy-base-user.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 	$(RM) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
