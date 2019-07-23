@@ -25,6 +25,9 @@ C_SRCS := jitterentropy-base.c
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 
+analyze_srcs = $(filter %.c, $(sort $(C_SRCS)))
+analyze_plists = $(analyze_srcs:%.c=%.plist)
+
 INCLUDE_DIRS :=
 LIBRARY_DIRS :=
 LIBRARIES := rt
@@ -43,8 +46,14 @@ $(NAME)-static: $(OBJS)
 $(NAME): $(OBJS)
 	$(CC) -shared -Wl,-soname,lib$(NAME).so.$(LIBMAJOR) -o lib$(NAME).so.$(LIBVERSION) $(OBJS) $(LDFLAGS)
 
-scan:	$(OBJS)
-	scan-build --use-analyzer=/usr/bin/clang $(CC) -shared -Wl,-soname,lib$(NAME).so.$(LIBMAJOR) -o lib$(NAME).so.$(LIBVERSION) $(OBJS) $(LDFLAGS)
+$(analyze_plists): %.plist: %.c
+	@echo "  CCSA  " $@
+	clang --analyze $(CFLAGS) $< -o $@
+
+scan: $(analyze_plists)
+
+cppcheck:
+	cppcheck --force -q --enable=performance --enable=warning --enable=portability *.h *.c
 
 install:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
@@ -64,5 +73,6 @@ clean:
 	@- $(RM) $(OBJS)
 	@- $(RM) lib$(NAME).so*
 	@- $(RM) lib$(NAME).a
+	@- $(RM) $(analyze_plists)
 
 distclean: clean

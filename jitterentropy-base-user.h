@@ -172,8 +172,8 @@ static inline int jent_fips_enabled(void)
 #define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
 	char buf[2] = "0";
 	int fd = 0;
-        if ((fd = open(FIPS_MODE_SWITCH_FILE, O_RDONLY)) >= 0)
-	{
+
+	if ((fd = open(FIPS_MODE_SWITCH_FILE, O_RDONLY)) >= 0) {
 		while (read(fd, buf, sizeof(buf)) < 0 && errno == EINTR);
 		close(fd);
 	}

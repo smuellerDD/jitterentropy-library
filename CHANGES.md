@@ -1,3 +1,13 @@
+2.2.0
+ * SP800-90B compliance: Add RCT runtime health test
+ * SP800-90B compliance: Add Chi-Squared runtime health test as a replacement
+   for the adaptive proportion test
+ * SP800-90B compliance: Increase initial entropy test to 1024 rounds
+ * SP800-90B compliance: Invoke runtime health tests during initialization
+ * remove FIPS 140-2 continuous self test (RCT covers the requirement as per
+   FIPS 140-2 IG 9.8)
+ * SP800-90B compliance: Do not mix stuck time deltas into entropy pool
+
 2.1.2:
  * Add static library compilation thanks to Neil Horman
  * Initialize variable ec to satisfy valgrind as suggested by Steve Grubb

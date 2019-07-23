@@ -1,7 +1,7 @@
 ﻿/*
  * Non-physical true random number generator based on timing jitter.
  *
- * Copyright Stephan Mueller <smueller@chronox.de>, 2014
+ * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2019
  *
  * License
  * =======
@@ -42,11 +42,7 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
-#ifdef __KERNEL__
-#include "jitterentropy-base-kernel.h"
-#else
 #include "jitterentropy-base-user.h"
-#endif /* __KERNEL__ */
 
 /* The entropy pool */
 struct rand_data
@@ -55,32 +51,38 @@ struct rand_data
 	 * of the RNG are marked as SENSITIVE. A user must not
 	 * access that information while the RNG executes its loops to
 	 * calculate the next random value. */
-	uint64_t data;		/* SENSITIVE Actual random number */
-	uint64_t old_data;	/* SENSITIVE Previous random number */
-	uint64_t prev_time;	/* SENSITIVE Previous time stamp */
+	uint64_t data;			/* SENSITIVE Actual random number */
+	uint64_t prev_time;		/* SENSITIVE Previous time stamp */
 #define DATA_SIZE_BITS ((sizeof(uint64_t)) * 8)
-	uint64_t last_delta;	/* SENSITIVE stuck test */
-	int64_t last_delta2;	/* SENSITIVE stuck test */
-	unsigned int osr;	/* Oversample rate */
-	int fips_enabled;	/* FIPS enabled? */
-	unsigned int stir:1;		/* Post-processing stirring */
-	unsigned int disable_unbias:1;	/* Deactivate Von-Neuman unbias */
+	uint64_t last_delta;		/* SENSITIVE stuck test */
+	uint64_t last_delta2;		/* SENSITIVE stuck test */
+	unsigned int osr;		/* Oversampling rate */
 #define JENT_MEMORY_BLOCKS 64
 #define JENT_MEMORY_BLOCKSIZE 32
 #define JENT_MEMORY_ACCESSLOOPS 128
 #define JENT_MEMORY_SIZE (JENT_MEMORY_BLOCKS*JENT_MEMORY_BLOCKSIZE)
-	unsigned char *mem;	/* Memory access location with size of
-				 * memblocks * memblocksize */
-	unsigned int memlocation; /* Pointer to byte in *mem */
-	unsigned int memblocks;	/* Number of memory blocks in *mem */
-	unsigned int memblocksize; /* Size of one memory block in bytes */
-	unsigned int memaccessloops; /* Number of memory accesses per random
-				      * bit generation */
+	unsigned char *mem;		/* Memory access location with size of
+					 * memblocks * memblocksize */
+	unsigned int memlocation; 	/* Pointer to byte in *mem */
+	unsigned int memblocks;		/* Number of memory blocks in *mem */
+	unsigned int memblocksize; 	/* Size of one memory block in bytes */
+	unsigned int memaccessloops;	/* Number of memory accesses per random
+					 * bit generation */
+
+	/* Chi-Squared Test */
+#define JENT_CHISQ_NUM_VALUES		64
+#define JENT_CHISQ_WORD_MASK		0xff
+	unsigned char chisq_vals[JENT_CHISQ_NUM_VALUES][2];
+
+	/* Repetition Count Test */
+	int rct_count;			/* Number of stuck values */
+
+	unsigned int fips_enabled:1;
 };
 
 /* Flags that can be used to initialize the RNG */
-#define JENT_DISABLE_STIR (1<<0) /* Disable stirring the entropy pool */
-#define JENT_DISABLE_UNBIAS (1<<1) /* Disable the Von-Neuman Unbiaser */
+#define JENT_DISABLE_STIR (1<<0) 	/* UNUSED */
+#define JENT_DISABLE_UNBIAS (1<<1) 	/* UNUSED */
 #define JENT_DISABLE_MEMORY_ACCESS (1<<2) /* Disable memory access for more
 					     entropy, saves MEMORY_SIZE RAM for
 					     entropy collector */
@@ -135,6 +137,8 @@ unsigned int jent_version(void);
 #define EMINVARVAR	6 /* Timer variations of variations is too small */
 #define EPROGERR	7 /* Programming error */
 #define ESTUCK		8 /* Too many stuck results during init. */
+#define ECHISQ		9 /* Chi-Squared test failed during initialization */
+#define ERCT		10 /* RCT failed during initialization */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */
 

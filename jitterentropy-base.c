@@ -1,7 +1,7 @@
 /*
  * Non-physical true random number generator based on timing jitter.
  *
- * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2018
+ * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2019
  *
  * Design
  * ======
@@ -11,7 +11,7 @@
  * Interface
  * =========
  *
- * See documentation in doc/ folder.
+ * See documentation in jitterentropy(3) man page.
  *
  * License
  * =======
@@ -54,22 +54,22 @@
 
 #include "jitterentropy.h"
 
-#ifndef CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT
- /* only check optimization in a compilation for real work */
- #ifdef __OPTIMIZE__
-  #error "The CPU Jitter random number generator must not be compiled with optimizations. See documentation. Use the compiler switch -O0 for compiling jitterentropy-base.c."
- #endif
+#ifdef __OPTIMIZE__
+ #error "The CPU Jitter random number generator must not be compiled with optimizations. See documentation. Use the compiler switch -O0 for compiling jitterentropy-base.c."
 #endif
 
 #define MAJVERSION 2 /* API / ABI incompatible changes, functional changes that
 		      * require consumer to be updated (as long as this number
 		      * is zero, the API is not considered stable and can
 		      * change without a bump of the major version) */
-#define MINVERSION 1 /* API compatible, ABI may change, functional
+#define MINVERSION 2 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 2 /* API / ABI compatible, no functional changes, no
+#define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
+
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 /**
  * jent_version() - Return machine-usable version number of jent library
@@ -82,7 +82,7 @@
  * The result of this function can be used in comparing the version number
  * in a calling program if version-specific calls need to be make.
  *
- * Return: Version number of jitterentropy library
+ * @return Version number of jitterentropy library
  */
 JENT_PRIVATE_STATIC
 unsigned int jent_version(void)
@@ -96,15 +96,341 @@ unsigned int jent_version(void)
 	return version;
 }
 
+/***************************************************************************
+ * Chi-Squared Test
+ *
+ * The Chi-Squared test is defined with the following formula:
+ * SUM( ((O_i - E_i)^2) / E_i)
+ *
+ * with:
+ *  E_i: Expected value (i.e. the number of all observations divided by the
+ *       the number of different observed time deltas)
+ *  O_i: The actual number of observation for a given time delta
+ *
+ * The approach to calculate the Chi-Squared value is the following:
+ *
+ * 1. Sum up the number of occurrences for one given possible time delta.
+ *    When using the Jitter RNG without oversampling rate, we may have up to 64
+ *    different possible time deltas. For an oversampling rate we have up to
+ *    64 times oversampling rate different time deltas. However, to keep the
+ *    code lean we truncate to at most 64 time deltas.
+ *
+ * 2. Calculate the expected value by dividing the number of observations
+ *    (commonly 64 observations for the 64 time deltas used to generate one
+ *    Jitter RNG output block) by the number of different observed values.
+ *
+ * 3. For each time delta, calculate ((O_i - E_i)^2) / E_i and sum it up.
+ *
+ * 4. Compare the calculated value with the Chi-Squared distribution value
+ *    for a given confidence interval specified below using the number of
+ *    different observed values minus one as the degrees of freedom. If the
+ *    calculated Chi-Squared value is larger than the Chi-Square value of
+ *    the distribution with the given confidence interval and the degree of
+ *    freedom, the test fails. A failing test implies that the Jitter RNG
+ *    output block will be calculated completely but discarded at the
+ *    end. The caller of the Jitter RNG is informed with an error code.
+ *
+ * With this approach, we do not maintain security sensitive data because the
+ * two-dimensional array has the values and their numbers of occurrences.
+ * The security sensitive information of the order how the values occurred
+ * is not maintained. Hence, an attacker may not gain any knowledge from
+ * this statistic.
+ ***************************************************************************/
+
+/**
+ * Insert an entropy event value into the state of the Chi-Squared test.
+ *
+ * @ec [in] Reference to entropy collector
+ * @delta [in] Jitter time delta
+ */
+static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
+{
+	unsigned int i;
+	unsigned char delta_byte = delta & JENT_CHISQ_WORD_MASK;
+
+	if (!delta_byte)
+		return;
+
+	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
+		if (!ec->chisq_vals[i][0]) {
+			ec->chisq_vals[i][0] = delta_byte;
+			ec->chisq_vals[i][1]++;
+			break;
+		}
+
+		if (ec->chisq_vals[i][0] == delta_byte) {
+			ec->chisq_vals[i][1]++;
+			break;
+		}
+	}
+}
+
+/**
+ * Calculate the Chi-Squared test value together with the degrees of freedom.
+ *
+ * @ec [in] Reference to entropy collector
+ * @chisq [out] Chi-Squared value
+ * @degrees_freedom [out] Degrees of freedom to be applied for Chi-Squared
+ *			  comparison
+ *
+ * @return
+ * 	0 Chi-Squared Test calculation successful
+ * 	1 Chi-Squared Test calculation failure
+ */
+static int jent_chisq_test(struct rand_data *ec, float *chisq,
+			   unsigned int *degrees_freedom)
+{
+	unsigned int i, j, observations = 0;
+	float expected, chi_squared = 0;
+
+	/* Calculate average */
+	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
+		if (!ec->chisq_vals[i][0])
+			break;
+
+		observations += ec->chisq_vals[i][1];
+	}
+
+	if (!i)
+		return 1;
+
+	expected = (float)observations / (float)i;
+
+	/* Calculate distance from average */
+	for (j = 0; j < i; j++) {
+		float residual = (float)ec->chisq_vals[j][1] - expected;
+		float component = (residual * residual) / expected;
+
+		chi_squared += component;
+	}
+
+	*chisq = chi_squared;
+	*degrees_freedom = i - 1;
+
+	return 0;
+}
+
+/**
+ * Analyze the Chi-Squared value by comparing it against the threshold
+ * of the Chi-Squared distribution with the measured degrees of freedom and
+ * the 99.9999 percentile.
+ *
+ * The test is derived from the AIS 31 section 5.5.1.
+ *
+ * @ec [in] Reference to entropy collector
+ *
+ * @return
+ * 	0 Chi-Squared Test passed (zero hypothesis discarded)
+ * 	1 Chi-Squared Test failed (zero hypothesis proven)
+ */
+static unsigned int jent_chisq_failure(struct rand_data *ec)
+{
+	/*
+	 * The Chi-Squared values for the 99.9999 percentile. These are our
+	 * thresholds for the given degrees of freedom.
+	 *
+	 * The following values of Chi-Squared distribution are generated
+	 * by using R with the following call: qchisq(0.999999, df=0:63)
+	 */
+	static const float chisq_distribution[] = {
+		  0.00000,  23.92813,  27.63102,  30.66485,
+		 33.37684,  35.88819,  38.25834,  40.52183,
+		 42.70091,  44.81094,  46.86305,  48.86564,
+		 50.82525,  52.74707,  54.63531,  56.49344,
+		 58.32439,  60.13061,  61.91423,  63.67705,
+		 65.42068,  67.14651,  68.85577,  70.54956,
+		 72.22885,  73.89454,  75.54741,  77.18817,
+		 78.81750,  80.43597,  82.04414,  83.64252,
+		 85.23155,  86.81167,  88.38328,  89.94674,
+		 91.50239,  93.05055,  94.59152,  96.12556,
+		 97.65296,  99.17394, 100.68873, 102.19757,
+		103.70063, 105.19813, 106.69024, 108.17713,
+		109.65897, 111.13591, 112.60809, 114.07567,
+		115.53876, 116.99751, 118.45202, 119.90242,
+		121.34881, 122.79130, 124.22999, 125.66498,
+		127.09636, 128.52422, 129.94864, 131.36970
+	};
+	/* qchisq(0.99, df=0:63)
+	static const float chisq_distribution[] = {
+		 0.000000,  6.634897,  9.210340, 11.344867,
+		13.276704, 15.086272, 16.811894, 18.475307,
+		20.090235, 21.665994, 23.209251, 24.724970,
+		26.216967, 27.688250, 29.141238, 30.577914,
+		31.999927, 33.408664, 34.805306, 36.190869,
+		37.566235, 38.932173, 40.289360, 41.638398,
+		42.979820, 44.314105, 45.641683, 46.962942,
+		48.278236, 49.587884, 50.892181, 52.191395,
+		53.485772, 54.775540, 56.060909, 57.342073,
+		58.619215, 59.892500, 61.162087, 62.428121,
+		63.690740, 64.950071, 66.206236, 67.459348,
+		68.709513, 69.956832, 71.201400, 72.443307,
+		73.682639, 74.919474, 76.153891, 77.385962,
+		78.615756, 79.843338, 81.068772, 82.292117,
+		83.513430, 84.732766, 85.950176, 87.165711,
+		88.379419, 89.591344, 90.801532, 92.010024
+	}; */
+	float chisq_val;
+	unsigned int degrees_freedom, i;
+	int ret;
+
+	BUILD_BUG_ON(ARRAY_SIZE(chisq_distribution) != JENT_CHISQ_NUM_VALUES);
+
+	/* Test is only enabled in FIPS mode */
+	if (!ec->fips_enabled)
+		return 0;
+
+	ret = jent_chisq_test(ec, &chisq_val, &degrees_freedom);
+	if (ret)
+		return ret;
+
+	 /* Reset Chi-Squared test */
+	for (i = 0; i < (degrees_freedom + 1); i++) {
+		ec->chisq_vals[i][0] = 0;
+		ec->chisq_vals[i][1] = 0;
+	}
+
+	if (chisq_val > chisq_distribution[degrees_freedom])
+		return 1;
+
+	return 0;
+}
+
+/***************************************************************************
+ * Stuck Test and its use as Repetition Count Test
+ *
+ * The Jitter RNG uses an enhanced version of the Repetition Count Test
+ * (RCT) specified in SP800-90B section 4.4.1. Instead of counting identical
+ * back-to-back values, the input to the RCT is the counting of the stuck
+ * values during the generation of one Jitter RNG output block.
+ *
+ * The RCT is applied with an alpha of 2^{-30} compliant to FIPS 140-2 IG 9.8.
+ *
+ * During the counting operation, the Jitter RNG always calculates the RCT
+ * cut-off value of C. If that value exceeds the allowed cut-off value,
+ * the Jitter RNG output block will be calculated completely but discarded at
+ * the end. The caller of the Jitter RNG is informed with an error code.
+ ***************************************************************************/
+
+/**
+ * Insert data for Repetition Count Test
+ *
+ * @ec [in] Reference to entropy collector
+ * @stuck [in] Indicator whether the value is stuck
+ */
+static void jent_rct_insert(struct rand_data *ec, int stuck)
+{
+	/*
+	 * If we have a count less than zero, a previous RCT round identified
+	 * a failure. We will not overwrite it.
+	 */
+	if (ec->rct_count < 0)
+		return;
+
+	if (stuck) {
+		ec->rct_count++;
+
+		/*
+		 * The cutoff value is based on the following consideration:
+		 * alpha = 2^-30 as recommended in FIPS 140-2 IG 9.8.
+		 * In addition, we require an entropy value H of 1/OSR as this
+		 * is the minimum entropy required to provide full entropy.
+		 * Note, we collect 64 * OSR deltas for inserting them into
+		 * the entropy pool which should then have (close to) 64 bits
+		 * of entropy.
+		 *
+		 * Note, ec->rct_count (which equals to value B in the pseudo
+		 * code of SP800-90B section 4.4.1) starts with zero. Hence
+		 * we need to subtract one from the cutoff value as calculated
+		 * following SP800-90B.
+		 */
+		if ((unsigned int)ec->rct_count >= (30 * ec->osr))
+			ec->rct_count = -1;
+	} else {
+		ec->rct_count = 0;
+	}
+}
+
+/**
+ * Repetition Count Test as defined in SP800-90B section 4.4.1
+ *
+ * @ec [in] Reference to entropy collector
+ *
+ * @return
+ * 	0 RCT successful
+ * 	1 RCT failure
+ */
+static int jent_rct_failure(struct rand_data *ec)
+{
+	int ret = 0;
+
+	/* Test is only enabled in FIPS mode */
+	if (!ec->fips_enabled)
+		return 0;
+
+	if (ec->rct_count < 0)
+		ret = 1;
+
+	/* Reset the RCT */
+	ec->rct_count = 0;
+
+	return ret;
+}
+
+static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
+{
+	return (prev < next) ? (next - prev) : (UINT64_MAX - prev + 1 + next);
+}
+
+/**
+ * Stuck test by checking the:
+ * 	1st derivative of the jitter measurement (time delta)
+ * 	2nd derivative of the jitter measurement (delta of time deltas)
+ * 	3rd derivative of the jitter measurement (delta of delta of time deltas)
+ *
+ * All values must always be non-zero.
+ *
+ * @ec [in] Reference to entropy collector
+ * @current_delta [in] Jitter time delta
+ *
+ * @return
+ * 	0 jitter measurement not stuck (good bit)
+ * 	1 jitter measurement stuck (reject bit)
+ */
+static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
+{
+	uint64_t delta2 = jent_delta(ec->last_delta, current_delta);
+	uint64_t delta3 = jent_delta(ec->last_delta2, delta2);
+
+	ec->last_delta = current_delta;
+	ec->last_delta2 = delta2;
+
+	if (!current_delta || !delta2 || !delta3) {
+		/* RCT with a stuck bit */
+		jent_rct_insert(ec, 1);
+		return 1;
+	}
+
+	/* Chi-Squared test is only calculated over non-stuck time deltas. */
+	jent_chisq_insert(ec, current_delta);
+
+	/* RCT with a non-stuck bit */
+	jent_rct_insert(ec, 0);
+
+	return 0;
+}
+
+/***************************************************************************
+ * Noise sources
+ ***************************************************************************/
+
 /**
  * Update of the loop count used for the next round of
  * an entropy collection.
  *
- * Input:
- * @ec entropy collector struct -- may be NULL
- * @bits is the number of low bits of the timer to consider
- * @min is the number of bits we shift the timer value to the right at
- * 	the end to make sure we have a guaranteed minimum value
+ * @ec [in] entropy collector struct -- may be NULL
+ * @bits [in] is the number of low bits of the timer to consider
+ * @min [in] is the number of bits we shift the timer value to the right at
+ *	     the end to make sure we have a guaranteed minimum value
  *
  * @return Newly calculated loop counter
  */
@@ -139,10 +465,6 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	return (shuffle + (1<<min));
 }
 
-/***************************************************************************
- * Noise sources
- ***************************************************************************/
-
 /**
  * CPU Jitter noise source -- this is the noise source based on the CPU
  * 			      execution time jitter
@@ -153,30 +475,27 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
  * The code is deliberately inefficient with respect to the bit shifting
  * and shall stay that way. This function is the root cause why the code
  * shall be compiled without optimization. This function not only acts as
- * folding operation, but this function's execution is used to measure
+ * LFSR operation, but this function's execution is used to measure
  * the CPU execution time jitter. Any change to the loop in this function
  * implies that careful retesting must be done.
  *
- * Input:
- * @ec entropy collector struct -- may be NULL
- * @time time stamp to be injected
- * @loop_cnt if a value not equal to 0 is set, use the given value as number of
- *	     loops to perform the folding
+ * @ec [in] entropy collector struct -- may be NULL
+ * @time [in] time stamp to be injected
+ * @loop_cnt [in] if a value not equal to 0 is set, use the given value as
+ *		  number of loops to perform the LFSR
  *
  * Output:
  * updated ec->data
- *
- * @return Number of loops the folding operation is performed
  */
-static uint64_t jent_lfsr_time(struct rand_data *ec, uint64_t time,
-			       uint64_t loop_cnt)
+static void jent_lfsr_time(struct rand_data *ec, uint64_t time,
+			   uint64_t loop_cnt, int stuck)
 {
 	unsigned int i;
 	uint64_t j = 0;
 	uint64_t new = 0;
 #define MAX_FOLD_LOOP_BIT 4
 #define MIN_FOLD_LOOP_BIT 0
-	uint64_t fold_loop_cnt =
+	uint64_t lfsr_loop_cnt =
 		jent_loop_shuffle(ec, MAX_FOLD_LOOP_BIT, MIN_FOLD_LOOP_BIT);
 
 	/*
@@ -184,8 +503,8 @@ static uint64_t jent_lfsr_time(struct rand_data *ec, uint64_t time,
 	 * needed during runtime
 	 */
 	if (loop_cnt)
-		fold_loop_cnt = loop_cnt;
-	for (j = 0; j < fold_loop_cnt; j++) {
+		lfsr_loop_cnt = loop_cnt;
+	for (j = 0; j < lfsr_loop_cnt; j++) {
 		new = ec->data;
 		for (i = 1; (DATA_SIZE_BITS) >= i; i++) {
 			uint64_t tmp = time << (DATA_SIZE_BITS - i);
@@ -212,9 +531,17 @@ static uint64_t jent_lfsr_time(struct rand_data *ec, uint64_t time,
 			new ^= tmp;
 		}
 	}
-	ec->data = new;
 
-	return fold_loop_cnt;
+	/*
+	 * If the time stamp is stuck, do not finally insert the value into
+	 * the entropy pool. Although this operation should not do any harm
+	 * even when the time stamp has no entropy, SP800-90B requires that
+	 * any conditioning operation (SP800-90B considers the LFSR to be a
+	 * conditioning operation) to have an identical amount of input
+	 * data according to section 3.1.5.
+	 */
+	if (!stuck)
+		ec->data = new;
 }
 
 /**
@@ -235,16 +562,13 @@ static uint64_t jent_lfsr_time(struct rand_data *ec, uint64_t time,
  * to reliably access either L3 or memory, the ec->mem memory must be quite
  * large which is usually not desirable.
  *
- * Input:
- * @ec Reference to the entropy collector with the memory access data -- if
- *     the reference to the memory block to be accessed is NULL, this noise
- *     source is disabled
- * @loop_cnt if a value not equal to 0 is set, use the given value as number of
- *	     loops to perform the folding
- *
- * @return Number of memory access operations
+ * @ec [in] Reference to the entropy collector with the memory access data -- if
+ *	    the reference to the memory block to be accessed is NULL, this noise
+ *	    source is disabled
+ * @loop_cnt [in] if a value not equal to 0 is set, use the given value as
+ *		  number of loops to perform the folding
  */
-static unsigned int jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
+static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
 	unsigned int wrap = 0;
 	uint64_t i = 0;
@@ -254,7 +578,7 @@ static unsigned int jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
 
 	if (NULL == ec || NULL == ec->mem)
-		return 0;
+		return;
 	wrap = ec->memblocksize * ec->memblocks;
 
 	/*
@@ -280,43 +604,11 @@ static unsigned int jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		ec->memlocation = ec->memlocation + ec->memblocksize - 1;
 		ec->memlocation = ec->memlocation % wrap;
 	}
-	return i;
 }
 
 /***************************************************************************
  * Start of entropy processing logic
  ***************************************************************************/
-
-/**
- * Stuck test by checking the:
- * 	1st derivation of the jitter measurement (time delta)
- * 	2nd derivation of the jitter measurement (delta of time deltas)
- * 	3rd derivation of the jitter measurement (delta of delta of time deltas)
- *
- * All values must always be non-zero.
- *
- * Input:
- * @ec Reference to entropy collector
- * @current_delta Jitter time delta
- *
- * @return
- * 	0 jitter measurement not stuck (good bit)
- * 	1 jitter measurement stuck (reject bit)
- */
-static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
-{
-	int64_t delta2 = ec->last_delta - current_delta;
-	int64_t delta3 = delta2 - ec->last_delta2;
-
-	ec->last_delta = current_delta;
-	ec->last_delta2 = delta2;
-
-	if (!current_delta || !delta2 || !delta3)
-		return 1;
-
-	return 0;
-}
-
 /**
  * This is the heart of the entropy generation: calculate time deltas and
  * use the CPU jitter in the time deltas. The jitter is injected into the
@@ -326,8 +618,7 @@ static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
  * 	    of this function! This can be done by calling this function
  * 	    and not using its result.
  *
- * Input:
- * @entropy_collector Reference to entropy collector
+ * @ec [in] Reference to entropy collector
  *
  * @return: result of stuck test
  */
@@ -335,6 +626,7 @@ static int jent_measure_jitter(struct rand_data *ec)
 {
 	uint64_t time = 0;
 	uint64_t current_delta = 0;
+	int stuck;
 
 	/* Invoke one noise source before time measurement to add variations */
 	jent_memaccess(ec, 0);
@@ -344,22 +636,23 @@ static int jent_measure_jitter(struct rand_data *ec)
 	 * invocation to measure the timing variations
 	 */
 	jent_get_nstime(&time);
-	current_delta = time - ec->prev_time;
+	current_delta = jent_delta(ec->prev_time, time);
 	ec->prev_time = time;
 
-	/* Now call the next noise sources which also injects the data */
-	jent_lfsr_time(ec, current_delta, 0);
-
 	/* Check whether we have a stuck measurement. */
-	return jent_stuck(ec, current_delta);
+	stuck = jent_stuck(ec, current_delta);
+
+	/* Now call the next noise sources which also injects the data */
+	jent_lfsr_time(ec, current_delta, 0, stuck);
+
+	return stuck;
 }
 
 /**
  * Generator of one 64 bit random number
  * Function fills rand_data->data
  *
- * Input:
- * @ec Reference to entropy collector
+ * @ec [in] Reference to entropy collector
  */
 static void jent_gen_entropy(struct rand_data *ec)
 {
@@ -383,41 +676,6 @@ static void jent_gen_entropy(struct rand_data *ec)
 }
 
 /**
- * The continuous test required by FIPS 140-2 -- the function automatically
- * primes the test if needed.
- *
- * Return:
- * 0 if FIPS test passed
- * < 0 if FIPS test failed
- */
-static int jent_fips_test(struct rand_data *ec)
-{
-	if (ec->fips_enabled == -1)
-		return 0;
-
-	if (ec->fips_enabled == 0) {
-		if (!jent_fips_enabled()) {
-			ec->fips_enabled = -1;
-			return 0;
-		} else
-			ec->fips_enabled = 1;
-	}
-
-	/* prime the FIPS test */
-	if (!ec->old_data) {
-		ec->old_data = ec->data;
-		jent_gen_entropy(ec);
-	}
-
-	if (ec->data == ec->old_data)
-		return -1;
-
-	ec->old_data = ec->data;
-
-	return 0;
-}
-
-/**
  * Entry function: Obtain entropy for the caller.
  *
  * This function invokes the entropy gathering logic as often to generate
@@ -427,18 +685,18 @@ static int jent_fips_test(struct rand_data *ec)
  * This function truncates the last 64 bit entropy value output to the exact
  * size specified by the caller.
  *
- * Input:
- * @ec Reference to entropy collector
- * @data pointer to buffer for storing random data -- buffer must already
- *        exist
- * @len size of the buffer, specifying also the requested number of random
- *       in bytes
+ * @ec [in] Reference to entropy collector
+ * @data [out] pointer to buffer for storing random data -- buffer must
+ *	       already exist
+ * @len [in] size of the buffer, specifying also the requested number of random
+ *	     in bytes
  *
  * @return number of bytes returned when request is fulfilled or an error
  *
  * The following error codes can occur:
  *	-1	entropy_collector is NULL
- *	-2	FIPS test failed
+ *	-2	RCT failed
+ *	-3	Chi-Squared test failed
  */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
@@ -453,8 +711,11 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		size_t tocopy;
 
 		jent_gen_entropy(ec);
-		if (jent_fips_test(ec))
+		if (jent_rct_failure(ec))
 			return -2;
+
+		if (jent_chisq_failure(ec))
+			return -3;
 
 		if ((DATA_SIZE_BITS / 8) < len)
 			tocopy = (DATA_SIZE_BITS / 8);
@@ -521,11 +782,8 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 		osr = 1; /* minimum sampling rate is 1 */
 	entropy_collector->osr = osr;
 
-	entropy_collector->stir = 1;
-	if (flags & JENT_DISABLE_STIR)
-		entropy_collector->stir = 0;
-	if (flags & JENT_DISABLE_UNBIAS)
-		entropy_collector->disable_unbias = 1;
+	if (jent_fips_enabled())
+		entropy_collector->fips_enabled = 1;
 
 	/* fill the data pad with non-zero values */
 	jent_gen_entropy(entropy_collector);
@@ -551,12 +809,18 @@ int jent_entropy_init(void)
 	int i;
 	uint64_t delta_sum = 0;
 	uint64_t old_delta = 0;
+	unsigned int nonstuck = 0;
 	int time_backwards = 0;
 	int count_mod = 0;
 	int count_stuck = 0;
 	struct rand_data ec;
 
 	memset(&ec, 0, sizeof(ec));
+
+	/* Required for RCT */
+	ec.osr = 1;
+	if (jent_fips_enabled())
+		ec.fips_enabled = 1;
 
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
@@ -579,8 +843,10 @@ int jent_entropy_init(void)
 	/*
 	 * TESTLOOPCOUNT needs some loops to identify edge systems. 100 is
 	 * definitely too little.
+	 *
+	 * SP800-90B requires at least 1024 initial test cycles.
 	 */
-#define TESTLOOPCOUNT 300
+#define TESTLOOPCOUNT 1024
 #define CLEARCACHE 100
 	for (i = 0; (TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
 		uint64_t time = 0;
@@ -592,13 +858,14 @@ int jent_entropy_init(void)
 		/* Invoke core entropy collection logic */
 		jent_get_nstime(&time);
 		ec.prev_time = time;
-		jent_lfsr_time(&ec, time, 0);
+		jent_memaccess(&ec, 0);
+		jent_lfsr_time(&ec, time, 0, 0);
 		jent_get_nstime(&time2);
 
 		/* test whether timer works */
 		if (!time || !time2)
 			return ENOTIME;
-		delta = time2 - time;
+		delta = jent_delta(time, time2);
 		/*
 		 * test whether timer is fine grained enough to provide
 		 * delta even when called shortly after each other -- this
@@ -621,6 +888,27 @@ int jent_entropy_init(void)
 
 		if (stuck)
 			count_stuck++;
+		else {
+			nonstuck++;
+
+			/*
+			 * Ensure that the Chi-Squared test succeeded.
+			 *
+			 * With the check below that count_stuck must be less
+			 * than 10% of the overall generated raw entropy values
+			 * it is guaranteed that the Chi-Squared test is
+			 * invoked at floor((TESTLOOPCOUNT * 0.9) / 64) == 14
+			 * times.
+			 */
+			if ((nonstuck % JENT_CHISQ_NUM_VALUES) == 0) {
+				if (jent_chisq_failure(&ec))
+					return ECHISQ;
+			}
+		}
+
+		/* Validate RCT */
+		if (jent_rct_failure(&ec))
+			return ERCT;
 
 		/* test whether we have an increasing timer */
 		if (!(time2 > time))
@@ -674,32 +962,8 @@ int jent_entropy_init(void)
 	 * If we have more than 90% stuck results, then this Jitter RNG is
 	 * likely to not work well.
 	 */
-	if (JENT_STUCK_INIT_THRES(TESTLOOPCOUNT) < count_stuck)
+	if ((TESTLOOPCOUNT/10 * 9) < count_stuck)
 		return ESTUCK;
 
 	return 0;
 }
-
-/***************************************************************************
- * Statistical test logic not compiled for regular operation
- ***************************************************************************/
-
-#ifdef CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT
-/*
- * Statistical test: return the time duration for the folding operation. If min
- * is set, perform the given number of LFSR ops. Otherwise, allow the
- * loop count shuffling to define the number of LFSR ops.
- */
-JENT_PRIVATE_STATIC
-uint64_t jent_lfsr_var_stat(struct rand_data *ec, unsigned int min)
-{
-	uint64_t time = 0;
-	uint64_t time2 = 0;
-
-	jent_get_nstime(&time);
-	jent_memaccess(ec, min);
-	jent_lfsr_time(ec, time, min);
-	jent_get_nstime(&time2);
-	return ((time2 - time));
-}
-#endif /* CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT */
