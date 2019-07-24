@@ -172,16 +172,12 @@ static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
  * @chisq [out] Chi-Squared value
  * @degrees_freedom [out] Degrees of freedom to be applied for Chi-Squared
  *			  comparison
- *
- * @return
- * 	0 Chi-Squared Test calculation successful
- * 	1 Chi-Squared Test calculation failure
  */
-static int jent_chisq_test(struct rand_data *ec, float *chisq,
-			   unsigned int *degrees_freedom)
+static void jent_chisq_test(struct rand_data *ec, unsigned int *chisq,
+			    unsigned int *degrees_freedom)
 {
-	unsigned int i, j, observations = 0;
-	float expected, chi_squared = 0;
+#define LRNG_CHISQ_INT_FACTOR	1000000
+	unsigned int i, j, expected, observations = 0, chi_squared = 0;
 
 	/* Calculate average */
 	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
@@ -192,28 +188,31 @@ static int jent_chisq_test(struct rand_data *ec, float *chisq,
 	}
 
 	if (!i)
-		return 1;
+		return;
 
-	expected = (float)observations / (float)i;
+	expected = (observations * LRNG_CHISQ_INT_FACTOR) / i;
 
 	/* Calculate distance from average */
 	for (j = 0; j < i; j++) {
-		float residual = (float)ec->chisq_vals[j][1] - expected;
-		float component = (residual * residual) / expected;
+		int residual = (ec->chisq_vals[j][1] * LRNG_CHISQ_INT_FACTOR) -
+			       expected;
+		uint64_t component = ((int64_t)residual * (int64_t)residual) /
+				     (uint64_t)expected;
 
-		chi_squared += component;
+		chi_squared += (uint32_t)component;
 	}
 
 	*chisq = chi_squared;
 	*degrees_freedom = i - 1;
-
-	return 0;
 }
 
 /**
  * Analyze the Chi-Squared value by comparing it against the threshold
  * of the Chi-Squared distribution with the measured degrees of freedom and
  * the 99.9999 percentile.
+ *
+ * NOTE To avoid using float data types, all values are multiplied by
+ * 1,000,000.
  *
  * The test is derived from the AIS 31 section 5.5.1.
  *
@@ -230,48 +229,27 @@ static unsigned int jent_chisq_failure(struct rand_data *ec)
 	 * thresholds for the given degrees of freedom.
 	 *
 	 * The following values of Chi-Squared distribution are generated
-	 * by using R with the following call: qchisq(0.999999, df=0:63)
+	 * by using R with the following call: qchisq(0.999999, df=0:63)*1000000
 	 */
-	static const float chisq_distribution[] = {
-		  0.00000,  23.92813,  27.63102,  30.66485,
-		 33.37684,  35.88819,  38.25834,  40.52183,
-		 42.70091,  44.81094,  46.86305,  48.86564,
-		 50.82525,  52.74707,  54.63531,  56.49344,
-		 58.32439,  60.13061,  61.91423,  63.67705,
-		 65.42068,  67.14651,  68.85577,  70.54956,
-		 72.22885,  73.89454,  75.54741,  77.18817,
-		 78.81750,  80.43597,  82.04414,  83.64252,
-		 85.23155,  86.81167,  88.38328,  89.94674,
-		 91.50239,  93.05055,  94.59152,  96.12556,
-		 97.65296,  99.17394, 100.68873, 102.19757,
-		103.70063, 105.19813, 106.69024, 108.17713,
-		109.65897, 111.13591, 112.60809, 114.07567,
-		115.53876, 116.99751, 118.45202, 119.90242,
-		121.34881, 122.79130, 124.22999, 125.66498,
-		127.09636, 128.52422, 129.94864, 131.36970
+	static const unsigned int chisq_distribution[] = {
+			0,  23928130,  27631020,  30664850,
+		 33376840,  35888190,  38258340,  40521830,
+		 42700910,  44810940,  46863050,  48865640,
+		 50825250,  52747070,  54635310,  56493440,
+		 58324390,  60130610,  61914230,  63677050,
+		 65420680,  67146510,  68855770,  70549560,
+		 72228850,  73894540,  75547410,  77188170,
+		 78817500,  80435970,  82044140,  83642520,
+		 85231550,  86811670,  88383280,  89946740,
+		 91502390,  93050550,  94591520,  96125560,
+		 97652960,  99173940, 100688730, 102197570,
+		103700630, 105198130, 106690240, 108177130,
+		109658970, 111135910, 112608090, 114075670,
+		115538760, 116997510, 118452020, 119902420,
+		121348810, 122791300, 124229990, 125664980,
+		127096360, 128524220, 129948640, 131369700,
 	};
-	/* qchisq(0.99, df=0:63)
-	static const float chisq_distribution[] = {
-		 0.000000,  6.634897,  9.210340, 11.344867,
-		13.276704, 15.086272, 16.811894, 18.475307,
-		20.090235, 21.665994, 23.209251, 24.724970,
-		26.216967, 27.688250, 29.141238, 30.577914,
-		31.999927, 33.408664, 34.805306, 36.190869,
-		37.566235, 38.932173, 40.289360, 41.638398,
-		42.979820, 44.314105, 45.641683, 46.962942,
-		48.278236, 49.587884, 50.892181, 52.191395,
-		53.485772, 54.775540, 56.060909, 57.342073,
-		58.619215, 59.892500, 61.162087, 62.428121,
-		63.690740, 64.950071, 66.206236, 67.459348,
-		68.709513, 69.956832, 71.201400, 72.443307,
-		73.682639, 74.919474, 76.153891, 77.385962,
-		78.615756, 79.843338, 81.068772, 82.292117,
-		83.513430, 84.732766, 85.950176, 87.165711,
-		88.379419, 89.591344, 90.801532, 92.010024
-	}; */
-	float chisq_val;
-	unsigned int degrees_freedom, i;
-	int ret;
+	unsigned int chisq_val = 0, degrees_freedom = 0, i;
 
 	BUILD_BUG_ON(ARRAY_SIZE(chisq_distribution) != JENT_CHISQ_NUM_VALUES);
 
@@ -279,15 +257,17 @@ static unsigned int jent_chisq_failure(struct rand_data *ec)
 	if (!ec->fips_enabled)
 		return 0;
 
-	ret = jent_chisq_test(ec, &chisq_val, &degrees_freedom);
-	if (ret)
-		return ret;
+	jent_chisq_test(ec, &chisq_val, &degrees_freedom);
 
 	 /* Reset Chi-Squared test */
 	for (i = 0; i < (degrees_freedom + 1); i++) {
 		ec->chisq_vals[i][0] = 0;
 		ec->chisq_vals[i][1] = 0;
 	}
+
+	/* This is needed to shut up clang code analyzer */
+	if (degrees_freedom > JENT_CHISQ_NUM_VALUES - 1)
+		return 1;
 
 	if (chisq_val > chisq_distribution[degrees_freedom])
 		return 1;
