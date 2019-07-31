@@ -260,6 +260,11 @@ static unsigned int jent_chisq_failure(struct rand_data *ec)
 	jent_chisq_test(ec, &chisq_val, &degrees_freedom);
 
 	 /* Reset Chi-Squared test */
+	 /*
+	 * Reset the Chi-Squared test - it is considered an intermittent
+	 * failure which implies we can continue to stay operational. This is
+	 * allowed as per SP800-90B section 4.3 bullet 2.
+	 */
 	for (i = 0; i < (degrees_freedom + 1); i++) {
 		ec->chisq_vals[i][0] = 0;
 		ec->chisq_vals[i][1] = 0;
@@ -350,7 +355,11 @@ static int jent_rct_failure(struct rand_data *ec)
 	if (ec->rct_count < 0)
 		ret = 1;
 
-	/* Reset the RCT */
+	/*
+	 * Reset the RCT - it is considered an intermittent failure which
+	 * implies we can continue to stay operational. This is allowed
+	 * as per SP800-90B section 4.3 bullet 2.
+	 */
 	ec->rct_count = 0;
 
 	return ret;
@@ -895,7 +904,7 @@ int jent_entropy_init(void)
 			time_backwards++;
 
 		/* use 32 bit value to ensure compilation on 32 bit arches */
-		lowdelta = time2 - time;
+		lowdelta = (uint64_t)time2 - (uint64_t)time;
 		if (!(lowdelta % 100))
 			count_mod++;
 
