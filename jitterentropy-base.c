@@ -353,8 +353,6 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
  */
 static int jent_rct_failure(struct rand_data *ec)
 {
-	int ret = 0;
-
 	/* Test is only enabled in FIPS mode */
 	if (!ec->fips_enabled)
 		return 0;
@@ -366,13 +364,12 @@ static int jent_rct_failure(struct rand_data *ec)
 	 * re-allocate the entropy collector.
 	 */
 	if (ec->rct_count < 0 || ec->health_failure) {
-		ret = 1;
 		ec->health_failure = 1;
-	} else {
-		ec->rct_count = 0;
+		return 1;
 	}
 
-	return ret;
+	ec->rct_count = 0;
+	return 0;
 }
 
 static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
