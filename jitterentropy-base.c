@@ -259,8 +259,7 @@ static unsigned int jent_chisq_failure(struct rand_data *ec)
 
 	jent_chisq_test(ec, &chisq_val, &degrees_freedom);
 
-	 /* Reset Chi-Squared test */
-	 /*
+	/*
 	 * Reset the Chi-Squared test - it is considered an intermittent
 	 * failure which implies we can continue to stay operational. This is
 	 * allowed as per SP800-90B section 4.3 bullet 2.
