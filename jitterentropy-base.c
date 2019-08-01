@@ -273,8 +273,16 @@ static unsigned int jent_chisq_failure(struct rand_data *ec)
 	if (degrees_freedom > JENT_CHISQ_NUM_VALUES - 1)
 		return 1;
 
-	if (chisq_val > chisq_distribution[degrees_freedom])
+	/*
+	 * A Chi-Squared test failure is a permanent a permanent failure which
+	 * implies we cannot continue to stay operational. The caller must
+	 * re-allocate the entropy collector.
+	 */
+	if (chisq_val > chisq_distribution[degrees_freedom] ||
+	    ec->health_failure) {
+		ec->health_failure = 1;
 		return 1;
+	}
 
 	return 0;
 }
@@ -351,15 +359,18 @@ static int jent_rct_failure(struct rand_data *ec)
 	if (!ec->fips_enabled)
 		return 0;
 
-	if (ec->rct_count < 0)
-		ret = 1;
-
 	/*
-	 * Reset the RCT - it is considered an intermittent failure which
-	 * implies we can continue to stay operational. This is allowed
-	 * as per SP800-90B section 4.3 bullet 2.
+	 * Reset the RCT counter only if we do not have an RCT failure - the
+	 * RCT failure is considered a permanent failure which
+	 * implies we cannot continue to stay operational. The caller must
+	 * re-allocate the entropy collector.
 	 */
-	ec->rct_count = 0;
+	if (ec->rct_count < 0 || ec->health_failure) {
+		ret = 1;
+		ec->health_failure = 1;
+	} else {
+		ec->rct_count = 0;
+	}
 
 	return ret;
 }

@@ -78,6 +78,7 @@ struct rand_data
 	int rct_count;			/* Number of stuck values */
 
 	unsigned int fips_enabled:1;
+	unsigned int health_failure:1;	/* Permanent health failure */
 };
 
 /* Flags that can be used to initialize the RNG */

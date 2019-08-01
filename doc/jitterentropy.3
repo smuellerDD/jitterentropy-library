@@ -133,10 +133,10 @@ specifies that the Chi-Squared online health test failed.
 When either online health test fails the Jitter RNG will not
 have any data provided in
 .IR data .
-It is recommended that you
-.B DO NOT
-generate any entropy any more with the given entropy collector.
-Deallocate the entropy collector and create a new instance instead.
+If either SP800-90B health test fails, the entropy collector instance
+will remain in error state. To recover, the entropy collector instance
+.B MUST
+be deallocated and a fresh instance must be allocated.
 .LP
 .BR jent_version ()
 returns the version number of the library as an integer value that is
