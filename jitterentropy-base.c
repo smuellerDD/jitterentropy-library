@@ -197,18 +197,14 @@ static void jent_chisq_analyze(struct rand_data *ec)
 
 	jent_chisq_test(ec, &chisq_val);
 
-	/*
-	 * Reset the Chi-Squared test - it is considered an intermittent
-	 * failure which implies we can continue to stay operational. This is
-	 * allowed as per SP800-90B section 4.3 bullet 2.
-	 */
+	/* Reset the Chi-Squared test for next round. */
 	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
 		ec->chisq_vals[i][0] = 0;
 		ec->chisq_vals[i][1] = 0;
 	}
 
 	/*
-	 * A Chi-Squared test failure is a permanent a permanent failure which
+	 * A Chi-Squared test failure is a permanent failure which
 	 * implies we cannot continue to stay operational. The caller must
 	 * re-allocate the entropy collector.
 	 */
