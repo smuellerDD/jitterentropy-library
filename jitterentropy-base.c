@@ -138,43 +138,12 @@ unsigned int jent_version(void)
  ***************************************************************************/
 
 /**
- * Insert an entropy event value into the state of the Chi-Squared test.
- *
- * @ec [in] Reference to entropy collector
- * @delta [in] Jitter time delta
- */
-static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
-{
-	unsigned int i;
-	unsigned char delta_byte = delta & JENT_CHISQ_WORD_MASK;
-
-	if (!delta_byte)
-		return;
-
-	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
-		if (!ec->chisq_vals[i][0]) {
-			ec->chisq_vals[i][0] = delta_byte;
-			ec->chisq_vals[i][1]++;
-			break;
-		}
-
-		if (ec->chisq_vals[i][0] == delta_byte) {
-			ec->chisq_vals[i][1]++;
-			break;
-		}
-	}
-}
-
-/**
  * Calculate the Chi-Squared test value together with the degrees of freedom.
  *
  * @ec [in] Reference to entropy collector
  * @chisq [out] Chi-Squared value
- * @degrees_freedom [out] Degrees of freedom to be applied for Chi-Squared
- *			  comparison
  */
-static void jent_chisq_test(struct rand_data *ec, unsigned int *chisq,
-			    unsigned int *degrees_freedom)
+static void jent_chisq_test(struct rand_data *ec, unsigned int *chisq)
 {
 #define LRNG_CHISQ_INT_FACTOR	1000000
 	unsigned int i, j, expected, observations = 0, chi_squared = 0;
@@ -203,7 +172,6 @@ static void jent_chisq_test(struct rand_data *ec, unsigned int *chisq,
 	}
 
 	*chisq = chi_squared;
-	*degrees_freedom = i - 1;
 }
 
 /**
@@ -217,74 +185,71 @@ static void jent_chisq_test(struct rand_data *ec, unsigned int *chisq,
  * The test is derived from the AIS 31 section 5.5.1.
  *
  * @ec [in] Reference to entropy collector
- *
- * @return
- * 	0 Chi-Squared Test passed (zero hypothesis discarded)
- * 	1 Chi-Squared Test failed (zero hypothesis proven)
  */
-static unsigned int jent_chisq_failure(struct rand_data *ec)
+static void jent_chisq_analyze(struct rand_data *ec)
 {
-	/*
-	 * The Chi-Squared values for the 99.9999 percentile. These are our
-	 * thresholds for the given degrees of freedom.
-	 *
-	 * The following values of Chi-Squared distribution are generated
-	 * by using R with the following call: qchisq(0.999999, df=0:63)*1000000
-	 */
-	static const unsigned int chisq_distribution[] = {
-			0,  23928130,  27631020,  30664850,
-		 33376840,  35888190,  38258340,  40521830,
-		 42700910,  44810940,  46863050,  48865640,
-		 50825250,  52747070,  54635310,  56493440,
-		 58324390,  60130610,  61914230,  63677050,
-		 65420680,  67146510,  68855770,  70549560,
-		 72228850,  73894540,  75547410,  77188170,
-		 78817500,  80435970,  82044140,  83642520,
-		 85231550,  86811670,  88383280,  89946740,
-		 91502390,  93050550,  94591520,  96125560,
-		 97652960,  99173940, 100688730, 102197570,
-		103700630, 105198130, 106690240, 108177130,
-		109658970, 111135910, 112608090, 114075670,
-		115538760, 116997510, 118452020, 119902420,
-		121348810, 122791300, 124229990, 125664980,
-		127096360, 128524220, 129948640, 131369700,
-	};
-	unsigned int chisq_val = 0, degrees_freedom = 0, i;
 
-	BUILD_BUG_ON(ARRAY_SIZE(chisq_distribution) != JENT_CHISQ_NUM_VALUES);
+	unsigned int chisq_val = 0, i;
 
 	/* Test is only enabled in FIPS mode */
 	if (!ec->fips_enabled)
-		return 0;
+		return;
 
-	jent_chisq_test(ec, &chisq_val, &degrees_freedom);
+	jent_chisq_test(ec, &chisq_val);
 
 	/*
 	 * Reset the Chi-Squared test - it is considered an intermittent
 	 * failure which implies we can continue to stay operational. This is
 	 * allowed as per SP800-90B section 4.3 bullet 2.
 	 */
-	for (i = 0; i < (degrees_freedom + 1); i++) {
+	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
 		ec->chisq_vals[i][0] = 0;
 		ec->chisq_vals[i][1] = 0;
 	}
-
-	/* This is needed to shut up clang code analyzer */
-	if (degrees_freedom > JENT_CHISQ_NUM_VALUES - 1)
-		return 1;
 
 	/*
 	 * A Chi-Squared test failure is a permanent a permanent failure which
 	 * implies we cannot continue to stay operational. The caller must
 	 * re-allocate the entropy collector.
 	 */
-	if (chisq_val > chisq_distribution[degrees_freedom] ||
-	    ec->health_failure) {
+	if (chisq_val > JENT_CHISQ_DISTRIBUTION)
 		ec->health_failure = 1;
-		return 1;
+}
+
+/**
+ * Insert an entropy event value into the state of the Chi-Squared test.
+ *
+ * @ec [in] Reference to entropy collector
+ * @delta [in] Jitter time delta
+ */
+static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
+{
+	unsigned int i;
+	unsigned char delta_byte = delta & JENT_CHISQ_WORD_MASK;
+
+	if (!delta_byte)
+		return;
+
+	BUILD_BUG_ON(JENT_CHISQ_WINDOW_SIZE < sizeof(ec->chisq_vals[0][0]));
+
+	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
+		if (!ec->chisq_vals[i][0]) {
+			ec->chisq_vals[i][0] = delta_byte;
+			ec->chisq_vals[i][1]++;
+			break;
+		}
+
+		if (ec->chisq_vals[i][0] == delta_byte) {
+			ec->chisq_vals[i][1]++;
+			break;
+		}
 	}
 
-	return 0;
+	ec->chisq_observations++;
+	if (ec->chisq_observations >= JENT_CHISQ_WINDOW_SIZE) {
+		ec->chisq_observations = 0;
+		jent_chisq_analyze(ec);
+	}
 }
 
 /***************************************************************************
@@ -304,7 +269,7 @@ static unsigned int jent_chisq_failure(struct rand_data *ec)
  ***************************************************************************/
 
 /**
- * Insert data for Repetition Count Test
+ * Repetition Count Test as defined in SP800-90B section 4.4.1
  *
  * @ec [in] Reference to entropy collector
  * @stuck [in] Indicator whether the value is stuck
@@ -335,40 +300,22 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		 * we need to subtract one from the cutoff value as calculated
 		 * following SP800-90B.
 		 */
-		if ((unsigned int)ec->rct_count >= (30 * ec->osr))
+		if ((unsigned int)ec->rct_count >= (30 * ec->osr)) {
 			ec->rct_count = -1;
+			ec->health_failure = 1;
+		}
 	} else {
 		ec->rct_count = 0;
 	}
 }
 
 /**
- * Repetition Count Test as defined in SP800-90B section 4.4.1
- *
- * @ec [in] Reference to entropy collector
- *
- * @return
- * 	0 RCT successful
- * 	1 RCT failure
+ * Is there an RCT health test failure?
  */
 static int jent_rct_failure(struct rand_data *ec)
 {
-	/* Test is only enabled in FIPS mode */
-	if (!ec->fips_enabled)
-		return 0;
-
-	/*
-	 * Reset the RCT counter only if we do not have an RCT failure - the
-	 * RCT failure is considered a permanent failure which
-	 * implies we cannot continue to stay operational. The caller must
-	 * re-allocate the entropy collector.
-	 */
-	if (ec->rct_count < 0 || ec->health_failure) {
-		ec->health_failure = 1;
+	if (ec->rct_count < 0)
 		return 1;
-	}
-
-	ec->rct_count = 0;
 	return 0;
 }
 
@@ -411,6 +358,27 @@ static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 
 	/* RCT with a non-stuck bit */
 	jent_rct_insert(ec, 0);
+
+	return 0;
+}
+
+/**
+ * Report any health test failures
+ *
+ * @ec [in] Reference to entropy collector
+ *
+ * @return
+ * 	0 No health test failure
+ * 	1 Permanent health test failure
+ */
+static int jent_health_failure(struct rand_data *ec)
+{
+	/* Test is only enabled in FIPS mode */
+	if (!ec->fips_enabled)
+		return 0;
+
+	if (ec->health_failure)
+		return 1;
 
 	return 0;
 }
@@ -707,11 +675,13 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		size_t tocopy;
 
 		jent_gen_entropy(ec);
-		if (jent_rct_failure(ec))
-			return -2;
 
-		if (jent_chisq_failure(ec))
-			return -3;
+		if (jent_health_failure(ec)) {
+			if (jent_rct_failure(ec))
+				return -2;
+			else
+				return -3;
+		}
 
 		if ((DATA_SIZE_BITS / 8) < len)
 			tocopy = (DATA_SIZE_BITS / 8);
@@ -897,7 +867,8 @@ int jent_entropy_init(void)
 			 * times.
 			 */
 			if ((nonstuck % JENT_CHISQ_NUM_VALUES) == 0) {
-				if (jent_chisq_failure(&ec))
+				jent_chisq_analyze(&ec);
+				if (jent_health_failure(&ec))
 					return ECHISQ;
 			}
 		}

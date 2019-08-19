@@ -70,9 +70,18 @@ struct rand_data
 					 * bit generation */
 
 	/* Chi-Squared Test */
-#define JENT_CHISQ_NUM_VALUES		64
-#define JENT_CHISQ_WORD_MASK		0xff
-	unsigned char chisq_vals[JENT_CHISQ_NUM_VALUES][2];
+	/*
+	 * The Chi-Squared values for the significance level 2^-30.
+	 *
+	 * The following values of Chi-Squared distribution are generated
+	 * by using R with the following call: qchisq(1-2^-30, df=15)*1000000
+	 */
+#define JENT_CHISQ_DISTRIBUTION		73801643
+#define JENT_CHISQ_NUM_VALUES		16	/* Number of different values */
+#define JENT_CHISQ_WINDOW_SIZE		512	/* Data window size */
+#define JENT_CHISQ_WORD_MASK		(JENT_CHISQ_NUM_VALUES - 1)
+	unsigned short chisq_observations;
+	unsigned short chisq_vals[JENT_CHISQ_NUM_VALUES][2];
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */
