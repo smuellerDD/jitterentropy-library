@@ -81,7 +81,7 @@ struct rand_data
 #define JENT_CHISQ_WINDOW_SIZE	512	/* Data window size */
 #define JENT_CHISQ_WORD_MASK		(JENT_CHISQ_NUM_VALUES - 1)
 	unsigned short chisq_observations;
-	unsigned short chisq_vals[JENT_CHISQ_NUM_VALUES][2];
+	unsigned short chisq_vals[JENT_CHISQ_NUM_VALUES];
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */

@@ -146,27 +146,38 @@ unsigned int jent_version(void)
 static void jent_chisq_test(struct rand_data *ec, unsigned int *chisq)
 {
 #define LRNG_CHISQ_INT_FACTOR	1000000
-	unsigned int i, j, expected, observations = 0, chi_squared = 0;
+	unsigned int i, expected, chi_squared = 0, found_values = 0,
+		     observations = 0;
 
 	/* Calculate average */
 	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
-		if (!ec->chisq_vals[i][0])
-			break;
-
-		observations += ec->chisq_vals[i][1];
+		if (ec->chisq_vals[i]) {
+			observations += ec->chisq_vals[i];
+			found_values++;
+		}
 	}
 
-	if (!i)
+	/*
+	 * We have no data recorded - e.g. the previous invocation of the
+	 * Chi-Squared test was just completed.
+	 */
+	if (!found_values)
 		return;
 
-	expected = (observations * LRNG_CHISQ_INT_FACTOR) / i;
+	expected = (observations * LRNG_CHISQ_INT_FACTOR) / found_values;
 
 	/* Calculate distance from average */
-	for (j = 0; j < i; j++) {
-		int residual = (ec->chisq_vals[j][1] * LRNG_CHISQ_INT_FACTOR) -
-			       expected;
-		uint64_t component = ((int64_t)residual * (int64_t)residual) /
-				     (uint64_t)expected;
+	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
+		int residual;
+		uint64_t component;
+
+		if (!ec->chisq_vals[i])
+			continue;
+
+		residual = (ec->chisq_vals[i] * LRNG_CHISQ_INT_FACTOR) -
+			   expected;
+		component = ((int64_t)residual * (int64_t)residual) /
+							(uint64_t)expected;
 
 		chi_squared += (uint32_t)component;
 	}
@@ -198,10 +209,8 @@ static void jent_chisq_analyze(struct rand_data *ec)
 	jent_chisq_test(ec, &chisq_val);
 
 	/* Reset the Chi-Squared test for next round. */
-	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
-		ec->chisq_vals[i][0] = 0;
-		ec->chisq_vals[i][1] = 0;
-	}
+	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++)
+		ec->chisq_vals[i] = 0;
 
 	/*
 	 * A Chi-Squared test failure is a permanent failure which
@@ -220,26 +229,14 @@ static void jent_chisq_analyze(struct rand_data *ec)
  */
 static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
 {
-	unsigned int i;
 	unsigned char delta_byte = delta & JENT_CHISQ_WORD_MASK;
 
-	if (!delta_byte)
-		return;
+	BUILD_BUG_ON(JENT_CHISQ_WINDOW_SIZE < sizeof(ec->chisq_vals[0]));
+	BUILD_BUG_ON(JENT_CHISQ_NUM_VALUES !=
+			(sizeof(ec->chisq_vals) / sizeof(ec->chisq_vals[0])));
 
-	BUILD_BUG_ON(JENT_CHISQ_WINDOW_SIZE < sizeof(ec->chisq_vals[0][0]));
-
-	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
-		if (!ec->chisq_vals[i][0]) {
-			ec->chisq_vals[i][0] = delta_byte;
-			ec->chisq_vals[i][1]++;
-			break;
-		}
-
-		if (ec->chisq_vals[i][0] == delta_byte) {
-			ec->chisq_vals[i][1]++;
-			break;
-		}
-	}
+	/* Add observation to histogram */
+	ec->chisq_vals[delta_byte]++;
 
 	ec->chisq_observations++;
 	if (ec->chisq_observations >= JENT_CHISQ_WINDOW_SIZE) {
