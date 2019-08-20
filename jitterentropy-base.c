@@ -266,7 +266,8 @@ static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
 	unsigned char delta_byte = delta & JENT_CHISQ_WORD_MASK;
 
 	/* Ensure that no overflow is possible */
-	BUILD_BUG_ON(JENT_CHISQ_WINDOW_SIZE < sizeof(ec->chisq_vals[0]));
+	BUILD_BUG_ON(JENT_CHISQ_WINDOW_SIZE >
+		     (1 << (sizeof(ec->chisq_vals[0]) << 3)));
 	/* Ensure that sufficient slots in the histogram are available */
 	BUILD_BUG_ON(JENT_CHISQ_NUM_VALUES !=
 			(sizeof(ec->chisq_vals) / sizeof(ec->chisq_vals[0])));
