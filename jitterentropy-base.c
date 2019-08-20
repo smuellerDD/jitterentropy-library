@@ -910,6 +910,7 @@ int jent_entropy_init(void)
 			 */
 			if ((nonstuck % JENT_CHISQ_NUM_VALUES) == 0) {
 				jent_chisq_analyze(&ec);
+				jent_apt_analyze(&ec);
 				if (jent_health_failure(&ec))
 					return ECHISQ;
 			}
