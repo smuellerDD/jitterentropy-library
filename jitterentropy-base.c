@@ -122,11 +122,12 @@ static void jent_apt_analyze(struct rand_data *ec)
  */
 static void jent_apt_insert(struct rand_data *ec, uint64_t delta2)
 {
-	if (!delta2)
+	if (!delta2) {
 		ec->apt_count++;
 
-	if (ec->apt_count >= JENT_APT_CUTOFF)
-		ec->health_failure = 1;
+		if (ec->apt_count >= JENT_APT_CUTOFF)
+			ec->health_failure = 1;
+	}
 }
 
 /***************************************************************************
