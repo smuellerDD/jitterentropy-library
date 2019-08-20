@@ -307,6 +307,12 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 
 /**
  * Is there an RCT health test failure?
+ *
+ * @ec [in] Reference to entropy collector
+ *
+ * @return
+ * 	0 No health test failure
+ * 	1 Permanent health test failure
  */
 static int jent_rct_failure(struct rand_data *ec)
 {
@@ -373,10 +379,7 @@ static int jent_health_failure(struct rand_data *ec)
 	if (!ec->fips_enabled)
 		return 0;
 
-	if (ec->health_failure)
-		return 1;
-
-	return 0;
+	return ec->health_failure;
 }
 
 /***************************************************************************
