@@ -112,7 +112,7 @@ static void jent_apt_analyze(struct rand_data *ec)
 	/* Analysis already done during jent_apt_insert */
 
 	/* Reset APT counter */
-	ec->apt = 0;
+	ec->apt_count = 0;
 }
 
 /**
@@ -123,9 +123,9 @@ static void jent_apt_analyze(struct rand_data *ec)
 static void jent_apt_insert(struct rand_data *ec, uint64_t delta2)
 {
 	if (!delta2)
-		ec->apt++;
+		ec->apt_count++;
 
-	if (ec->apt >= JENT_APT_CUTOFF)
+	if (ec->apt_count >= JENT_APT_CUTOFF)
 		ec->health_failure = 1;
 }
 

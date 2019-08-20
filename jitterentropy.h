@@ -89,7 +89,7 @@ struct rand_data
 	/* Adaptive Proportion Test */
 #define JENT_APT_CUTOFF		311	/* Taken from SP800-90B sec 4.4.2 */
 #define JENT_APT_WINDOW_SIZE	512	/* Data window size */
-	unsigned int apt;		/* APT counter */
+	unsigned int apt_count;		/* APT counter */
 
 	unsigned int fips_enabled:1;
 	unsigned int health_failure:1;	/* Permanent health failure */
