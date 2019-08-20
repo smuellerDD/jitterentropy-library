@@ -77,8 +77,11 @@ struct rand_data
 	 * by using R with the following call: qchisq(1-2^-30, df=15)*1000000
 	 */
 #define JENT_CHISQ_CUTOFF	73801643
-#define JENT_CHISQ_NUM_VALUES	16	/* Number of different values */
-#define JENT_CHISQ_WINDOW_SIZE	512	/* Data window size */
+	/* Number of possible different values for Chi-Squared test */
+#define JENT_CHISQ_NUM_VALUES	16
+	/* Number of noise source samples to collect for Chi-Squared test */
+#define JENT_CHISQ_WINDOW_SIZE	512
+	/* Mask of LSB of time stamp to process with Chi-Squared test */
 #define JENT_CHISQ_WORD_MASK		(JENT_CHISQ_NUM_VALUES - 1)
 	unsigned short chisq_observations;
 	unsigned short chisq_vals[JENT_CHISQ_NUM_VALUES];
