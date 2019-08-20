@@ -97,6 +97,39 @@ unsigned int jent_version(void)
 }
 
 /***************************************************************************
+ * Adaptive Proportion Test
+ *
+ * This test complies with SP800-90B section 4.4.2.
+ ***************************************************************************/
+
+/**
+ * Analyze the APT data whether it is below cut-off threshold.
+ *
+ * @ec [in] Reference to entropy collector
+ */
+static void jent_apt_analyze(struct rand_data *ec)
+{
+	/* Analysis already done during jent_apt_insert */
+
+	/* Reset APT counter */
+	ec->apt = 0;
+}
+
+/**
+ * Insert a new entropy event into APT
+ *
+ * @ec [in] Reference to entropy collector
+ */
+static void jent_apt_insert(struct rand_data *ec, uint64_t delta2)
+{
+	if (!delta2)
+		ec->apt++;
+
+	if (ec->apt >= JENT_APT_CUTOFF)
+		ec->health_failure = 1;
+}
+
+/***************************************************************************
  * Chi-Squared Test
  *
  * The Chi-Squared test is defined with the following formula:
@@ -217,7 +250,7 @@ static void jent_chisq_analyze(struct rand_data *ec)
 	 * implies we cannot continue to stay operational. The caller must
 	 * re-allocate the entropy collector.
 	 */
-	if (chisq_val > JENT_CHISQ_DISTRIBUTION)
+	if (chisq_val > JENT_CHISQ_CUTOFF)
 		ec->health_failure = 1;
 }
 
@@ -231,7 +264,9 @@ static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
 {
 	unsigned char delta_byte = delta & JENT_CHISQ_WORD_MASK;
 
+	/* Ensure that no overflow is possible */
 	BUILD_BUG_ON(JENT_CHISQ_WINDOW_SIZE < sizeof(ec->chisq_vals[0]));
+	/* Ensure that sufficient slots in the histogram are available */
 	BUILD_BUG_ON(JENT_CHISQ_NUM_VALUES !=
 			(sizeof(ec->chisq_vals) / sizeof(ec->chisq_vals[0])));
 
@@ -239,9 +274,14 @@ static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
 	ec->chisq_vals[delta_byte]++;
 
 	ec->chisq_observations++;
+
+	/* Ensure that APT is called at right time */
+	BUILD_BUG_ON(JENT_APT_WINDOW_SIZE != JENT_CHISQ_WINDOW_SIZE);
+
 	if (ec->chisq_observations >= JENT_CHISQ_WINDOW_SIZE) {
 		ec->chisq_observations = 0;
 		jent_chisq_analyze(ec);
+		jent_apt_analyze(ec);
 	}
 }
 
@@ -345,6 +385,12 @@ static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 
 	ec->last_delta = current_delta;
 	ec->last_delta2 = delta2;
+
+	/*
+	 * Insert the result of the comparison of two back-to-back time
+	 * deltas.
+	 */
+	jent_apt_insert(ec, delta2);
 
 	if (!current_delta || !delta2 || !delta3) {
 		/* RCT with a stuck bit */

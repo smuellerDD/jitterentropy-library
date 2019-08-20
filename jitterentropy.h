@@ -76,7 +76,7 @@ struct rand_data
 	 * The following values of Chi-Squared distribution are generated
 	 * by using R with the following call: qchisq(1-2^-30, df=15)*1000000
 	 */
-#define JENT_CHISQ_DISTRIBUTION	73801643
+#define JENT_CHISQ_CUTOFF	73801643
 #define JENT_CHISQ_NUM_VALUES	16	/* Number of different values */
 #define JENT_CHISQ_WINDOW_SIZE	512	/* Data window size */
 #define JENT_CHISQ_WORD_MASK		(JENT_CHISQ_NUM_VALUES - 1)
@@ -85,6 +85,11 @@ struct rand_data
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */
+
+	/* Adaptive Proportion Test */
+#define JENT_APT_CUTOFF		311	/* Taken from SP800-90B sec 4.4.2 */
+#define JENT_APT_WINDOW_SIZE	512	/* Data window size */
+	unsigned int apt;		/* APT counter */
 
 	unsigned int fips_enabled:1;
 	unsigned int health_failure:1;	/* Permanent health failure */
