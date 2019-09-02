@@ -68,7 +68,6 @@
 #define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
-#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 /**
@@ -103,188 +102,44 @@ unsigned int jent_version(void)
  ***************************************************************************/
 
 /**
- * Analyze the APT data whether it is below cut-off threshold.
+ * Reset the APT counter
  *
  * @ec [in] Reference to entropy collector
  */
-static void jent_apt_analyze(struct rand_data *ec)
+static void jent_apt_reset(struct rand_data *ec, unsigned int delta_masked)
 {
-	/* Analysis already done during jent_apt_insert */
-
 	/* Reset APT counter */
 	ec->apt_count = 0;
+	ec->apt_base = delta_masked;
+	ec->apt_observations = 0;
 }
 
 /**
  * Insert a new entropy event into APT
  *
  * @ec [in] Reference to entropy collector
+ * @delta_masked [in] Masked time delta to process
  */
-static void jent_apt_insert(struct rand_data *ec, uint64_t delta2)
+static void jent_apt_insert(struct rand_data *ec, unsigned int delta_masked)
 {
-	if (!delta2) {
+	/* Initialize the base reference */
+	if (!ec->apt_base_set) {
+		ec->apt_base = delta_masked;
+		ec->apt_base_set = 1;
+		return;
+	}
+
+	if (delta_masked == ec->apt_base) {
 		ec->apt_count++;
 
 		if (ec->apt_count >= JENT_APT_CUTOFF)
 			ec->health_failure = 1;
 	}
-}
 
-/***************************************************************************
- * Chi-Squared Test
- *
- * The Chi-Squared test is defined with the following formula:
- * SUM( ((O_i - E_i)^2) / E_i)
- *
- * with:
- *  E_i: Expected value (i.e. the number of all observations divided by the
- *       the number of different observed time deltas)
- *  O_i: The actual number of observation for a given time delta
- *
- * The approach to calculate the Chi-Squared value is the following:
- *
- * 1. Sum up the number of occurrences for one given possible time delta.
- *    When using the Jitter RNG without oversampling rate, we may have up to 64
- *    different possible time deltas. For an oversampling rate we have up to
- *    64 times oversampling rate different time deltas. However, to keep the
- *    code lean we truncate to at most 64 time deltas.
- *
- * 2. Calculate the expected value by dividing the number of observations
- *    (commonly 64 observations for the 64 time deltas used to generate one
- *    Jitter RNG output block) by the number of different observed values.
- *
- * 3. For each time delta, calculate ((O_i - E_i)^2) / E_i and sum it up.
- *
- * 4. Compare the calculated value with the Chi-Squared distribution value
- *    for a given confidence interval specified below using the number of
- *    different observed values minus one as the degrees of freedom. If the
- *    calculated Chi-Squared value is larger than the Chi-Square value of
- *    the distribution with the given confidence interval and the degree of
- *    freedom, the test fails. A failing test implies that the Jitter RNG
- *    output block will be calculated completely but discarded at the
- *    end. The caller of the Jitter RNG is informed with an error code.
- *
- * With this approach, we do not maintain security sensitive data because the
- * two-dimensional array has the values and their numbers of occurrences.
- * The security sensitive information of the order how the values occurred
- * is not maintained. Hence, an attacker may not gain any knowledge from
- * this statistic.
- ***************************************************************************/
+	ec->apt_observations++;
 
-/**
- * Calculate the Chi-Squared test value together with the degrees of freedom.
- *
- * @ec [in] Reference to entropy collector
- * @chisq [out] Chi-Squared value
- */
-static void jent_chisq_test(struct rand_data *ec, unsigned int *chisq)
-{
-#define LRNG_CHISQ_INT_FACTOR	1000000
-	unsigned int i, expected, chi_squared = 0, found_values = 0,
-		     observations = 0;
-
-	/* Calculate average */
-	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
-		if (ec->chisq_vals[i]) {
-			observations += ec->chisq_vals[i];
-			found_values++;
-		}
-	}
-
-	/*
-	 * We have no data recorded - e.g. the previous invocation of the
-	 * Chi-Squared test was just completed.
-	 */
-	if (!found_values)
-		return;
-
-	expected = (observations * LRNG_CHISQ_INT_FACTOR) / found_values;
-
-	/* Calculate distance from average */
-	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++) {
-		int residual;
-		uint64_t component;
-
-		if (!ec->chisq_vals[i])
-			continue;
-
-		residual = (ec->chisq_vals[i] * LRNG_CHISQ_INT_FACTOR) -
-			   expected;
-		component = ((int64_t)residual * (int64_t)residual) /
-							(uint64_t)expected;
-
-		chi_squared += (uint32_t)component;
-	}
-
-	*chisq = chi_squared;
-}
-
-/**
- * Analyze the Chi-Squared value by comparing it against the threshold
- * of the Chi-Squared distribution with the measured degrees of freedom and
- * the 99.9999 percentile.
- *
- * NOTE To avoid using float data types, all values are multiplied by
- * 1,000,000.
- *
- * The test is derived from the AIS 31 section 5.5.1.
- *
- * @ec [in] Reference to entropy collector
- */
-static void jent_chisq_analyze(struct rand_data *ec)
-{
-
-	unsigned int chisq_val = 0, i;
-
-	/* Test is only enabled in FIPS mode */
-	if (!ec->fips_enabled)
-		return;
-
-	jent_chisq_test(ec, &chisq_val);
-
-	/* Reset the Chi-Squared test for next round. */
-	for (i = 0; i < JENT_CHISQ_NUM_VALUES; i++)
-		ec->chisq_vals[i] = 0;
-
-	/*
-	 * A Chi-Squared test failure is a permanent failure which
-	 * implies we cannot continue to stay operational. The caller must
-	 * re-allocate the entropy collector.
-	 */
-	if (chisq_val > JENT_CHISQ_CUTOFF)
-		ec->health_failure = 1;
-}
-
-/**
- * Insert an entropy event value into the state of the Chi-Squared test.
- *
- * @ec [in] Reference to entropy collector
- * @delta [in] Jitter time delta
- */
-static void jent_chisq_insert(struct rand_data *ec, uint64_t delta)
-{
-	unsigned char delta_byte = delta & JENT_CHISQ_WORD_MASK;
-
-	/* Ensure that no overflow is possible */
-	BUILD_BUG_ON(JENT_CHISQ_WINDOW_SIZE >
-		     (1 << (sizeof(ec->chisq_vals[0]) << 3)));
-	/* Ensure that sufficient slots in the histogram are available */
-	BUILD_BUG_ON(JENT_CHISQ_NUM_VALUES !=
-			(sizeof(ec->chisq_vals) / sizeof(ec->chisq_vals[0])));
-
-	/* Add observation to histogram */
-	ec->chisq_vals[delta_byte]++;
-
-	ec->chisq_observations++;
-
-	/* Ensure that APT is called at right time */
-	BUILD_BUG_ON(JENT_APT_WINDOW_SIZE != JENT_CHISQ_WINDOW_SIZE);
-
-	if (ec->chisq_observations >= JENT_CHISQ_WINDOW_SIZE) {
-		ec->chisq_observations = 0;
-		jent_chisq_analyze(ec);
-		jent_apt_analyze(ec);
-	}
+	if (ec->apt_observations >= JENT_APT_WINDOW_SIZE)
+		jent_apt_reset(ec, delta_masked);
 }
 
 /***************************************************************************
@@ -384,6 +239,7 @@ static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
 	uint64_t delta2 = jent_delta(ec->last_delta, current_delta);
 	uint64_t delta3 = jent_delta(ec->last_delta2, delta2);
+	unsigned int delta_masked = current_delta & JENT_APT_WORD_MASK;
 
 	ec->last_delta = current_delta;
 	ec->last_delta2 = delta2;
@@ -392,16 +248,13 @@ static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	 * Insert the result of the comparison of two back-to-back time
 	 * deltas.
 	 */
-	jent_apt_insert(ec, delta2);
+	jent_apt_insert(ec, delta_masked);
 
 	if (!current_delta || !delta2 || !delta3) {
 		/* RCT with a stuck bit */
 		jent_rct_insert(ec, 1);
 		return 1;
 	}
-
-	/* Chi-Squared test is only calculated over non-stuck time deltas. */
-	jent_chisq_insert(ec, current_delta);
 
 	/* RCT with a non-stuck bit */
 	jent_rct_insert(ec, 0);
@@ -902,19 +755,18 @@ int jent_entropy_init(void)
 			nonstuck++;
 
 			/*
-			 * Ensure that the Chi-Squared test succeeded.
+			 * Ensure that the APT succeeded.
 			 *
 			 * With the check below that count_stuck must be less
 			 * than 10% of the overall generated raw entropy values
-			 * it is guaranteed that the Chi-Squared test is
-			 * invoked at floor((TESTLOOPCOUNT * 0.9) / 64) == 14
-			 * times.
+			 * it is guaranteed that the APT is invoked at
+			 * floor((TESTLOOPCOUNT * 0.9) / 64) == 14 times.
 			 */
-			if ((nonstuck % JENT_CHISQ_NUM_VALUES) == 0) {
-				jent_chisq_analyze(&ec);
-				jent_apt_analyze(&ec);
+			if ((nonstuck % JENT_APT_WINDOW_SIZE) == 0) {
+				jent_apt_reset(&ec,
+					       delta & JENT_APT_WORD_MASK);
 				if (jent_health_failure(&ec))
-					return ECHISQ;
+					return EHEALTH;
 			}
 		}
 

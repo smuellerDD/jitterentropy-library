@@ -69,30 +69,19 @@ struct rand_data
 	unsigned int memaccessloops;	/* Number of memory accesses per random
 					 * bit generation */
 
-	/* Chi-Squared Test */
-	/*
-	 * The Chi-Squared values for the significance level 2^-30.
-	 *
-	 * The following values of Chi-Squared distribution are generated
-	 * by using R with the following call: qchisq(1-2^-30, df=15)*1000000
-	 */
-#define JENT_CHISQ_CUTOFF	73801643
-	/* Number of possible different values for Chi-Squared test */
-#define JENT_CHISQ_NUM_VALUES	16
-	/* Number of noise source samples to collect for Chi-Squared test */
-#define JENT_CHISQ_WINDOW_SIZE	512
-	/* Mask of LSB of time stamp to process with Chi-Squared test */
-#define JENT_CHISQ_WORD_MASK		(JENT_CHISQ_NUM_VALUES - 1)
-	unsigned short chisq_observations;
-	unsigned short chisq_vals[JENT_CHISQ_NUM_VALUES];
-
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */
 
-	/* Adaptive Proportion Test */
-#define JENT_APT_CUTOFF		311	/* Taken from SP800-90B sec 4.4.2 */
+	/* Adaptive Proportion Test for a significance level of 2^-30 */
+#define JENT_APT_CUTOFF		325	/* Taken from SP800-90B sec 4.4.2 */
 #define JENT_APT_WINDOW_SIZE	512	/* Data window size */
+	/* LSB of time stamp to process */
+#define JENT_APT_LSB		16
+#define JENT_APT_WORD_MASK	(JENT_APT_LSB - 1)
+	unsigned int apt_observations;	/* Number of collected observations */
 	unsigned int apt_count;		/* APT counter */
+	unsigned int apt_base;		/* APT base reference */
+	unsigned int apt_base_set:1;	/* APT base reference set? */
 
 	unsigned int fips_enabled:1;
 	unsigned int health_failure:1;	/* Permanent health failure */
@@ -155,7 +144,7 @@ unsigned int jent_version(void);
 #define EMINVARVAR	6 /* Timer variations of variations is too small */
 #define EPROGERR	7 /* Programming error */
 #define ESTUCK		8 /* Too many stuck results during init. */
-#define ECHISQ		9 /* Chi-Squared test failed during initialization */
+#define EHEALTH		9 /* Health test failed during initialization */
 #define ERCT		10 /* RCT failed during initialization */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */
