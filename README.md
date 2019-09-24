@@ -10,7 +10,8 @@ The implementation of the Jitter RNG is independent of any operating system.
 As such, it could even run on baremetal without any operating system.
 
 The design of the RNG is given in the documentation found in at
-http://www.chronox.de/jent.html
+http://www.chronox.de/jent.html . This documentation also covers the full
+assessment of the SP800-90B compliance as well as all required test code.
 
 API
 ---
