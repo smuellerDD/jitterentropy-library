@@ -14,6 +14,8 @@ LIBDIR := lib
 # include target directory
 INCDIR := include
 
+INSTALL_STRIP ?= install -s
+
 NAME := jitterentropy
 LIBMAJOR=$(shell cat jitterentropy-base.c | grep define | grep MAJVERSION | awk '{print $$3}')
 LIBMINOR=$(shell cat jitterentropy-base.c | grep define | grep MINVERSION | awk '{print $$3}')
@@ -58,15 +60,15 @@ cppcheck:
 install:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
 	install -m 644 doc/$(NAME).3 $(DESTDIR)$(PREFIX)/share/man/man3/
-	gzip -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
+	gzip -f -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
-	install -m 0755 -s lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/
+	$(INSTALL_STRIP) -m 0755 lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(INCDIR)
 	install -m 0644 jitterentropy.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 	install -m 0644 jitterentropy-base-user.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 	$(RM) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
-	ln -s lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
-	ln -s lib$(NAME).so.$(LIBMAJOR) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so
+	ln -sf lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
+	ln -sf lib$(NAME).so.$(LIBMAJOR) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so
 
 clean:
 	@- $(RM) $(NAME)
