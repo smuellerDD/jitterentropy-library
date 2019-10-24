@@ -57,18 +57,28 @@ scan: $(analyze_plists)
 cppcheck:
 	cppcheck --force -q --enable=performance --enable=warning --enable=portability *.h *.c
 
-install:
+install: install-man install-shared install-includes
+
+install-man:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
 	install -m 644 doc/$(NAME).3 $(DESTDIR)$(PREFIX)/share/man/man3/
 	gzip -f -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
+
+install-shared:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
 	$(INSTALL_STRIP) -m 0755 lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/
-	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(INCDIR)
-	install -m 0644 jitterentropy.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
-	install -m 0644 jitterentropy-base-user.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 	$(RM) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
 	ln -sf lib$(NAME).so.$(LIBVERSION) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so.$(LIBMAJOR)
 	ln -sf lib$(NAME).so.$(LIBMAJOR) $(DESTDIR)$(PREFIX)/$(LIBDIR)/lib$(NAME).so
+
+install-includes:
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(INCDIR)
+	install -m 0644 jitterentropy.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
+	install -m 0644 jitterentropy-base-user.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
+
+install-static:
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
+	install -m 0755 lib$(NAME).a $(DESTDIR)$(PREFIX)/$(LIBDIR)/
 
 clean:
 	@- $(RM) $(NAME)
