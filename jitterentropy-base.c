@@ -51,7 +51,9 @@
 
 #undef _FORTIFY_SOURCE
 
-#ifndef __clang__
+#ifdef __clang__
+#pragma clang optimize off
+#elif defined (__GNUC__)
 #pragma GCC optimize ("O0")
 #endif
 
