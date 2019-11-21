@@ -62,7 +62,7 @@ install: install-man install-shared install-includes
 install-man:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
 	install -m 644 doc/$(NAME).3 $(DESTDIR)$(PREFIX)/share/man/man3/
-	gzip -f -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
+	gzip -n -f -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
 
 install-shared:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
