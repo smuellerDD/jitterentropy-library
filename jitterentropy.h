@@ -42,7 +42,11 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
+#ifdef __x86_64__
+#include "arch/jitterentropy-base-x86.h"
+#else
 #include "jitterentropy-base-user.h"
+#endif
 
 /* The entropy pool */
 struct rand_data
