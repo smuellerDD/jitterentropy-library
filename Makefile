@@ -3,7 +3,7 @@
 CC ?= gcc
 #Hardening
 CFLAGS ?=-fstack-protector-all --param ssp-buffer-size=4
-CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -fwrapv
+CFLAGS +=-Wextra -Wall -pedantic -fPIC -O2 -fwrapv -Wconversion
 LDFLAGS +=-Wl,-z,relro,-z,now
 
 # Change as necessary

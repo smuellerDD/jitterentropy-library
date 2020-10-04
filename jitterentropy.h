@@ -48,6 +48,9 @@
 #include "jitterentropy-base-user.h"
 #endif
 
+#define SHA3_256_SIZE_DIGEST_BITS	256
+#define SHA3_256_SIZE_DIGEST		(SHA3_256_SIZE_DIGEST_BITS >> 3)
+
 /* The entropy pool */
 struct rand_data
 {
@@ -55,9 +58,9 @@ struct rand_data
 	 * of the RNG are marked as SENSITIVE. A user must not
 	 * access that information while the RNG executes its loops to
 	 * calculate the next random value. */
-	uint64_t data;			/* SENSITIVE Actual random number */
+	uint8_t data[SHA3_256_SIZE_DIGEST]; /* SENSITIVE Actual random number */
 	uint64_t prev_time;		/* SENSITIVE Previous time stamp */
-#define DATA_SIZE_BITS ((sizeof(uint64_t)) * 8)
+#define DATA_SIZE_BITS (SHA3_256_SIZE_DIGEST_BITS)
 	uint64_t last_delta;		/* SENSITIVE stuck test */
 	uint64_t last_delta2;		/* SENSITIVE stuck test */
 	unsigned int osr;		/* Oversampling rate */
@@ -150,6 +153,7 @@ unsigned int jent_version(void);
 #define ESTUCK		8 /* Too many stuck results during init. */
 #define EHEALTH		9 /* Health test failed during initialization */
 #define ERCT		10 /* RCT failed during initialization */
+#define EHASH		11 /* Hash self test failed */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */
 

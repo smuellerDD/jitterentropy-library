@@ -1,3 +1,7 @@
+3.0.0
+ * use the x86-specific header file in case the code is compiled on x86
+ * use SHA-3 instead of LFSR
+
 2.2.0
  * SP800-90B compliance: Add RCT runtime health test
  * SP800-90B compliance: Add Chi-Squared runtime health test as a replacement
