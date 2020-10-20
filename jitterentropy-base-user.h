@@ -1,7 +1,7 @@
 /*
  * Non-physical true random number generator based on timing jitter.
  *
- * Copyright Stephan Mueller <smueller@chronox.de>, 2013 - 2019
+ * Copyright Stephan Mueller <smueller@chronox.de>, 2013 - 2020
  *
  * License
  * =======
@@ -185,13 +185,9 @@ static inline int jent_fips_enabled(void)
 
 /* --- helpers needed in user space -- */
 
-/* note: these helper functions are shamelessly stolen from the kernel :-) */
-
-static inline uint64_t rol64(uint64_t word, unsigned int shift)
+static inline uint64_t rol64(uint64_t x, int n)
 {
-	return (word << shift) | (word >> (64 - shift));
+	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
 }
 
-
 #endif /* _JITTERENTROPY_BASE_USER_H */
-

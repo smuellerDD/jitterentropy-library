@@ -1,7 +1,7 @@
 /*
  * Non-physical true random number generator based on timing jitter.
  *
- * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2019
+ * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2020
  *
  * Design
  * ======
@@ -297,11 +297,6 @@ struct sha_ctx {
 	uint8_t name ## _ctx_buf[SHA_MAX_CTX_SIZE];			\
 	struct sha_ctx *name = (struct sha_ctx *) name ## _ctx_buf
 
-static inline uint64_t rol(uint64_t x, int n)
-{
-	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
-}
-
 /*
  * Conversion of Little-Endian representations in byte streams - the data
  * representation in the integer values is the host representation.
@@ -347,11 +342,11 @@ static inline void keccakp_theta(uint64_t s[25])
 	C[4] = s[A(4, 0)] ^ s[A(4, 1)] ^ s[A(4, 2)] ^ s[A(4, 3)] ^ s[A(4, 4)];
 
 	/* Step 2 */
-	D[0] = C[4] ^ rol(C[1], 1);
-	D[1] = C[0] ^ rol(C[2], 1);
-	D[2] = C[1] ^ rol(C[3], 1);
-	D[3] = C[2] ^ rol(C[4], 1);
-	D[4] = C[3] ^ rol(C[0], 1);
+	D[0] = C[4] ^ rol64(C[1], 1);
+	D[1] = C[0] ^ rol64(C[2], 1);
+	D[2] = C[1] ^ rol64(C[3], 1);
+	D[3] = C[2] ^ rol64(C[4], 1);
+	D[4] = C[3] ^ rol64(C[0], 1);
 
 	/* Step 3 */
 	s[A(0, 0)] ^= D[0];
@@ -392,30 +387,30 @@ static inline void keccakp_rho(uint64_t s[25])
 
 #define RHO_ROL(t)	(((t + 1) * (t + 2) / 2) % 64)
 	/* Step 3 */
-	s[A(1, 0)] = rol(s[A(1, 0)], RHO_ROL(0));
-	s[A(0, 2)] = rol(s[A(0, 2)], RHO_ROL(1));
-	s[A(2, 1)] = rol(s[A(2, 1)], RHO_ROL(2));
-	s[A(1, 2)] = rol(s[A(1, 2)], RHO_ROL(3));
-	s[A(2, 3)] = rol(s[A(2, 3)], RHO_ROL(4));
-	s[A(3, 3)] = rol(s[A(3, 3)], RHO_ROL(5));
-	s[A(3, 0)] = rol(s[A(3, 0)], RHO_ROL(6));
-	s[A(0, 1)] = rol(s[A(0, 1)], RHO_ROL(7));
-	s[A(1, 3)] = rol(s[A(1, 3)], RHO_ROL(8));
-	s[A(3, 1)] = rol(s[A(3, 1)], RHO_ROL(9));
-	s[A(1, 4)] = rol(s[A(1, 4)], RHO_ROL(10));
-	s[A(4, 4)] = rol(s[A(4, 4)], RHO_ROL(11));
-	s[A(4, 0)] = rol(s[A(4, 0)], RHO_ROL(12));
-	s[A(0, 3)] = rol(s[A(0, 3)], RHO_ROL(13));
-	s[A(3, 4)] = rol(s[A(3, 4)], RHO_ROL(14));
-	s[A(4, 3)] = rol(s[A(4, 3)], RHO_ROL(15));
-	s[A(3, 2)] = rol(s[A(3, 2)], RHO_ROL(16));
-	s[A(2, 2)] = rol(s[A(2, 2)], RHO_ROL(17));
-	s[A(2, 0)] = rol(s[A(2, 0)], RHO_ROL(18));
-	s[A(0, 4)] = rol(s[A(0, 4)], RHO_ROL(19));
-	s[A(4, 2)] = rol(s[A(4, 2)], RHO_ROL(20));
-	s[A(2, 4)] = rol(s[A(2, 4)], RHO_ROL(21));
-	s[A(4, 1)] = rol(s[A(4, 1)], RHO_ROL(22));
-	s[A(1, 1)] = rol(s[A(1, 1)], RHO_ROL(23));
+	s[A(1, 0)] = rol64(s[A(1, 0)], RHO_ROL(0));
+	s[A(0, 2)] = rol64(s[A(0, 2)], RHO_ROL(1));
+	s[A(2, 1)] = rol64(s[A(2, 1)], RHO_ROL(2));
+	s[A(1, 2)] = rol64(s[A(1, 2)], RHO_ROL(3));
+	s[A(2, 3)] = rol64(s[A(2, 3)], RHO_ROL(4));
+	s[A(3, 3)] = rol64(s[A(3, 3)], RHO_ROL(5));
+	s[A(3, 0)] = rol64(s[A(3, 0)], RHO_ROL(6));
+	s[A(0, 1)] = rol64(s[A(0, 1)], RHO_ROL(7));
+	s[A(1, 3)] = rol64(s[A(1, 3)], RHO_ROL(8));
+	s[A(3, 1)] = rol64(s[A(3, 1)], RHO_ROL(9));
+	s[A(1, 4)] = rol64(s[A(1, 4)], RHO_ROL(10));
+	s[A(4, 4)] = rol64(s[A(4, 4)], RHO_ROL(11));
+	s[A(4, 0)] = rol64(s[A(4, 0)], RHO_ROL(12));
+	s[A(0, 3)] = rol64(s[A(0, 3)], RHO_ROL(13));
+	s[A(3, 4)] = rol64(s[A(3, 4)], RHO_ROL(14));
+	s[A(4, 3)] = rol64(s[A(4, 3)], RHO_ROL(15));
+	s[A(3, 2)] = rol64(s[A(3, 2)], RHO_ROL(16));
+	s[A(2, 2)] = rol64(s[A(2, 2)], RHO_ROL(17));
+	s[A(2, 0)] = rol64(s[A(2, 0)], RHO_ROL(18));
+	s[A(0, 4)] = rol64(s[A(0, 4)], RHO_ROL(19));
+	s[A(4, 2)] = rol64(s[A(4, 2)], RHO_ROL(20));
+	s[A(2, 4)] = rol64(s[A(2, 4)], RHO_ROL(21));
+	s[A(4, 1)] = rol64(s[A(4, 1)], RHO_ROL(22));
+	s[A(1, 1)] = rol64(s[A(1, 1)], RHO_ROL(23));
 }
 
 static inline void keccakp_pi(uint64_t s[25])
@@ -710,14 +705,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
  * 			      execution time jitter
  *
  * This function injects the individual bits of the time value into the
- * entropy pool using an LFSR.
- *
- * The code is deliberately inefficient with respect to the bit shifting
- * and shall stay that way. This function is the root cause why the code
- * shall be compiled without optimization. This function not only acts as
- * LFSR operation, but this function's execution is used to measure
- * the CPU execution time jitter. Any change to the loop in this function
- * implies that careful retesting must be done.
+ * entropy pool using a hash.
  *
  * @ec [in] entropy collector struct -- may be NULL
  * @time [in] time stamp to be injected
@@ -787,7 +775,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
  *	    the reference to the memory block to be accessed is NULL, this noise
  *	    source is disabled
  * @loop_cnt [in] if a value not equal to 0 is set, use the given value as
- *		  number of loops to perform the LFSR
+ *		  number of loops to perform the hash operation
  */
 static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
