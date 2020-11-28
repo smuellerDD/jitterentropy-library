@@ -2,7 +2,7 @@
 
 CC ?= gcc
 #Hardening
-CFLAGS ?=-fstack-protector-all --param ssp-buffer-size=4
+CFLAGS ?= -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O2 -fwrapv -Wconversion
 LDFLAGS +=-Wl,-z,relro,-z,now
 

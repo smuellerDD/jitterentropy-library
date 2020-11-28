@@ -46,20 +46,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Timer-less entropy source */
+#include <pthread.h>
+
 typedef uint64_t __u64;
 
 /* taken from Linux kernel */
-#ifdef X86_64
-#define DECLARE_ARGS(val, low, high)    unsigned low, high
-#define EAX_EDX_VAL(val, low, high)     ((low) | ((__u64)(high) << 32))
+#ifdef __x86_64__
+#define DECLARE_ARGS(val, low, high)    unsigned long low, high
+#define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
 #define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
-#else   
+#else
 #define DECLARE_ARGS(val, low, high)    unsigned long long val
 #define EAX_EDX_VAL(val, low, high)     (val)
 #define EAX_EDX_RET(val, low, high)     "=A" (val)
 #endif
 
-static inline void jent_get_nstime(__u64 *out)
+static inline void jent_get_nstime(uint64_t *out)
 {
 	DECLARE_ARGS(val, low, high);
 	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
@@ -88,13 +91,17 @@ static inline int jent_fips_enabled(void)
         return 0;
 }
 
+static inline void jent_memset_secure(void *s, size_t n)
+{
+	memset(s, 0, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
+}
+
 /* --- helpers needed in user space -- */
 
-/* note: these helper functions are shamelessly stolen from the kernel :-) */
-
-static inline __u64 rol64(__u64 word, unsigned int shift)
+static inline uint64_t rol64(uint64_t x, int n)
 {
-	return (word << shift) | (word >> (64 - shift));
+	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
 }
 
 

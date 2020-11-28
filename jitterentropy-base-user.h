@@ -66,6 +66,9 @@
 #include <unistd.h>
 #include <errno.h>
 
+/* Timer-less entropy source */
+#include <pthread.h>
+
 #ifdef LIBGCRYPT
 #include <config.h>
 #include "g10lib.h"
@@ -112,9 +115,9 @@ static inline void jent_get_nstime(uint64_t *out)
 	struct timespec time;
 	if (clock_gettime(CLOCK_REALTIME, &time) == 0)
 	{
-		tmp = time.tv_sec;
+		tmp = (uint32_t)time.tv_sec;
 		tmp = tmp << 32;
-		tmp = tmp | time.tv_nsec;
+		tmp = tmp | (uint32_t)time.tv_nsec;
 	}
 	*out = tmp;
 #endif /* __MACH__ */
@@ -181,6 +184,12 @@ static inline int jent_fips_enabled(void)
 	else
 		return 0;
 #endif
+}
+
+static inline void jent_memset_secure(void *s, size_t n)
+{
+	memset(s, 0, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
 }
 
 /* --- helpers needed in user space -- */

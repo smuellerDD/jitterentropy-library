@@ -49,8 +49,6 @@
  * DAMAGE.
  */
 
-#undef _FORTIFY_SOURCE
-
 #include "jitterentropy.h"
 
 #define MAJVERSION 3 /* API / ABI incompatible changes, functional changes that
@@ -62,6 +60,40 @@
 		      * enhancements are not considered */
 #define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
+
+
+/***************************************************************************
+ * Jitter RNG Configuration Section
+ *
+ * You may alter the following options
+ ***************************************************************************/
+
+/*
+ * Enable timer-less timer support
+ *
+ * In case the hardware is identified to not provide a high-resolution time
+ * stamp, this option enables a built-in high-resolution time stamp mechanism.
+ *
+ * The timer-less noise source is based on threads. This noise source requires
+ * the linking with the POSIX threads library. I.e. the executing environment
+ * must offer POSIX threads. If this option is disabled, no linking
+ * with the POSIX threads library is needed.
+ */
+#define JENT_CONF_ENABLE_INTERNAL_TIMER
+
+/***************************************************************************
+ * Jitter RNG Static Definitions
+ *
+ * None of the following should be altered
+ ***************************************************************************/
+
+/*
+ * JENT_POWERUP_TESTLOOPCOUNT needs some loops to identify edge
+ * systems. 100 is definitely too little.
+ *
+ * SP800-90B requires at least 1024 initial test cycles.
+ */
+#define JENT_POWERUP_TESTLOOPCOUNT 1024
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
@@ -212,7 +244,7 @@ static int jent_rct_failure(struct rand_data *ec)
 
 static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 {
-	return (prev < next) ? (next - prev) : (UINT64_MAX - prev + 1 + next);
+	return (next - prev);
 }
 
 /**
@@ -230,7 +262,7 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
  * 	0 jitter measurement not stuck (good bit)
  * 	1 jitter measurement stuck (reject bit)
  */
-static int jent_stuck(struct rand_data *ec, uint64_t current_delta)
+static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
 	uint64_t delta2 = jent_delta(ec->last_delta, current_delta);
 	uint64_t delta3 = jent_delta(ec->last_delta2, delta2);
@@ -654,6 +686,138 @@ static int sha3_tester(void)
 	return 0;
 }
 
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+
+/***************************************************************************
+ * Timer-less timer replacement
+ *
+ * If there is no high-resolution hardware timer available, we create one
+ * ourselves. This logic is only used when the initialization identifies
+ * that no suitable time source is available.
+ ***************************************************************************/
+
+static volatile uint8_t jent_notime_interrupt = 0;
+static volatile uint64_t jent_notime_timer = 0;
+static uint64_t jent_notime_prev_timer = 0;
+static int jent_force_internal_timer = 0;
+
+/**
+ * Timer-replacement loop
+ *
+ * @brief The measurement loop triggers the read of the value from the
+ * counter function. It conceptually acts as the low resolution
+ * sampleS timer from a ring oscillator.
+ */
+static void *jent_notime_sample_timer(void *arg)
+{
+	(void)arg;
+
+	jent_notime_timer = 0;
+
+	while (1) {
+		if (jent_notime_interrupt)
+			return NULL;
+
+		jent_notime_timer++;
+	}
+
+	return NULL;
+}
+
+static pthread_attr_t jent_notime_pthread_attr;
+static pthread_t jent_notime_thread_id;
+
+/*
+ * Enable the clock: spawn a new thread that holds a counter.
+ *
+ * Note, although creating a thread is expensive, we do that every time a
+ * caller wants entropy from us and terminate the thread afterwards. This
+ * is to ensure an attacker cannot easily identify the ticking thread.
+ */
+static inline int jent_notime_settick(void)
+{
+	int ret = -pthread_attr_init(&jent_notime_pthread_attr);
+
+	if (ret)
+		return ret;
+
+	jent_notime_interrupt = 0;
+	jent_notime_prev_timer = 0;
+	jent_notime_timer = 0;
+
+	return -pthread_create(&jent_notime_thread_id,
+			       &jent_notime_pthread_attr,
+			       &jent_notime_sample_timer, NULL);
+}
+
+static inline void jent_notime_unsettick(void)
+{
+	jent_notime_interrupt = 1;
+	pthread_join(jent_notime_thread_id, NULL);
+	pthread_attr_destroy(&jent_notime_pthread_attr);
+}
+
+static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
+{
+	if (ec->enable_notime) {
+		/*
+		 * Allow the counting thread to be initialized and guarantee
+		 * that it ticked since last time we looked.
+		 *
+		 * Note, we do not use an atomic operation here for reading
+		 * jent_notime_timer as if this integer is garbled, it even
+		 * adds to entropy. But on most architectures, read/write
+		 * of an uint64_t should be atomic anyway.
+		 */
+		while (jent_notime_timer == jent_notime_prev_timer)
+			;
+
+		jent_notime_prev_timer = jent_notime_timer;
+		*out = jent_notime_prev_timer;
+	} else {
+		jent_get_nstime(out);
+	}
+}
+
+static int jent_time_entropy_init(unsigned int enable_notime);
+static int jent_notime_enable(struct rand_data *ec, unsigned int flags)
+{
+	/* Use internal timer */
+	if (jent_force_internal_timer || (flags & JENT_FORCE_INTERNAL_TIMER)) {
+		/* Self test not run yet */
+		if (!jent_force_internal_timer && jent_time_entropy_init(1))
+			return EHEALTH;
+
+		ec->enable_notime = 1;
+	}
+
+	return 0;
+}
+
+#else /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
+static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
+{
+	(void)ec;
+	jent_get_nstime(out);
+}
+
+static inline int jent_notime_enable(struct rand_data *ec, unsigned int flags)
+{
+	(void)ec;
+
+	/* If we force the timer-less noise source, we return an error */
+	if (flags & JENT_FORCE_INTERNAL_TIMER)
+		return EHEALTH;
+
+	return 0;
+}
+
+static inline int jent_notime_settick(void) { return 0; }
+static inline void jent_notime_unsettick(void) { }
+
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
 /***************************************************************************
  * Noise sources
  ***************************************************************************/
@@ -677,13 +841,15 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	unsigned int i = 0;
 	unsigned int mask = (1U<<bits) - 1;
 
-	jent_get_nstime(&time);
 	/*
 	 * Mix the current state of the random number into the shuffle
 	 * calculation to balance that shuffle a bit more.
 	 */
-	if (ec)
+	if (ec) {
+		jent_get_nstime_internal(ec, &time);
 		time ^= ec->data[0];
+	}
+
 	/*
 	 * We fold the time value as much as possible to ensure that as many
 	 * bits of the time stamp are included as possible.
@@ -717,7 +883,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
  * updated hash context
  */
 static void jent_hash_time(struct rand_data *ec, uint64_t time,
-			   uint64_t loop_cnt, int stuck)
+			   uint64_t loop_cnt, unsigned int stuck)
 {
 	HASH_CTX_ON_STACK(ctx);
 	uint64_t j = 0;
@@ -751,6 +917,8 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 		else
 			sha3_final(ctx, ec->data);
 	}
+
+	jent_memset_secure(ctx, SHA_MAX_CTX_SIZE);
 }
 
 /**
@@ -818,6 +986,7 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 /***************************************************************************
  * Start of entropy processing logic
  ***************************************************************************/
+
 /**
  * This is the heart of the entropy generation: calculate time deltas and
  * use the CPU jitter in the time deltas. The jitter is injected into the
@@ -831,11 +1000,11 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
  *
  * @return: result of stuck test
  */
-static int jent_measure_jitter(struct rand_data *ec)
+static unsigned int jent_measure_jitter(struct rand_data *ec)
 {
 	uint64_t time = 0;
 	uint64_t current_delta = 0;
-	int stuck;
+	unsigned int stuck;
 
 	/* Invoke one noise source before time measurement to add variations */
 	jent_memaccess(ec, 0);
@@ -844,7 +1013,7 @@ static int jent_measure_jitter(struct rand_data *ec)
 	 * Get time stamp and calculate time delta to previous
 	 * invocation to measure the timing variations
 	 */
-	jent_get_nstime(&time);
+	jent_get_nstime_internal(ec, &time);
 	current_delta = jent_delta(ec->prev_time, time);
 	ec->prev_time = time;
 
@@ -863,7 +1032,7 @@ static int jent_measure_jitter(struct rand_data *ec)
  *
  * @ec [in] Reference to entropy collector
  */
-static void jent_gen_entropy(struct rand_data *ec)
+static void jent_random_data(struct rand_data *ec)
 {
 	unsigned int k = 0;
 
@@ -883,6 +1052,10 @@ static void jent_gen_entropy(struct rand_data *ec)
 			break;
 	}
 }
+
+/***************************************************************************
+ * Random Number Generation
+ ***************************************************************************/
 
 /**
  * Entry function: Obtain entropy for the caller.
@@ -906,26 +1079,33 @@ static void jent_gen_entropy(struct rand_data *ec)
  *	-1	entropy_collector is NULL
  *	-2	RCT failed
  *	-3	APT test failed
+ *	-4	The timer cannot be initialized
  */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 {
 	char *p = data;
 	size_t orig_len = len;
+	int ret = 0;
 
 	if (NULL == ec)
 		return -1;
 
-	while (0 < len) {
+	if (jent_notime_settick())
+		return -4;
+
+	while (len > 0) {
 		size_t tocopy;
 
-		jent_gen_entropy(ec);
+		jent_random_data(ec);
 
 		if (jent_health_failure(ec)) {
 			if (jent_rct_failure(ec))
-				return -2;
+				ret = -2;
 			else
-				return -3;
+				ret = -3;
+
+			goto err;
 		}
 
 		if ((DATA_SIZE_BITS / 8) < len)
@@ -954,9 +1134,12 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	 * call reduces the speed of the RNG by up to half
 	 */
 #ifndef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
-	jent_gen_entropy(ec);
+	jent_random_data(ec);
 #endif
-	return (ssize_t)orig_len;
+
+err:
+	jent_notime_unsettick();
+	return ret ? ret : (ssize_t)orig_len;
 }
 
 /***************************************************************************
@@ -979,34 +1162,46 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 		 */
 		entropy_collector->mem = 
 			(unsigned char *)jent_zalloc(JENT_MEMORY_SIZE);
-		if (NULL == entropy_collector->mem) {
-			jent_zfree(entropy_collector, sizeof(struct rand_data));
-			return NULL;
-		}
+		if (entropy_collector->mem == NULL)
+			goto err;
+
 		entropy_collector->memblocksize = JENT_MEMORY_BLOCKSIZE;
 		entropy_collector->memblocks = JENT_MEMORY_BLOCKS;
 		entropy_collector->memaccessloops = JENT_MEMORY_ACCESSLOOPS;
 	}
 
 	/* verify and set the oversampling rate */
-	if (0 == osr)
+	if (osr == 0)
 		osr = 1; /* minimum sampling rate is 1 */
 	entropy_collector->osr = osr;
 
 	if (jent_fips_enabled())
 		entropy_collector->fips_enabled = 1;
 
+	/* Use timer-less noise source */
+	if (jent_notime_enable(entropy_collector, flags))
+		goto err;
+
 	/* fill the data pad with non-zero values */
-	jent_gen_entropy(entropy_collector);
+	if (jent_notime_settick())
+		goto err;
+	jent_random_data(entropy_collector);
+	jent_notime_unsettick();
 
 	return entropy_collector;
+
+err:
+	if (entropy_collector->mem != NULL)
+		jent_zfree(entropy_collector->mem, JENT_MEMORY_SIZE);
+	jent_zfree(entropy_collector, sizeof(struct rand_data));
+	return NULL;
 }
 
 JENT_PRIVATE_STATIC
 void jent_entropy_collector_free(struct rand_data *entropy_collector)
 {
-	if (NULL != entropy_collector) {
-		if (NULL != entropy_collector->mem) {
+	if (entropy_collector != NULL) {
+		if (entropy_collector->mem != NULL) {
 			jent_zfree(entropy_collector->mem, JENT_MEMORY_SIZE);
 			entropy_collector->mem = NULL;
 		}
@@ -1014,8 +1209,7 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 	}
 }
 
-JENT_PRIVATE_STATIC
-int jent_entropy_init(void)
+static int jent_time_entropy_init(unsigned int enable_notime)
 {
 	int i;
 	uint64_t delta_sum = 0;
@@ -1024,12 +1218,15 @@ int jent_entropy_init(void)
 	int time_backwards = 0;
 	int count_mod = 0;
 	int count_stuck = 0;
+	int ret = 0;
 	struct rand_data ec;
 
-	if (sha3_tester())
-		return EHASH;
-
 	memset(&ec, 0, sizeof(ec));
+
+	if (enable_notime) {
+		ec.enable_notime = 1;
+		jent_notime_settick();
+	}
 
 	/* Required for RCT */
 	ec.osr = 1;
@@ -1054,39 +1251,37 @@ int jent_entropy_init(void)
 	 * following sanity checks verify that we have a high-resolution
 	 * timer.
 	 */
-	/*
-	 * TESTLOOPCOUNT needs some loops to identify edge systems. 100 is
-	 * definitely too little.
-	 *
-	 * SP800-90B requires at least 1024 initial test cycles.
-	 */
-#define TESTLOOPCOUNT 1024
+
 #define CLEARCACHE 100
-	for (i = 0; (TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
+	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
 		uint64_t time = 0;
 		uint64_t time2 = 0;
 		uint64_t delta = 0;
 		unsigned int lowdelta = 0;
-		int stuck;
+		unsigned int stuck;
 
 		/* Invoke core entropy collection logic */
-		jent_get_nstime(&time);
+		jent_get_nstime_internal(&ec, &time);
 		ec.prev_time = time;
 		jent_memaccess(&ec, 0);
 		jent_hash_time(&ec, time, 0, 0);
-		jent_get_nstime(&time2);
+		jent_get_nstime_internal(&ec, &time2);
 
 		/* test whether timer works */
-		if (!time || !time2)
-			return ENOTIME;
+		if (!time || !time2) {
+			ret = ENOTIME;
+			goto out;
+		}
 		delta = jent_delta(time, time2);
 		/*
 		 * test whether timer is fine grained enough to provide
 		 * delta even when called shortly after each other -- this
 		 * implies that we also have a high resolution timer
 		 */
-		if (!delta)
-			return ECOARSETIME;
+		if (!delta) {
+			ret = ECOARSETIME;
+			goto out;
+		}
 
 		stuck = jent_stuck(&ec, delta);
 
@@ -1111,19 +1306,24 @@ int jent_entropy_init(void)
 			 * With the check below that count_stuck must be less
 			 * than 10% of the overall generated raw entropy values
 			 * it is guaranteed that the APT is invoked at
-			 * floor((TESTLOOPCOUNT * 0.9) / 64) == 14 times.
+			 * floor((JENT_POWERUP_TESTLOOPCOUNT * 0.9) / 64) == 14
+			 * times.
 			 */
 			if ((nonstuck % JENT_APT_WINDOW_SIZE) == 0) {
 				jent_apt_reset(&ec,
 					       delta & JENT_APT_WORD_MASK);
-				if (jent_health_failure(&ec))
-					return EHEALTH;
+				if (jent_health_failure(&ec)) {
+					ret = EHEALTH;
+					goto out;
+				}
 			}
 		}
 
 		/* Validate RCT */
-		if (jent_rct_failure(&ec))
-			return ERCT;
+		if (jent_rct_failure(&ec)) {
+			ret = ERCT;
+			goto out;
+		}
 
 		/* test whether we have an increasing timer */
 		if (!(time2 > time))
@@ -1154,31 +1354,63 @@ int jent_entropy_init(void)
 	 * should not fail. The value of 3 should cover the NTP case being
 	 * performed during our test run.
 	 */
-	if (3 < time_backwards)
-		return ENOMONOTONIC;
+	if (time_backwards > 3) {
+		ret = ENOMONOTONIC;
+		goto out;
+	}
 
 	/*
 	 * Variations of deltas of time must on average be larger
 	 * than 1 to ensure the entropy estimation
 	 * implied with 1 is preserved
 	 */
-	if ((delta_sum) <= 1)
-		return EMINVARVAR;
+	if ((delta_sum) <= 1) {
+		ret = EMINVARVAR;
+		goto out;
+	}
 
 	/*
-	 * Ensure that we have variations in the time stamp below 10 for at least
-	 * 10% of all checks -- on some platforms, the counter increments in
-	 * multiples of 100, but not always
+	 * Ensure that we have variations in the time stamp below 10 for at
+	 * least 10% of all checks -- on some platforms, the counter increments
+	 * in multiples of 100, but not always
 	 */
-	if ((TESTLOOPCOUNT/10 * 9) < count_mod)
-		return ECOARSETIME;
+	if ((JENT_POWERUP_TESTLOOPCOUNT/10 * 9) < count_mod) {
+		ret = ECOARSETIME;
+		goto out;
+	}
 
 	/*
 	 * If we have more than 90% stuck results, then this Jitter RNG is
 	 * likely to not work well.
 	 */
-	if ((TESTLOOPCOUNT/10 * 9) < count_stuck)
-		return ESTUCK;
+	if ((JENT_POWERUP_TESTLOOPCOUNT/10 * 9) < count_stuck)
+		ret = ESTUCK;
 
-	return 0;
+out:
+	if (enable_notime)
+		jent_notime_unsettick();
+
+	return ret;
+}
+
+JENT_PRIVATE_STATIC
+int jent_entropy_init(void)
+{
+	int ret;
+
+	if (sha3_tester())
+		return EHASH;
+
+	ret = jent_time_entropy_init(0);
+
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	if (ret) {
+		jent_force_internal_timer = 0;
+		ret = jent_time_entropy_init(1);
+		if (!ret)
+			jent_force_internal_timer = 1;
+	}
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
+	return ret;
 }

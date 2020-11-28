@@ -46,16 +46,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef unsigned long long __u64;
-
-static inline void jent_get_nstime(__u64 *out)
+static inline void jent_get_nstime(uint64_t *out)
 {
-	__u64 clk;
+	uint64_t clk;
 	/* this is MVS code! enable with -S in the compiler */
 	/*__asm__ volatile("stck %0" : "=m" (clk) : : "cc"); */
 	/* this is gcc */
 	asm volatile("stcke %0" : "=Q" (clk) : : "cc");
-	*out = (__u64)(clk);
+	*out = (uint64_t)(clk);
 }
 
 static inline void *jent_zalloc(size_t len)
@@ -82,11 +80,9 @@ static inline int jent_fips_enabled(void)
 
 /* --- helpers needed in user space -- */
 
-/* note: these helper functions are shamelessly stolen from the kernel :-) */
-
-static inline __u64 rol64(__u64 word, unsigned int shift)
+static inline uint64_t rol64(uint64_t x, int n)
 {
-	return (word << shift) | (word >> (64 - shift));
+	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
 }
 
 

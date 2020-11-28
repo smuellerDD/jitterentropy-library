@@ -46,16 +46,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef uint64_t __u64;
-
 /* taken from http://www.ecrypt.eu.org/ebats/cpucycles.html */
 
-static inline void jent_get_nstime(__u64 *out)
+static inline void jent_get_nstime(uint64_t *out)
 {
 	unsigned long high;
 	unsigned long low;
 	unsigned long newhigh;
-	__u64 result;
+	uint64_t result;
         asm volatile(
 		"Lcpucycles:mftbu %0;mftb %1;mftbu %2;cmpw %0,%2;bne Lcpucycles"
 		: "=r" (high), "=r" (low), "=r" (newhigh)
@@ -90,13 +88,10 @@ static inline int jent_fips_enabled(void)
 
 /* --- helpers needed in user space -- */
 
-/* note: these helper functions are shamelessly stolen from the kernel :-) */
-
-static inline __u64 rol64(__u64 word, unsigned int shift)
+static inline uint64_t rol64(uint64_t x, int n)
 {
-	return (word << shift) | (word >> (64 - shift));
+	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
 }
-
 
 #endif /* _JITTERENTROPY_BASE_POWER_H */
 

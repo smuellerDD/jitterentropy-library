@@ -92,6 +92,8 @@ struct rand_data
 
 	unsigned int fips_enabled:1;
 	unsigned int health_failure:1;	/* Permanent health failure */
+
+	unsigned int enable_notime:1;	/* Use internal high-res timer */
 };
 
 /* Flags that can be used to initialize the RNG */
@@ -100,6 +102,8 @@ struct rand_data
 #define JENT_DISABLE_MEMORY_ACCESS (1<<2) /* Disable memory access for more
 					     entropy, saves MEMORY_SIZE RAM for
 					     entropy collector */
+#define JENT_FORCE_INTERNAL_TIMER (1<<3)  /* Force the use of the internal
+					     timer */
 
 /* -- BEGIN Main interface functions -- */
 
