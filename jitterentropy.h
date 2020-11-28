@@ -42,11 +42,7 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
-#ifdef __x86_64__
-#include "arch/jitterentropy-base-x86.h"
-#else
 #include "jitterentropy-base-user.h"
-#endif
 
 #define SHA3_256_SIZE_DIGEST_BITS	256
 #define SHA3_256_SIZE_DIGEST		(SHA3_256_SIZE_DIGEST_BITS >> 3)

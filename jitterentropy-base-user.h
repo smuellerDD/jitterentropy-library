@@ -89,13 +89,28 @@
 #include <unistd.h>
 #endif
 
+#ifdef __x86_64__
+
+# define DECLARE_ARGS(val, low, high)    unsigned long low, high
+# define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
+# define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
+
+static inline void jent_get_nstime(uint64_t *out)
+{
+	DECLARE_ARGS(val, low, high);
+	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
+	*out = EAX_EDX_VAL(val, low, high);
+}
+
+#else /* __x86_64__ */
+
 static inline void jent_get_nstime(uint64_t *out)
 {
 	/* OSX does not have clock_gettime -- taken from
 	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html */
-#ifdef __MACH__
+# ifdef __MACH__
 	*out = mach_absolute_time();
-#elif _AIX
+# elif _AIX
 	/* clock_gettime() on AIX returns a timer value that increments in
 	 * steps of 1000
 	 */
@@ -106,7 +121,7 @@ static inline void jent_get_nstime(uint64_t *out)
 	tmp = tmp << 32;
 	tmp = tmp | aixtime.tb_low;
 	*out = tmp;
-#else /* __MACH__ */
+# else /* __MACH__ */
 	/* we could use CLOCK_MONOTONIC(_RAW), but with CLOCK_REALTIME
 	 * we get some nice extra entropy once in a while from the NTP actions
 	 * that we want to use as well... though, we do not rely on that
@@ -120,8 +135,10 @@ static inline void jent_get_nstime(uint64_t *out)
 		tmp = tmp | (uint32_t)time.tv_nsec;
 	}
 	*out = tmp;
-#endif /* __MACH__ */
+# endif /* __MACH__ */
 }
+
+#endif /* __x86_64__ */
 
 static inline void *jent_zalloc(size_t len)
 {
