@@ -61,26 +61,6 @@
 #define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
-
-/***************************************************************************
- * Jitter RNG Configuration Section
- *
- * You may alter the following options
- ***************************************************************************/
-
-/*
- * Enable timer-less timer support
- *
- * In case the hardware is identified to not provide a high-resolution time
- * stamp, this option enables a built-in high-resolution time stamp mechanism.
- *
- * The timer-less noise source is based on threads. This noise source requires
- * the linking with the POSIX threads library. I.e. the executing environment
- * must offer POSIX threads. If this option is disabled, no linking
- * with the POSIX threads library is needed.
- */
-#define JENT_CONF_ENABLE_INTERNAL_TIMER
-
 /***************************************************************************
  * Jitter RNG Static Definitions
  *
@@ -696,10 +676,7 @@ static int sha3_tester(void)
  * that no suitable time source is available.
  ***************************************************************************/
 
-static volatile uint8_t jent_notime_interrupt = 0;
-static volatile uint64_t jent_notime_timer = 0;
-static uint64_t jent_notime_prev_timer = 0;
-static int jent_force_internal_timer = 0;
+static int jent_force_internal_timer;
 
 /**
  * Timer-replacement loop
@@ -710,22 +687,19 @@ static int jent_force_internal_timer = 0;
  */
 static void *jent_notime_sample_timer(void *arg)
 {
-	(void)arg;
+	struct rand_data *ec = (struct rand_data *)arg;
 
-	jent_notime_timer = 0;
+	ec->notime_timer = 0;
 
 	while (1) {
-		if (jent_notime_interrupt)
+		if (ec->notime_interrupt)
 			return NULL;
 
-		jent_notime_timer++;
+		ec->notime_timer++;
 	}
 
 	return NULL;
 }
-
-static pthread_attr_t jent_notime_pthread_attr;
-static pthread_t jent_notime_thread_id;
 
 /*
  * Enable the clock: spawn a new thread that holds a counter.
@@ -734,27 +708,27 @@ static pthread_t jent_notime_thread_id;
  * caller wants entropy from us and terminate the thread afterwards. This
  * is to ensure an attacker cannot easily identify the ticking thread.
  */
-static inline int jent_notime_settick(void)
+static inline int jent_notime_settick(struct rand_data *ec)
 {
-	int ret = -pthread_attr_init(&jent_notime_pthread_attr);
+	int ret = -pthread_attr_init(&ec->notime_pthread_attr);
 
 	if (ret)
 		return ret;
 
-	jent_notime_interrupt = 0;
-	jent_notime_prev_timer = 0;
-	jent_notime_timer = 0;
+	ec->notime_interrupt = 0;
+	ec->notime_prev_timer = 0;
+	ec->notime_timer = 0;
 
-	return -pthread_create(&jent_notime_thread_id,
-			       &jent_notime_pthread_attr,
-			       &jent_notime_sample_timer, NULL);
+	return -pthread_create(&ec->notime_thread_id,
+			       &ec->notime_pthread_attr,
+			       jent_notime_sample_timer, ec);
 }
 
-static inline void jent_notime_unsettick(void)
+static inline void jent_notime_unsettick(struct rand_data *ec)
 {
-	jent_notime_interrupt = 1;
-	pthread_join(jent_notime_thread_id, NULL);
-	pthread_attr_destroy(&jent_notime_pthread_attr);
+	ec->notime_interrupt = 1;
+	pthread_join(ec->notime_thread_id, NULL);
+	pthread_attr_destroy(&ec->notime_pthread_attr);
 }
 
 static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
@@ -765,15 +739,15 @@ static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 		 * that it ticked since last time we looked.
 		 *
 		 * Note, we do not use an atomic operation here for reading
-		 * jent_notime_timer as if this integer is garbled, it even
+		 * jent_notime_timer since if this integer is garbled, it even
 		 * adds to entropy. But on most architectures, read/write
 		 * of an uint64_t should be atomic anyway.
 		 */
-		while (jent_notime_timer == jent_notime_prev_timer)
+		while (ec->notime_timer == ec->notime_prev_timer)
 			;
 
-		jent_notime_prev_timer = jent_notime_timer;
-		*out = jent_notime_prev_timer;
+		ec->notime_prev_timer = ec->notime_timer;
+		*out = ec->notime_prev_timer;
 	} else {
 		jent_get_nstime(out);
 	}
@@ -813,8 +787,13 @@ static inline int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 	return 0;
 }
 
-static inline int jent_notime_settick(void) { return 0; }
-static inline void jent_notime_unsettick(void) { }
+static inline int jent_notime_settick(struct rand_data *ec)
+{
+	(void)ec;
+	return 0;
+}
+
+static inline void jent_notime_unsettick(struct rand_data *ec) { (void)ec; }
 
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
@@ -1091,7 +1070,7 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	if (NULL == ec)
 		return -1;
 
-	if (jent_notime_settick())
+	if (jent_notime_settick(ec))
 		return -4;
 
 	while (len > 0) {
@@ -1138,7 +1117,7 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 #endif
 
 err:
-	jent_notime_unsettick();
+	jent_notime_unsettick(ec);
 	return ret ? ret : (ssize_t)orig_len;
 }
 
@@ -1183,10 +1162,10 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 		goto err;
 
 	/* fill the data pad with non-zero values */
-	if (jent_notime_settick())
+	if (jent_notime_settick(entropy_collector))
 		goto err;
 	jent_random_data(entropy_collector);
-	jent_notime_unsettick();
+	jent_notime_unsettick(entropy_collector);
 
 	return entropy_collector;
 
@@ -1225,7 +1204,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 
 	if (enable_notime) {
 		ec.enable_notime = 1;
-		jent_notime_settick();
+		jent_notime_settick(&ec);
 	}
 
 	/* Required for RCT */
@@ -1388,7 +1367,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 
 out:
 	if (enable_notime)
-		jent_notime_unsettick();
+		jent_notime_unsettick(&ec);
 
 	return ret;
 }

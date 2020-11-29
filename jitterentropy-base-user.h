@@ -67,7 +67,9 @@
 #include <errno.h>
 
 /* Timer-less entropy source */
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 #include <pthread.h>
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 #ifdef LIBGCRYPT
 #include <config.h>

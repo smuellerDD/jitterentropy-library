@@ -42,6 +42,29 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
+/***************************************************************************
+ * Jitter RNG Configuration Section
+ *
+ * You may alter the following options
+ ***************************************************************************/
+
+/*
+ * Enable timer-less timer support
+ *
+ * In case the hardware is identified to not provide a high-resolution time
+ * stamp, this option enables a built-in high-resolution time stamp mechanism.
+ *
+ * The timer-less noise source is based on threads. This noise source requires
+ * the linking with the POSIX threads library. I.e. the executing environment
+ * must offer POSIX threads. If this option is disabled, no linking
+ * with the POSIX threads library is needed.
+ */
+#define JENT_CONF_ENABLE_INTERNAL_TIMER
+
+/***************************************************************************
+ * Jitter RNG State Definition Section
+ ***************************************************************************/
+
 #include "jitterentropy-base-user.h"
 
 #define SHA3_256_SIZE_DIGEST_BITS	256
@@ -88,8 +111,15 @@ struct rand_data
 
 	unsigned int fips_enabled:1;
 	unsigned int health_failure:1;	/* Permanent health failure */
-
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
+
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
+	volatile uint64_t notime_timer;		/* high-res timer mock-up */
+	uint64_t notime_prev_timer;		/* previous timer value */
+	pthread_attr_t notime_pthread_attr;	/* pthreads library */
+	pthread_t notime_thread_id;		/* pthreads thread ID */
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 };
 
 /* Flags that can be used to initialize the RNG */

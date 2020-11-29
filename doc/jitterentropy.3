@@ -107,7 +107,12 @@ the startup self test performed with
 .BR jent_entropy_init ()
 uses the hardware timer with precedence if it is identified to be appropriate
 for entropy collection. If the internal timer is not compiled, requesting
-this flag returns an error.
+this flag returns an error. Even though a separate thread is spawned
+to provide a high-resolution time stamp, this entire operation is completely
+thread-safe as all relevant data is maintained as part of the
+.IR entropy_collector
+data structure.
+.LP
 .BR jent_entropy_collector_free()
 zeroizes and frees the given CPU Jitter entropy collector instance.
 .LP
