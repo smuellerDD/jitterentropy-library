@@ -1,5 +1,5 @@
 3.0.0
- * use the x86-specific header file in case the code is compiled on x86
+ * use RDTSC on x86 directly instead of clock_gettime
  * use SHA-3 instead of LFSR
  * add internal high-resolution timer support
 
