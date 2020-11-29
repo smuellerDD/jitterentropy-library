@@ -676,7 +676,7 @@ static int sha3_tester(void)
  * that no suitable time source is available.
  ***************************************************************************/
 
-static int jent_force_internal_timer;
+static int jent_force_internal_timer = 0;
 
 /**
  * Timer-replacement loop
@@ -1383,8 +1383,8 @@ int jent_entropy_init(void)
 	ret = jent_time_entropy_init(0);
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	jent_force_internal_timer = 0;
 	if (ret) {
-		jent_force_internal_timer = 0;
 		ret = jent_time_entropy_init(1);
 		if (!ret)
 			jent_force_internal_timer = 1;
