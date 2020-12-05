@@ -2,9 +2,22 @@
 
 CC ?= gcc
 #Hardening
-CFLAGS ?= -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
+CFLAGS ?= -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O2 -fwrapv -Wconversion
 LDFLAGS +=-Wl,-z,relro,-z,now
+
+GCCVERSIONFORMAT := $(shell echo `gcc -dumpversion | sed 's/\./\n/g' | wc -l`)
+ifeq "$(GCCVERSIONFORMAT)" "3"
+  GCC_GTEQ_490 := $(shell expr `gcc -dumpversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
+else
+  GCC_GTEQ_490 := $(shell expr `gcc -dumpfullversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
+endif
+
+ifeq "$(GCC_GTEQ_490)" "1"
+  CFLAGS += -fstack-protector-strong
+else
+  CFLAGS += -fstack-protector-all
+endif
 
 # Change as necessary
 PREFIX := /usr/local

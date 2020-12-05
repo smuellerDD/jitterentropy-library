@@ -1,3 +1,6 @@
+3.0.1
+ * on older GCC versions use -fstack-protector
+
 3.0.0
  * use RDTSC on x86 directly instead of clock_gettime
  * use SHA-3 instead of LFSR
