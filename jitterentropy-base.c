@@ -58,7 +58,7 @@
 #define MINVERSION 0 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
+#define PATCHLEVEL 1 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
 /***************************************************************************
@@ -710,8 +710,12 @@ static void *jent_notime_sample_timer(void *arg)
  */
 static inline int jent_notime_settick(struct rand_data *ec)
 {
-	int ret = -pthread_attr_init(&ec->notime_pthread_attr);
+	int ret;
 
+	if (!ec->enable_notime)
+		return 0;
+
+	ret = -pthread_attr_init(&ec->notime_pthread_attr);
 	if (ret)
 		return ret;
 
@@ -726,6 +730,9 @@ static inline int jent_notime_settick(struct rand_data *ec)
 
 static inline void jent_notime_unsettick(struct rand_data *ec)
 {
+	if (!ec->enable_notime)
+		return;
+
 	ec->notime_interrupt = 1;
 	pthread_join(ec->notime_thread_id, NULL);
 	pthread_attr_destroy(&ec->notime_pthread_attr);

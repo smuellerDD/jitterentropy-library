@@ -1,5 +1,8 @@
 3.0.1
- * on older GCC versions use -fstack-protector
+ * on older GCC versions use -fstack-protector as suggested by Warszawski,
+   Diego
+ * prevent creating the internal timer thread if a high-res hardware timer is
+   found as reported by Lonnie Abelbeck
 
 3.0.0
  * use RDTSC on x86 directly instead of clock_gettime
