@@ -1138,6 +1138,23 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 {
 	struct rand_data *entropy_collector;
 
+	/*
+	 * Requesting disabling and forcing of internal timer
+	 * makes no sense.
+	 */
+	if ((flags & JENT_DISABLE_INTERNAL_TIMER) &&
+	    (flags & JENT_FORCE_INTERNAL_TIMER))
+		return NULL;
+
+	/*
+	 * If the initial test code concludes to force the internal timer
+	 * and the user requests it not to be used, do not allocate
+	 * the Jitter RNG instance.
+	 */
+	if (jent_force_internal_timer && (flags & JENT_DISABLE_INTERNAL_TIMER))
+		return NULL;
+
+
 	entropy_collector = jent_zalloc(sizeof(struct rand_data));
 	if (NULL == entropy_collector)
 		return NULL;
@@ -1165,8 +1182,10 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 		entropy_collector->fips_enabled = 1;
 
 	/* Use timer-less noise source */
-	if (jent_notime_enable(entropy_collector, flags))
-		goto err;
+	if (!(flags & JENT_DISABLE_INTERNAL_TIMER)) {
+		if (jent_notime_enable(entropy_collector, flags))
+			goto err;
+	}
 
 	/* fill the data pad with non-zero values */
 	if (jent_notime_settick(entropy_collector))

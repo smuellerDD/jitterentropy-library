@@ -130,6 +130,8 @@ struct rand_data
 					     entropy collector */
 #define JENT_FORCE_INTERNAL_TIMER (1<<3)  /* Force the use of the internal
 					     timer */
+#define JENT_DISABLE_INTERNAL_TIMER (1<<4)  /* Disable the potential use of
+					       the internal timer. */
 
 /* -- BEGIN Main interface functions -- */
 

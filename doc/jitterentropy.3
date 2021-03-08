@@ -12,7 +12,7 @@
 .\" Formatted or processed versions of this manual, if unaccompanied by
 .\" the source, must acknowledge the copyright and authors of this work.
 .\" License.
-.TH JITTERENTROPY 3  2020-11-28
+.TH JITTERENTROPY 3  2021-03-08
 .SH NAME
 jitterentropy \- CPU Jitter Random Number Generator
 .SH SYNOPSIS
@@ -112,6 +112,16 @@ to provide a high-resolution time stamp, this entire operation is completely
 thread-safe as all relevant data is maintained as part of the
 .IR entropy_collector
 data structure.
+.TP
+.B JENT_DISABLE_INTERNAL_TIMER
+This flag can be used to ensure that the internal timer is not used.
+If this flag is used together with
+.B JENT_FORCE_INTERNAL_TIMER
+this is treated as an error and the allocation returns NULL. Also,
+in case
+.BR jent_entropy_init ()
+detects that the internal timer shall be used but the disable flag
+is set, the allocation returns NULL.
 .LP
 .BR jent_entropy_collector_free()
 zeroizes and frees the given CPU Jitter entropy collector instance.
