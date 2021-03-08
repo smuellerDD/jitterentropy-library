@@ -872,6 +872,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 			   uint64_t loop_cnt, unsigned int stuck)
 {
 	HASH_CTX_ON_STACK(ctx);
+	uint8_t itermediary[SHA3_256_SIZE_DIGEST];
 	uint64_t j = 0;
 #define MAX_HASH_LOOP 3
 #define MIN_HASH_LOOP 0
@@ -886,6 +887,12 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	 */
 	if (loop_cnt)
 		hash_loop_cnt = loop_cnt;
+
+	/*
+	 * This loop basically slows down the SHA-3 operation depending
+	 * on the hash_loop_cnt. Each iteration of the loop generates the
+	 * same result.
+	 */
 	for (j = 0; j < hash_loop_cnt; j++) {
 		sha3_update(ctx, ec->data, SHA3_256_SIZE_DIGEST);
 		sha3_update(ctx, (uint8_t *)&time, sizeof(uint64_t));
@@ -898,13 +905,19 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 		 * requires that any conditioning operation to have an identical
 		 * amount of input data according to section 3.1.5.
 		 */
-		if (stuck)
-			sha3_init(ctx);
+
+		/*
+		 * The sha3_final operations re-initialize the context for the
+		 * next loop iteration.
+		 */
+		if (stuck || (j < hash_loop_cnt - 1))
+			sha3_final(ctx, itermediary);
 		else
 			sha3_final(ctx, ec->data);
 	}
 
 	jent_memset_secure(ctx, SHA_MAX_CTX_SIZE);
+	jent_memset_secure(itermediary, sizeof(itermediary));
 }
 
 /**
