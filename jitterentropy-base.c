@@ -1398,7 +1398,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * least 10% of all checks -- on some platforms, the counter increments
 	 * in multiples of 100, but not always
 	 */
-	if ((JENT_POWERUP_TESTLOOPCOUNT/10 * 9) < count_mod) {
+	if (JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT) < count_mod) {
 		ret = ECOARSETIME;
 		goto out;
 	}
@@ -1407,7 +1407,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * If we have more than 90% stuck results, then this Jitter RNG is
 	 * likely to not work well.
 	 */
-	if ((JENT_POWERUP_TESTLOOPCOUNT/10 * 9) < count_stuck)
+	if (JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT) < count_stuck)
 		ret = ESTUCK;
 
 out:
