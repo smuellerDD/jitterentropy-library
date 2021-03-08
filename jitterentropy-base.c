@@ -875,7 +875,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	uint64_t j = 0;
 #define MAX_HASH_LOOP 3
 #define MIN_HASH_LOOP 0
-	uint64_t lfsr_loop_cnt =
+	uint64_t hash_loop_cnt =
 		jent_loop_shuffle(ec, MAX_HASH_LOOP, MIN_HASH_LOOP);
 
 	sha3_256_init(ctx);
@@ -885,8 +885,8 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	 * needed during runtime
 	 */
 	if (loop_cnt)
-		lfsr_loop_cnt = loop_cnt;
-	for (j = 0; j < lfsr_loop_cnt; j++) {
+		hash_loop_cnt = loop_cnt;
+	for (j = 0; j < hash_loop_cnt; j++) {
 		sha3_update(ctx, ec->data, SHA3_256_SIZE_DIGEST);
 		sha3_update(ctx, (uint8_t *)&time, sizeof(uint64_t));
 		sha3_update(ctx, (uint8_t *)&j, sizeof(uint64_t));
@@ -950,7 +950,6 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	 */
 	if (loop_cnt)
 		acc_loop_cnt = loop_cnt;
-
 	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
 		unsigned char *tmpval = ec->mem + ec->memlocation;
 		/*
@@ -983,17 +982,21 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
  * 	    and not using its result.
  *
  * @ec [in] Reference to entropy collector
+ * @loop_cnt [in] see jent_hash_time
+ * @ret_current_delta [out] Test interface: return time delta - may be NULL
  *
  * @return: result of stuck test
  */
-static unsigned int jent_measure_jitter(struct rand_data *ec)
+static unsigned int jent_measure_jitter(struct rand_data *ec,
+					uint64_t loop_cnt,
+					uint64_t *ret_current_delta)
 {
 	uint64_t time = 0;
 	uint64_t current_delta = 0;
 	unsigned int stuck;
 
 	/* Invoke one noise source before time measurement to add variations */
-	jent_memaccess(ec, 0);
+	jent_memaccess(ec, loop_cnt);
 
 	/*
 	 * Get time stamp and calculate time delta to previous
@@ -1007,7 +1010,11 @@ static unsigned int jent_measure_jitter(struct rand_data *ec)
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Now call the next noise sources which also injects the data */
-	jent_hash_time(ec, current_delta, 0, stuck);
+	jent_hash_time(ec, current_delta, loop_cnt, stuck);
+
+	/* return the raw entropy value */
+	if (ret_current_delta)
+		*ret_current_delta = current_delta;
 
 	return stuck;
 }
@@ -1023,11 +1030,11 @@ static void jent_random_data(struct rand_data *ec)
 	unsigned int k = 0;
 
 	/* priming of the ->prev_time value */
-	jent_measure_jitter(ec);
+	jent_measure_jitter(ec, 0, NULL);
 
 	while (1) {
 		/* If a stuck measurement is received, repeat measurement */
-		if (jent_measure_jitter(ec))
+		if (jent_measure_jitter(ec, 0, NULL))
 			continue;
 
 		/*
@@ -1153,7 +1160,6 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	 */
 	if (jent_force_internal_timer && (flags & JENT_DISABLE_INTERNAL_TIMER))
 		return NULL;
-
 
 	entropy_collector = jent_zalloc(sizeof(struct rand_data));
 	if (NULL == entropy_collector)
