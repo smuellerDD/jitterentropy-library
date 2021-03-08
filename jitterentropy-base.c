@@ -1350,7 +1350,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * than 1 to ensure the entropy estimation
 	 * implied with 1 is preserved
 	 */
-	if ((delta_sum) <= 1) {
+	if ((delta_sum) <= JENT_POWERUP_TESTLOOPCOUNT) {
 		ret = EMINVARVAR;
 		goto out;
 	}
