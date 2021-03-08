@@ -1197,7 +1197,7 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 		osr = 1; /* minimum sampling rate is 1 */
 	entropy_collector->osr = osr;
 
-	if (jent_fips_enabled())
+	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
 		entropy_collector->fips_enabled = 1;
 
 	/* Use timer-less noise source */

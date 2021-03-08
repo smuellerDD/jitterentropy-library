@@ -132,6 +132,9 @@ struct rand_data
 					     timer */
 #define JENT_DISABLE_INTERNAL_TIMER (1<<4)  /* Disable the potential use of
 					       the internal timer. */
+#define JENT_FORCE_FIPS (1<<5)		  /* Force FIPS compliant mode
+					     including full SP800-90B
+					     compliance. */
 
 /* -- BEGIN Main interface functions -- */
 

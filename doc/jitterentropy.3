@@ -122,6 +122,10 @@ in case
 .BR jent_entropy_init ()
 detects that the internal timer shall be used but the disable flag
 is set, the allocation returns NULL.
+.TP
+.B JENT_FORCE_FIPS
+Force full FIPS 140 and SP800-90B compliance irrespective of the
+FIPS setting of the underlying operating system.
 .LP
 .BR jent_entropy_collector_free()
 zeroizes and frees the given CPU Jitter entropy collector instance.
