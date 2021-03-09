@@ -106,7 +106,7 @@ struct rand_data
 #define JENT_APT_WORD_MASK	(JENT_APT_LSB - 1)
 	unsigned int apt_observations;	/* Number of collected observations */
 	unsigned int apt_count;		/* APT counter */
-	unsigned int apt_base;		/* APT base reference */
+	uint64_t apt_base;		/* APT base reference */
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 
 	unsigned int fips_enabled:1;

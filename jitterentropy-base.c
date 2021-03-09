@@ -113,11 +113,11 @@ unsigned int jent_version(void)
  *
  * @ec [in] Reference to entropy collector
  */
-static void jent_apt_reset(struct rand_data *ec, unsigned int delta_masked)
+static void jent_apt_reset(struct rand_data *ec, uint64_t current_delta)
 {
 	/* Reset APT counter */
 	ec->apt_count = 0;
-	ec->apt_base = delta_masked;
+	ec->apt_base = current_delta;
 	ec->apt_observations = 0;
 }
 
@@ -125,18 +125,18 @@ static void jent_apt_reset(struct rand_data *ec, unsigned int delta_masked)
  * Insert a new entropy event into APT
  *
  * @ec [in] Reference to entropy collector
- * @delta_masked [in] Masked time delta to process
+ * @current_delta [in] Current time delta
  */
-static void jent_apt_insert(struct rand_data *ec, unsigned int delta_masked)
+static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 {
 	/* Initialize the base reference */
 	if (!ec->apt_base_set) {
-		ec->apt_base = delta_masked;
+		ec->apt_base = current_delta;
 		ec->apt_base_set = 1;
 		return;
 	}
 
-	if (delta_masked == ec->apt_base) {
+	if (current_delta == ec->apt_base) {
 		ec->apt_count++;
 
 		if (ec->apt_count >= JENT_APT_CUTOFF)
@@ -146,7 +146,7 @@ static void jent_apt_insert(struct rand_data *ec, unsigned int delta_masked)
 	ec->apt_observations++;
 
 	if (ec->apt_observations >= JENT_APT_WINDOW_SIZE)
-		jent_apt_reset(ec, delta_masked);
+		jent_apt_reset(ec, current_delta);
 }
 
 /***************************************************************************
@@ -246,7 +246,6 @@ static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
 	uint64_t delta2 = jent_delta(ec->last_delta, current_delta);
 	uint64_t delta3 = jent_delta(ec->last_delta2, delta2);
-	unsigned int delta_masked = current_delta & JENT_APT_WORD_MASK;
 
 	ec->last_delta = current_delta;
 	ec->last_delta2 = delta2;
@@ -255,7 +254,7 @@ static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	 * Insert the result of the comparison of two back-to-back time
 	 * deltas.
 	 */
-	jent_apt_insert(ec, delta_masked);
+	jent_apt_insert(ec, current_delta);
 
 	if (!current_delta || !delta2 || !delta3) {
 		/* RCT with a stuck bit */
