@@ -1,0 +1,47 @@
+# Compile Noise Source as user space application
+
+CC ?= gcc
+CFLAGS +=-Wextra -Wall -pedantic -fPIC -O2
+#Hardening
+CFLAGS +=-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
+LDFLAGS +=-Wl,-z,relro,-z,now
+
+GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
+ifeq "$(GCCVERSIONFORMAT)" "3"
+  GCC_GTEQ_490 := $(shell expr `$(CC) -dumpversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
+else
+  GCC_GTEQ_490 := $(shell expr `$(CC) -dumpfullversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
+endif
+
+ifeq "$(GCC_GTEQ_490)" "1"
+  CFLAGS += -fstack-protector-strong
+else
+  CFLAGS += -fstack-protector-all
+endif
+
+program_NAME := jitterentropy-hashtime
+#program_C_SRCS := $(wildcard *.c) 
+program_C_SRCS := jitterentropy-hashtime.c
+program_C_OBJS := ${program_C_SRCS:.c=.o}
+program_OBJS := $(program_C_OBJS)
+
+program_INCLUDE_DIRS :=
+program_LIBRARY_DIRS :=
+program_LIBRARIES := rt pthread
+
+CPPFLAGS += $(foreach includedir,$(program_INCLUDE_DIRS),-I$(includedir))
+LDFLAGS += $(foreach librarydir,$(program_LIBRARY_DIRS),-L$(librarydir))
+LDFLAGS += $(foreach library,$(program_LIBRARIES),-l$(library))
+
+.PHONY: all clean distclean
+
+all: $(program_NAME)
+
+$(program_NAME): $(program_OBJS)
+	$(CC) $(program_OBJS) -o $(program_NAME) $(LDFLAGS)
+
+clean:
+	@- $(RM) $(program_NAME)
+	@- $(RM) $(program_OBJS)
+
+distclean: clean
