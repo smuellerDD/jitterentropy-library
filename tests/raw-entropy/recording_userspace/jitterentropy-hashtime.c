@@ -17,6 +17,7 @@
  * DAMAGE.
  */
 
+#include <inttypes.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <stdint.h>
@@ -92,7 +93,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	}
 
 	for (size = 0; size < rounds; size++)
-		fprintf(out, "%lu %lu\n", duration[size], duration_min[size]);
+		fprintf(out, "%" PRIu64 " %" PRIu64 "\n", duration[size], duration_min[size]);
 
 out:
 	free(duration);
