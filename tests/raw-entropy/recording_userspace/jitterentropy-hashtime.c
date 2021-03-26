@@ -78,6 +78,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 
 	/* Enable full SP800-90B health test handling */
 	ec->fips_enabled = 1;
+	ec_min->fips_enabled = 1;
 
 	/* Prime the test */
 	jent_measure_jitter(ec, 0, NULL);
