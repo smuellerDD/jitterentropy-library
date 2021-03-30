@@ -58,7 +58,7 @@
 #define MINVERSION 0 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 1 /* API / ABI compatible, no functional changes, no
+#define PATCHLEVEL 2 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
 /***************************************************************************
@@ -821,6 +821,15 @@ static inline void jent_notime_unsettick(struct rand_data *ec) { (void)ec; }
 static uint64_t jent_loop_shuffle(struct rand_data *ec,
 				  unsigned int bits, unsigned int min)
 {
+#ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
+
+	(void)ec;
+	(void)bits;
+
+	return (1<<min);
+
+#else /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
+
 	uint64_t time = 0;
 	uint64_t shuffle = 0;
 	unsigned int i = 0;
@@ -849,6 +858,8 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	 * RNG loop count.
 	 */
 	return (shuffle + (1<<min));
+
+#endif /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
 }
 
 /**
@@ -1192,8 +1203,8 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	}
 
 	/* verify and set the oversampling rate */
-	if (osr == 0)
-		osr = 1; /* minimum sampling rate is 1 */
+	if (osr < JENT_MIM_OSR)
+		osr = JENT_MIM_OSR;
 	entropy_collector->osr = osr;
 
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
