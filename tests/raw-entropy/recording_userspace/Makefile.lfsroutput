@@ -1,7 +1,7 @@
 # Compile Noise Source as user space application
 
 CC ?= gcc
-CFLAGS +=-Wextra -Wall -pedantic -fPIC -O2 -DCONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
+CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -DCONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 #Hardening
 CFLAGS +=-fwrapv --param ssp-buffer-size=4
 LDFLAGS +=-Wl,-z,relro,-z,now

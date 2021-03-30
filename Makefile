@@ -2,8 +2,8 @@
 
 CC ?= gcc
 #Hardening
-CFLAGS ?= -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
-CFLAGS +=-Wextra -Wall -pedantic -fPIC -O2 -fwrapv -Wconversion
+CFLAGS ?= -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
+CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -fwrapv -Wconversion
 LDFLAGS +=-Wl,-z,relro,-z,now
 
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)

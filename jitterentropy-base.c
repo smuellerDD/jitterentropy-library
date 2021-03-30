@@ -67,6 +67,10 @@
  * None of the following should be altered
  ***************************************************************************/
 
+#ifdef __OPTIMIZE__
+ #error "The CPU Jitter random number generator must not be compiled with optimizations. See documentation. Use the compiler switch -O0 for compiling jitterentropy.c."
+#endif
+
 /*
  * JENT_POWERUP_TESTLOOPCOUNT needs some loops to identify edge
  * systems. 100 is definitely too little.
