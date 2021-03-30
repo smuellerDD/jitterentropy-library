@@ -308,8 +308,8 @@ struct sha_ctx {
 
 /* CTX size allows any hash type up to SHA3-224 */
 #define SHA_MAX_CTX_SIZE	368
-#define HASH_CTX_ON_STACK(name)						\
-	uint8_t name ## _ctx_buf[SHA_MAX_CTX_SIZE];			\
+#define HASH_CTX_ON_STACK(name)						       \
+	uint8_t name ## _ctx_buf[SHA_MAX_CTX_SIZE] __attribute__((aligned(8)));\
 	struct sha_ctx *name = (struct sha_ctx *) name ## _ctx_buf
 
 /*
