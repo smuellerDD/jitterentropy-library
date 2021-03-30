@@ -1207,8 +1207,8 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	}
 
 	/* verify and set the oversampling rate */
-	if (osr < JENT_MIM_OSR)
-		osr = JENT_MIM_OSR;
+	if (osr < JENT_MIN_OSR)
+		osr = JENT_MIN_OSR;
 	entropy_collector->osr = osr;
 
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))

@@ -66,9 +66,12 @@
  *
  * The shuffle operation enlarges the timing of the conditioning function
  * by a variable length defined by the LSB of a time stamp. Some mathematicians
- * are concerned that this quasi-random selection of the loop iteration count
+ * are concerned that this pseudo-random selection of the loop iteration count
  * may create some form of dependency between the different loop counts
- * and the associated time duration of the conditioning function.
+ * and the associated time duration of the conditioning function. It would
+ * also complicates entropy assessment because it effectively combines a bunch
+ * of shifted/scaled copies the same distribution) and masks failures from the
+ * health testing.
  *
  * By enabling this flag, the loop shuffle operation is disabled and
  * the entropy collection operates in a way that honor the concerns.
@@ -153,9 +156,9 @@ struct rand_data
 					     compliance. */
 
 #ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
-# define JENT_MIM_OSR	3
+# define JENT_MIN_OSR	3
 #else
-# define JENT_MIM_OSR	1
+# define JENT_MIN_OSR	1
 #endif
 
 /* -- BEGIN Main interface functions -- */
