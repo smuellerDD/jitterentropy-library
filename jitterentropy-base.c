@@ -306,10 +306,14 @@ struct sha_ctx {
 	uint8_t partial[SHA3_MAX_SIZE_BLOCK];
 };
 
+#define aligned(val)	__attribute__((aligned(val)))
+#define ALIGNED_BUFFER(name, size, type)				       \
+	type name[(size + sizeof(type)-1) / sizeof(type)] aligned(sizeof(type));
+
 /* CTX size allows any hash type up to SHA3-224 */
 #define SHA_MAX_CTX_SIZE	368
 #define HASH_CTX_ON_STACK(name)						       \
-	uint8_t name ## _ctx_buf[SHA_MAX_CTX_SIZE] __attribute__((aligned(8)));\
+	ALIGNED_BUFFER(name ## _ctx_buf, SHA_MAX_CTX_SIZE, uint64_t)	       \
 	struct sha_ctx *name = (struct sha_ctx *) name ## _ctx_buf
 
 /*
