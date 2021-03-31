@@ -151,7 +151,7 @@ do
 			if [ ! -f $outfile ]
 			then
 				echo "Analyzing entropy for $infilesingle ${bits}-bit single" | tee -a $LOGFILE
-				$EATOOL_NONIID -n -v $infilesingle ${bits} 1 > $outfile
+				$EATOOL_NONIID -n -v $infilesingle ${bits} 0.333 > $outfile
 			else
 				echo "File $outfile already generated"
 			fi
@@ -161,7 +161,7 @@ do
 			if [ ! -f $outfile ]
 			then
 				echo "Analyzing entropy for $infilevar ${bits}-bit var" | tee -a $LOGFILE
-				$EATOOL_NONIID -n -v $infilevar ${bits} 1 > $outfile
+				$EATOOL_NONIID -n -v $infilevar ${bits} 0.333 > $outfile
 			else
 				echo "File $outfile already generated"
 			fi
