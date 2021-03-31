@@ -68,9 +68,9 @@
  * by a variable length defined by the LSB of a time stamp. Some mathematicians
  * are concerned that this pseudo-random selection of the loop iteration count
  * may create some form of dependency between the different loop counts
- * and the associated time duration of the conditioning function. It would
+ * and the associated time duration of the conditioning function. It
  * also complicates entropy assessment because it effectively combines a bunch
- * of shifted/scaled copies the same distribution) and masks failures from the
+ * of shifted/scaled copies the same distribution and masks failures from the
  * health testing.
  *
  * By enabling this flag, the loop shuffle operation is disabled and
