@@ -1,3 +1,9 @@
+3.0.2
+ * Small fixes suggested by Joshua Hill
+ * Update the invocation of SHA-3 invocation: each loop iteration defined by the loop shuffle is a self-contained SHA-3 operation. Therefore, the conditioning information is always *one* SHA-3 operation with different time duration.
+ * add JENT_CONF_DISABLE_LOOP_SHUFFLE config option allowing disabling of the shuffle operation
+ * Use -O0
+
 3.0.1
  * on older GCC versions use -fstack-protector as suggested by Warszawski,
    Diego
