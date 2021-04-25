@@ -89,6 +89,21 @@
 #define SHA3_256_SIZE_DIGEST_BITS	256
 #define SHA3_256_SIZE_DIGEST		(SHA3_256_SIZE_DIGEST_BITS >> 3)
 
+/*
+ * The output 256 bits can receive more than 256 bits of min entropy,
+ * of course, but the 256-bit output of SHA3-256(M) can only asymptotically
+ * approach 256 bits of min entropy, not attain that bound. Random maps will
+ * tend to have output collisions, which reduces the creditable output entropy
+ * (that is what SP 800-90B Section 3.1.5.1.2 attempts to bound).
+ *
+ * The value "64" is justified in Appendix A.4 of the current 90C draft,
+ * and aligns with NIST's in "epsilon" definition in this document, which is
+ * that a string can be considered "full entropy" if you can bound the min
+ * entropy in each bit of output to at least 1-epsilson, where epsilon is
+ * required to be <= 2^(-32).
+ */
+#define ENTROPY_SAFETY_FACTOR		0
+
 /* The entropy pool */
 struct rand_data
 {

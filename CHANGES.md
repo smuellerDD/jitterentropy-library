@@ -1,3 +1,8 @@
+3.0.3
+ * Add link call to pthreads library as suggested by Mikhail Novosyolov
+ * Add ENTROPY_SAFETY_FACTOR to apply consideration of asymptotically reaching
+   full entropy following SP800-90C suggested by Joshua Hill
+
 3.0.2
  * Small fixes suggested by Joshua Hill
  * Update the invocation of SHA-3 invocation: each loop iteration defined by the loop shuffle is a self-contained SHA-3 operation. Therefore, the conditioning information is always *one* SHA-3 operation with different time duration.

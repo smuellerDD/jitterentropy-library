@@ -1072,7 +1072,7 @@ static void jent_random_data(struct rand_data *ec)
 		 * We multiply the loop value with ->osr to obtain the
 		 * oversampling rate requested by the caller
 		 */
-		if (++k >= (DATA_SIZE_BITS * ec->osr))
+		if (++k >= ((DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR) * ec->osr))
 			break;
 	}
 }
