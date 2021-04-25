@@ -4,7 +4,7 @@ CC ?= gcc
 #Hardening
 CFLAGS ?= -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -fwrapv -Wconversion
-LDFLAGS +=-Wl,-z,relro,-z,now
+LDFLAGS +=-Wl,-z,relro,-z,now -lpthread
 
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
 ifeq "$(GCCVERSIONFORMAT)" "3"
