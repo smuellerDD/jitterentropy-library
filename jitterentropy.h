@@ -102,7 +102,7 @@
  * entropy in each bit of output to at least 1-epsilson, where epsilon is
  * required to be <= 2^(-32).
  */
-#define ENTROPY_SAFETY_FACTOR		0
+#define ENTROPY_SAFETY_FACTOR		64
 
 /* The entropy pool */
 struct rand_data
