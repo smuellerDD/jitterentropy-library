@@ -120,6 +120,13 @@ int main(int argc, char * argv[])
 	if (repeats >= UINT_MAX)
 		return 1;
 
+        ret = jent_entropy_init();
+
+	if (ret) {
+		printf("The initialization failed with error code %d\n", ret);
+		return ret;
+	}
+
 	for (i = 1; i <= repeats; i++) {
 		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", argv[3],
 			 i);

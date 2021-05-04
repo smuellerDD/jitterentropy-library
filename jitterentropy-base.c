@@ -81,6 +81,7 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+
 /**
  * jent_version() - Return machine-usable version number of jent library
  *
@@ -139,6 +140,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		ec->apt_base_set = 1;
 		return;
 	}
+
 
 	if (current_delta == ec->apt_base) {
 		ec->apt_count++;
@@ -690,7 +692,7 @@ static int jent_force_internal_timer = 0;
  *
  * @brief The measurement loop triggers the read of the value from the
  * counter function. It conceptually acts as the low resolution
- * sampleS timer from a ring oscillator.
+ * samples timer from a ring oscillator.
  */
 static void *jent_notime_sample_timer(void *arg)
 {
@@ -834,7 +836,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	(void)ec;
 	(void)bits;
 
-	return (1<<min);
+	return (1U<<min);
 
 #else /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
 
@@ -865,7 +867,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	 * We add a lower boundary value to ensure we have a minimum
 	 * RNG loop count.
 	 */
-	return (shuffle + (1<<min));
+	return (shuffle + (1U<<min));
 
 #endif /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
 }
@@ -1184,6 +1186,7 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	    (flags & JENT_FORCE_INTERNAL_TIMER))
 		return NULL;
 
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	/*
 	 * If the initial test code concludes to force the internal timer
 	 * and the user requests it not to be used, do not allocate
@@ -1191,6 +1194,7 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	 */
 	if (jent_force_internal_timer && (flags & JENT_DISABLE_INTERNAL_TIMER))
 		return NULL;
+#endif
 
 	entropy_collector = jent_zalloc(sizeof(struct rand_data));
 	if (NULL == entropy_collector)
@@ -1253,7 +1257,6 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 
 static int jent_time_entropy_init(unsigned int enable_notime)
 {
-	int i;
 	uint64_t delta_sum = 0;
 	uint64_t old_delta = 0;
 	unsigned int nonstuck = 0;
@@ -1262,6 +1265,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	int count_stuck = 0;
 	int ret = 0;
 	struct rand_data ec;
+
 
 	memset(&ec, 0, sizeof(ec));
 
@@ -1295,7 +1299,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 */
 
 #define CLEARCACHE 100
-	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
+	for (int i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
 		uint64_t time = 0;
 		uint64_t time2 = 0;
 		uint64_t delta = 0;
@@ -1406,7 +1410,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * than 1 to ensure the entropy estimation
 	 * implied with 1 is preserved
 	 */
-	if ((delta_sum) <= JENT_POWERUP_TESTLOOPCOUNT) {
+	if (delta_sum <= JENT_POWERUP_TESTLOOPCOUNT) {
 		ret = EMINVARVAR;
 		goto out;
 	}

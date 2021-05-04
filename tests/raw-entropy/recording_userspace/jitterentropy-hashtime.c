@@ -147,6 +147,9 @@ int main(int argc, char * argv[])
 	if (argc == 5)
 		notime = 1;
 
+	ret=jent_entropy_init();
+	if(ret != 0) return ret;
+
 	for (i = 1; i <= repeats; i++) {
 		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", argv[3],
 			 i);

@@ -31,6 +31,11 @@ int main(int argc, char * argv[])
 #ifdef ROUNDS
 	size_t size = 0;
 	struct rand_data *ec;
+	int ret;
+
+	ret = jent_entropy_init();
+	if(!ret)
+		return ret;
 
 	ec = jent_entropy_collector_alloc(0, 0);
 	if(!ec)
