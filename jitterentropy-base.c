@@ -1578,9 +1578,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	}
 
 	if(most_common_gcd > 0) {
-		if (most_common_gcd >= 10) {
+		if (most_common_gcd >= 100) {
 			/*
-			 * We found some divisor, and it is 10 or greater.
+			 * We found some divisor, and it is 100 or greater.
 			 */
 			ret = ECOARSETIME;
 			goto out;
