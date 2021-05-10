@@ -57,6 +57,11 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		goto out;
 	}
 
+	ret = jent_entropy_init();
+	if(!ret) {
+		printf("The initialization failed with error code %d\n", ret);
+		goto out;
+	}
 	ec = jent_entropy_collector_alloc(0, notime ?
 					     JENT_FORCE_INTERNAL_TIMER : 0);
 	if (!ec) {
