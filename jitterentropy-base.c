@@ -81,6 +81,7 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+
 /**
  * jent_version() - Return machine-usable version number of jent library
  *
@@ -139,6 +140,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		ec->apt_base_set = 1;
 		return;
 	}
+
 
 	if (current_delta == ec->apt_base) {
 		ec->apt_count++;
@@ -315,6 +317,29 @@ struct sha_ctx {
 #define HASH_CTX_ON_STACK(name)						       \
 	ALIGNED_BUFFER(name ## _ctx_buf, SHA_MAX_CTX_SIZE, uint64_t)	       \
 	struct sha_ctx *name = (struct sha_ctx *) name ## _ctx_buf
+
+/**
+ * Compare two uint64s, whose pointers have been passed in to support qsort.
+ *
+ * @in1 [in] Reference to left uint64_t
+ * @in2 [in] Reference to right uint64_t
+ * @return -1 if left<right, 1 if left>right, and 0 if they are equal.
+ */
+static int jent_uint64compare(const void *in1, const void *in2) {
+	const uint64_t *left;
+	const uint64_t *right;
+
+	left = in1;
+	right = in2;
+
+	if (*left < *right) {
+		return (-1);
+	} else if (*left > *right) {
+		return (1);
+	} else {
+		return (0);
+	}
+}
 
 /*
  * Conversion of Little-Endian representations in byte streams - the data
@@ -672,6 +697,8 @@ static int sha3_tester(void)
 
 	return 0;
 }
+
+static uint64_t jent_common_timer_gcd = 0; /* The common divisor for all timestamp deltas */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
@@ -1034,7 +1061,7 @@ static unsigned int jent_measure_jitter(struct rand_data *ec,
 	 * invocation to measure the timing variations
 	 */
 	jent_get_nstime_internal(ec, &time);
-	current_delta = jent_delta(ec->prev_time, time);
+	current_delta = jent_delta(ec->prev_time, time) / jent_common_timer_gcd;
 	ec->prev_time = time;
 
 	/* Check whether we have a stuck measurement. */
@@ -1197,6 +1224,17 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 		return NULL;
 #endif
 
+	/*
+	 * Was jent_entropy_init run (establishing the common GCD)?
+	 */
+	if(0 == jent_common_timer_gcd) {
+		/*
+		 * It was not. This should probably be an error, but this behavior breaks the test code.
+		 * Set the gcd to a value that won't hurt anything.
+		 */
+		jent_common_timer_gcd = 1;
+	}
+
 	entropy_collector = jent_zalloc(sizeof(struct rand_data));
 	if (NULL == entropy_collector)
 		return NULL;
@@ -1256,18 +1294,52 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 	}
 }
 
+/*A straight forward implementation of the Euclidean algorithm for GCD.*/
+uint64_t gcd64(uint64_t a, uint64_t b) {
+	/* Make a greater a than or equal b. */
+	if (a < b) {
+		uint64_t c = a;
+		a = b;
+		b = c;
+	}
+
+	/* Now perform the standard inner-loop for this algorithm.*/
+	while (b != 0) {
+		uint64_t r;
+
+		r = a % b;
+
+		a = b;
+		b = r;
+  }
+
+  return a;
+}
+
+
 static int jent_time_entropy_init(unsigned int enable_notime)
 {
 	uint64_t delta_sum = 0;
 	uint64_t old_delta = 0;
 	unsigned int nonstuck = 0;
 	int time_backwards = 0;
-	int count_mod = 0;
 	int count_stuck = 0;
 	int ret = 0;
 	struct rand_data ec;
+	uint64_t *delta_gcd = NULL;
+	uint64_t *gcd_table = NULL;
+	unsigned int distinct_gcd_count = 0;
+	uint64_t cur_gcd = 0;
+	uint64_t cur_gcd_count = 0;
+	uint64_t most_common_gcd = 0;
+
 
 	memset(&ec, 0, sizeof(ec));
+	delta_gcd = jent_zalloc(JENT_POWERUP_TESTLOOPCOUNT*sizeof(uint64_t));
+	if(NULL == delta_gcd) {
+		ret = EMEM;
+		goto out;
+	}
 
 	if (enable_notime) {
 		ec.enable_notime = 1;
@@ -1303,7 +1375,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		uint64_t time = 0;
 		uint64_t time2 = 0;
 		uint64_t delta = 0;
-		unsigned int lowdelta = 0;
 		unsigned int stuck;
 
 		/* Invoke core entropy collection logic */
@@ -1338,8 +1409,10 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		 * etc. with the goal to clear it to get the worst case
 		 * measurements.
 		 */
-		if (CLEARCACHE > i)
+		if (CLEARCACHE > i) {
+			old_delta = delta;
 			continue;
+		}
 
 		if (stuck)
 			count_stuck++;
@@ -1375,10 +1448,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		if (!(time2 > time))
 			time_backwards++;
 
-		/* use 32 bit value to ensure compilation on 32 bit arches */
-		lowdelta = (unsigned int)(time2 - time);
-		if (!(lowdelta % 100))
-			count_mod++;
+
+		/* Watch for common adjacent GCD values */
+		delta_gcd[i-CLEARCACHE] = gcd64(delta, old_delta);
 
 		/*
 		 * ensure that we have a varying delta timer which is necessary
@@ -1416,13 +1488,116 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	}
 
 	/*
-	 * Ensure that we have variations in the time stamp below 10 for at
-	 * least 10% of all checks -- on some platforms, the counter increments
-	 * in multiples of 100, but not always
+	 * Ensure that delta predominately change in integer multiples.
+	 * Some timers increment by a fixed (non-1) amount each step.
+	 * This code checks for such increments, and allows the library
+	 * to output the number of such changes have occurred.
+         * A candidate divisor must divide at least 90% of the test values.
+	 * The largest such value is used.
 	 */
-	if (JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT) < count_mod) {
-		ret = ECOARSETIME;
+	/* First, sort the delta gcd values. */
+	qsort(delta_gcd, JENT_POWERUP_TESTLOOPCOUNT, sizeof(uint64_t), jent_uint64compare);
+
+	/* How many distinct gcd values were found? */
+	distinct_gcd_count = 0;
+
+	for (int i = 0; JENT_POWERUP_TESTLOOPCOUNT > i; i++) {
+		if(delta_gcd[i] != cur_gcd) {
+			cur_gcd=delta_gcd[i];
+			distinct_gcd_count++;
+		}
+	}
+
+	/* Need to count the last one as well. */
+	if(cur_gcd != 0) {
+		distinct_gcd_count++;
+	}
+
+	/* Now we'll determine the number of times that each distinct gcd occurs. */
+	/* We could have done this in the above pass at the cost of more memory. */
+	gcd_table = jent_zalloc(distinct_gcd_count*2*sizeof(uint64_t));
+	if(NULL == gcd_table) {
+		ret = EMEM;
 		goto out;
+	}
+
+	cur_gcd=0;
+	distinct_gcd_count = 0;
+	cur_gcd_count = 0;
+
+	/* Populate the gcd table with the gcd values and their counts. */
+	for (int i = 0; JENT_POWERUP_TESTLOOPCOUNT > i; i++) {
+                if (delta_gcd[i] == cur_gcd) {
+                        cur_gcd_count++;
+                } else {
+			if(cur_gcd_count > 0) {
+				/*
+				 * Save the gcd.
+				 */
+				gcd_table[2*distinct_gcd_count] = cur_gcd;
+				gcd_table[2*distinct_gcd_count+1] = cur_gcd_count;
+				distinct_gcd_count++;
+			}
+                        cur_gcd_count = 1;
+                        cur_gcd = delta_gcd[i];
+                }
+        }
+
+	/*
+	 * Save the last gcd.
+	 */
+	if(cur_gcd_count > 0) {
+		gcd_table[2*distinct_gcd_count] = cur_gcd;
+		gcd_table[2*distinct_gcd_count+1] = cur_gcd_count;
+		distinct_gcd_count++;
+	}
+
+	/*
+	 * The number of times a specific GCD "works" isn't the number of times it directly appeared.
+	 * We also need to include each GCD value that some integer multiple of that value occurs as
+	 * a GCD. For example, if the GCD 2 occurred 10 times, the GCD 3 occurred 5 times and the GCD 6
+	 * occurred 5 times, then a GCD of 2 occurred should be counted as 15 times (10 for the value '2',
+	 * and 5 for the value '6'),  the GCD 3 should be counted as 10 times, and the value 6 should
+	 * be counted 5 times.
+	 */
+	for(uint64_t i = 0; distinct_gcd_count > i; i++) {
+		for(uint64_t j=0; i > j; j++) {
+			/*
+			 * Account for all lower gcds that are divisors of the current gcd.
+			 */
+			if((gcd_table[2*i] % gcd_table[2*j]) == 0)
+				gcd_table[2*j+1] += gcd_table[2*i+1];
+		}
+	}
+
+	/*
+	 * We can now establish the largest GCD such that over 90% of the tested values
+	 * are divisible by this value.
+	 */
+	for(uint64_t i = 0; distinct_gcd_count > i; i++) {
+		if(gcd_table[2*i+1] > JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT)) {
+			most_common_gcd = gcd_table[2*i];
+		}
+	}
+
+	if(most_common_gcd > 0) {
+		if (most_common_gcd >= 100) {
+			/*
+			 * We found some divisor, and it is 100 or greater.
+			 */
+			ret = ECOARSETIME;
+			goto out;
+		} else {
+			/*
+			 * We found a divisor, but it is small. Adjust all deltas by removing this factor.
+			 */
+			jent_common_timer_gcd = most_common_gcd;
+		}
+	} else {
+			/*
+			 * No dominant GCD was found.
+			 */
+			jent_common_timer_gcd = 1;
 	}
 
 	/*
@@ -1433,8 +1608,15 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		ret = ESTUCK;
 
 out:
-	if (enable_notime)
+	if(delta_gcd != NULL) {
+		jent_zfree(delta_gcd, JENT_POWERUP_TESTLOOPCOUNT*sizeof(uint64_t));
+	}
+	if(gcd_table != NULL) {
+		jent_zfree(gcd_table, distinct_gcd_count*2*(unsigned int)sizeof(uint64_t));
+	}
+	if (enable_notime) {
 		jent_notime_unsettick(&ec);
+	}
 
 	return ret;
 }

@@ -229,6 +229,7 @@ unsigned int jent_version(void);
 #define EHEALTH		9 /* Health test failed during initialization */
 #define ERCT		10 /* RCT failed during initialization */
 #define EHASH		11 /* Hash self test failed */
+#define EMEM		12 /* Can't allocate memory for initialization */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */
 
