@@ -1488,8 +1488,8 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * Ensure that delta predominately change in integer multiples.
 	 * Some timers increment by a fixed (non-1) amount each step.
 	 * This code checks for such increments, and allows the library
-	 * to output the number of such changes have occured.
-         * A canidate divisor must divide at least 90% of the test values.
+	 * to output the number of such changes have occurred.
+         * A candidate divisor must divide at least 90% of the test values.
 	 * The largest such value is used.
 	 */
 	/* First, sort the delta gcd values. */
@@ -1552,15 +1552,15 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	/*
 	 * The number of times a specific GCD "works" isn't the number of times it directly appeared.
 	 * We also need to include each GCD value that some integer multiple of that value occurs as
-	 * a GCD. For example, if the GCD 2 occured 10 times, the GCD 3 occured 5 times and the GCD 6
-	 * occured 5 times, then a GCD of 2 occured should be counted as 15 times (10 for the value '2',
+	 * a GCD. For example, if the GCD 2 occurred 10 times, the GCD 3 occurred 5 times and the GCD 6
+	 * occurred 5 times, then a GCD of 2 occurred should be counted as 15 times (10 for the value '2',
 	 * and 5 for the value '6'),  the GCD 3 should be counted as 10 times, and the value 6 should
 	 * be counted 5 times.
 	 */
 	for(uint64_t i = 0; distinct_gcd_count > i; i++) {
 		for(uint64_t j=0; i > j; j++) {
 			/*
-			 * Account for all lower gcds that are divisiors of the current gcd.
+			 * Account for all lower gcds that are divisors of the current gcd.
 			 */
 			if((gcd_table[2*i] % gcd_table[2*j]) == 0)
 				gcd_table[2*j+1] += gcd_table[2*i+1];
