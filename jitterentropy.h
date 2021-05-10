@@ -104,6 +104,19 @@
  */
 #define ENTROPY_SAFETY_FACTOR		64
 
+/* See the SP 800-90B comment #10b for the corrected cutoff for the SP 800-90B APT.
+ * http://www.untruth.org/~josh/sp80090b/UL%20SP800-90B-final%20comments%20v1.9%2020191212.pdf
+ * In in the syntax of R, this is C = 2 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
+ * (The original formula wasn't correct because the first symbol must necessarily
+ * have been observed, so there is no chance of observing 0 of these symbols.)
+ * This library doesn't count the first instance of the symbol, so we actually need
+ * C = 1 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
+ * For any value above 14, this yields the maximal allowable value of 511
+ * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that renders the
+ * test unable to fail)
+ */
+const unsigned int apt_cutoff_lookup[14]={324, 421, 458, 476, 487, 493, 498, 501, 504, 506, 507, 508, 509, 510};
+
 /* The entropy pool */
 struct rand_data
 {
@@ -133,11 +146,9 @@ struct rand_data
 	int rct_count;			/* Number of stuck values */
 
 	/* Adaptive Proportion Test for a significance level of 2^-30 */
-#define JENT_APT_CUTOFF		325	/* Taken from SP800-90B sec 4.4.2 */
+	unsigned int apt_cutoff; /* Calculated using a corrected version of the SP800-90B sec 4.4.2 formula*/
 #define JENT_APT_WINDOW_SIZE	512	/* Data window size */
 	/* LSB of time stamp to process */
-#define JENT_APT_LSB		16
-#define JENT_APT_WORD_MASK	(JENT_APT_LSB - 1)
 	unsigned int apt_observations;	/* Number of collected observations */
 	unsigned int apt_count;		/* APT counter */
 	uint64_t apt_base;		/* APT base reference */
