@@ -165,7 +165,8 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 		if(ec->lag_delta_history[(ec->lag_observations - i - 1)&JENT_LAG_MASK] == current_delta) {
 			/*The ith predictor (which guesses i+1 symbols in the past) successfully guessed.*/
 			ec->lag_scoreboard[i] ++;
-			if(ec->lag_scoreboard[i] >= ec->lag_scoreboard[ec->lag_best_predictor])
+			//Keep track of the best predictor (tie goes to the shortest lag)
+			if(ec->lag_scoreboard[i] > ec->lag_scoreboard[ec->lag_best_predictor])
 				ec->lag_best_predictor = i;
 		}
 	}
@@ -174,8 +175,7 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 	ec->lag_delta_history[(ec->lag_observations) & JENT_LAG_MASK] = current_delta;
 	ec->lag_observations++;
 
-	/* lag_best_predictor now is the index of the predictor with the largest number of correct guesses
-	 * (tie goes to the larger predictor)
+	/* lag_best_predictor now is the index of the predictor with the largest number of correct guesses.
 	 * This establishes our next guess.
 	 */
 
