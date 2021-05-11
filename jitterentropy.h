@@ -107,7 +107,8 @@
 /*
  * These cutoffs are configured using an entropy estimate of 1/osr under an alpha value
  * of 2^(-30) for a window size of 50000.
- * The global cutoffs are calculated using the InverseBinomialCDF(n=50,000-256, p=2^(-1/osr); 1-2^(-30))
+ * The global cutoffs are calculated using the 
+ * InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
  * The local cutoffs are somewhat more complicated. For background, see Feller's 
  * _Introduction to Probability Theory and It's Applications_ Vol. 1, Chapter 13, section 7 
  * (in particular see equation 7.11, where x is a root of the denominator of equation 7.6).
@@ -118,7 +119,7 @@
  * 
  * We have to iteratively look for an appropriate value for r.
  */
-static const unsigned int jent_lag_global_cutoff_lookup[20] = {25542, 35782, 40021, 42316, 43750, 44730, 45441, 45980, 46403, 46743, 47022, 47255, 47453, 47623, 47771, 47900, 48014, 48115, 48206, 48287};
+static const unsigned int jent_lag_global_cutoff_lookup[20] = {25607, 35873, 40123, 42424, 43862, 44845, 45558, 46098, 46522, 46863, 47143, 47377, 47575, 47745, 47893, 48023, 48137, 48238, 48329, 48411};
 static const unsigned int jent_lag_local_cutoff_lookup[20] = {45, 88, 130, 172, 214, 255, 296, 337, 377, 417, 458, 498, 538, 577, 617, 657, 696, 736, 775, 815};
 
 /* The entropy pool */
