@@ -1224,8 +1224,8 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	entropy_collector->osr = osr;
 
 	/* Establish the apt_cutoff based on the presumed entropy rate of 1/osr. */
-	if(osr > 14) {
-		entropy_collector->apt_cutoff = 511;
+	if(osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
+		entropy_collector->apt_cutoff = jent_apt_cutoff_lookup[ARRAY_SIZE(jent_apt_cutoff_lookup)-1];
 	} else {
 		entropy_collector->apt_cutoff = jent_apt_cutoff_lookup[osr-1];
 	}
