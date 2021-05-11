@@ -1295,7 +1295,7 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 }
 
 /*A straight forward implementation of the Euclidean algorithm for GCD.*/
-uint64_t gcd64(uint64_t a, uint64_t b) {
+static uint64_t jent_gcd64(uint64_t a, uint64_t b) {
 	/* Make a greater a than or equal b. */
 	if (a < b) {
 		uint64_t c = a;
@@ -1450,7 +1450,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 
 
 		/* Watch for common adjacent GCD values */
-		delta_gcd[i-CLEARCACHE] = gcd64(delta, old_delta);
+		delta_gcd[i-CLEARCACHE] = jent_gcd64(delta, old_delta);
 
 		/*
 		 * ensure that we have a varying delta timer which is necessary
