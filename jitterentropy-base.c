@@ -1227,7 +1227,7 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	if(osr > 14) {
 		entropy_collector->apt_cutoff = 511;
 	} else {
-		entropy_collector->apt_cutoff = apt_cutoff_lookup[osr-1];
+		entropy_collector->apt_cutoff = jent_apt_cutoff_lookup[osr-1];
 	}
 
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
