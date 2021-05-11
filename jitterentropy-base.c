@@ -111,7 +111,7 @@ unsigned int jent_version(void)
  *
  * This test is a vendor-defined conditional test that is designed to detect
  * a known failure mode where the result becomes mostly deterministic
- * Note that lag_observations&JENT_LAG_MASK is the index where the next value
+ * Note that (lag_observations&JENT_LAG_MASK) is the index where the next value
  * provided will be stored.
  ***************************************************************************/
 
@@ -122,17 +122,7 @@ unsigned int jent_version(void)
  */
 static void jent_lag_reset(struct rand_data *ec)
 {
-	if(ec->lag_prediction_success_run > ec->lag_prediction_success_run_max) {
-		ec->lag_prediction_success_run_max = ec->lag_prediction_success_run;
-		//fprintf(stderr, "End New max run %u\n", ec->lag_prediction_success_run_max);
-	}
 	/* Reset Lag counters */
-	fprintf(stderr, "Reset lag\n");
-	fprintf(stderr, "Best Predictor: %u (%u correct predictions)\n", ec->lag_best_predictor, ec->lag_scoreboard[ec->lag_best_predictor]);
-	fprintf(stderr, "Success count: %u\n", ec->lag_prediction_success_count);
-	fprintf(stderr, "Success run max: %u\n", ec->lag_prediction_success_run_max);
-
-	ec->lag_prediction_success_run_max = 0;
 	ec->lag_prediction_success_count = 0;
 	ec->lag_prediction_success_run = 0;
 	ec->lag_best_predictor = 0; //The first guess is basically arbitrary.
@@ -142,7 +132,7 @@ static void jent_lag_reset(struct rand_data *ec)
 }
 
 /**
- * Insert a new entropy event into APT
+ * Insert a new entropy event into the lag predictor.
  *
  * @ec [in] Reference to entropy collector
  * @current_delta [in] Current time delta
@@ -157,28 +147,16 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 		return;
 	}
 
-	/*fprintf(stderr, "lag observations: %u\n", ec->lag_observations);
-	fprintf(stderr, "Prior symbols: ");
-	for(unsigned int i = 0; i < JENT_LAG_HISTORY_SIZE; i++) fprintf(stderr, "%lu ", ec->lag_delta_history[(ec->lag_observations + i)&JENT_LAG_MASK]);
-	fprintf(stderr, "\n");
-	fprintf(stderr, "Input symbol: %lu\n", current_delta);*/
-
 	/* The history is initialized. First make a guess and examine the results. */
 	prediction = ec->lag_delta_history[(ec->lag_observations - ec->lag_best_predictor - 1)&JENT_LAG_MASK];
-	//fprintf(stderr, "Prediction %lu (predictor chosen: %u)\n", prediction, ec->lag_best_predictor);
 	if(prediction == current_delta) {
-		//fprintf(stderr, "Prediction Correct!\n");
+		/* The prediction was correct. */
 		ec->lag_prediction_success_count++;
 		ec->lag_prediction_success_run++;
 		if((ec->lag_prediction_success_run >= ec->lag_local_cutoff) || (ec->lag_prediction_success_count >= ec->lag_global_cutoff))
 			ec->health_failure = 1;
 	} else {
 		/*The prediction wasn't correct. End any run of successes.*/
-		//fprintf(stderr, "Prediction failed :-(\n");
-		if(ec->lag_prediction_success_run > ec->lag_prediction_success_run_max) {
-			ec->lag_prediction_success_run_max = ec->lag_prediction_success_run;
-			//fprintf(stderr, "New max run %u\n", ec->lag_prediction_success_run_max);
-		}
 		ec->lag_prediction_success_run=0;
 	}
 
@@ -191,10 +169,6 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 				ec->lag_best_predictor = i;
 		}
 	}
-
-	/*fprintf(stderr, "scoreboard: ");
-	for(int i = 0; i < JENT_LAG_HISTORY_SIZE; i++) fprintf(stderr, "%u ", ec->lag_scoreboard[i]);
-	fprintf(stderr, "\n");*/
 
 	/*Finally, update the lag_delta_history array with the newly input value.*/
 	ec->lag_delta_history[(ec->lag_observations) & JENT_LAG_MASK] = current_delta;
@@ -1326,9 +1300,9 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	entropy_collector->osr = osr;
 
 
-	if(osr > 19) {
-		entropy_collector->lag_global_cutoff = jent_lag_global_cutoff_lookup[19];
-		entropy_collector->lag_local_cutoff = jent_lag_local_cutoff_lookup[19];
+	if(osr >= ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
+		entropy_collector->lag_global_cutoff = jent_lag_global_cutoff_lookup[ARRAY_SIZE(jent_lag_global_cutoff_lookup)-1];
+		entropy_collector->lag_local_cutoff = jent_lag_local_cutoff_lookup[ARRAY_SIZE(jent_lag_local_cutoff_lookup)-1];
 	} else {
 		entropy_collector->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr-1];
 		entropy_collector->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr-1];

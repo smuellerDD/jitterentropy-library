@@ -99,11 +99,25 @@
  * The value "64" is justified in Appendix A.4 of the current 90C draft,
  * and aligns with NIST's in "epsilon" definition in this document, which is
  * that a string can be considered "full entropy" if you can bound the min
- * entropy in each bit of output to at least 1-epsilson, where epsilon is
+ * entropy in each bit of output to at least 1-epsilon, where epsilon is
  * required to be <= 2^(-32).
  */
 #define ENTROPY_SAFETY_FACTOR		64
 
+/*
+ * These cutoffs are configured using an entropy estimate of 1/osr under an alpha value
+ * of 2^(-30) for a window size of 50000.
+ * The global cutoffs are calculated using the InverseBinomialCDF(n=50,000-256, p=2^(-1/osr); 1-2^(-30))
+ * The local cutoffs are somewhat more complicated. For background, see Feller's 
+ * _Introduction to Probability Theory and It's Applications_ Vol. 1, Chapter 13, section 7 
+ * (in particular see equation 7.11, where x is a root of the denominator of equation 7.6).
+ * We'll proceed using the notation of SP 800-90B Section 6.3.8 (which is developed in
+ * Kelsey-McKay-Turan paper "Predictive Models for Min-entropy Estimation".)
+ * Here, we set p=2^(-1/osr), seeking probability of less than (1-2^(-30)) 
+ * (that is, there is a very very large probability that there is _no_ run of length r).
+ * 
+ * We have to iteratively look for an appropriate value for r.
+ */
 static const unsigned int jent_lag_global_cutoff_lookup[20] = {25542, 35782, 40021, 42316, 43750, 44730, 45441, 45980, 46403, 46743, 47022, 47255, 47453, 47623, 47771, 47900, 48014, 48115, 48206, 48287};
 static const unsigned int jent_lag_local_cutoff_lookup[20] = {45, 88, 130, 172, 214, 255, 296, 337, 377, 417, 458, 498, 538, 577, 617, 657, 696, 736, 775, 815};
 
@@ -132,20 +146,18 @@ struct rand_data
 	unsigned int memaccessloops;	/* Number of memory accesses per random
 					 * bit generation */
 
-	/*Lag predictor test to look for reoccuring patterns.*/
-	unsigned int lag_global_cutoff;
-	unsigned int lag_local_cutoff;
-	unsigned int lag_prediction_success_count;
-	unsigned int lag_prediction_success_run;
-	unsigned int lag_prediction_success_run_max;
-	unsigned int lag_best_predictor;
-	unsigned int lag_observations;
-/*This must be a power of 2.*/
-#define JENT_LAG_WINDOW_SIZE 50000
-#define JENT_LAG_HISTORY_SIZE 128
+	/*Lag predictor test to look for reoccurring patterns.*/
+	unsigned int lag_global_cutoff;	/* The lag global cutoff selected based on the selection of osr. */
+	unsigned int lag_local_cutoff; /* The lag local cutoff selected based on the selection of osr. */
+	unsigned int lag_prediction_success_count; /* The number of times the lag predictor was correct. Compared to the global cutoff. */
+	unsigned int lag_prediction_success_run; /* The size of the current run of successes. Compared to the local cutoff. */
+	unsigned int lag_best_predictor; /* The currently selected predictor lag (-1). */
+	unsigned int lag_observations; /* The total number of collected observations since the health test was last reset. */
+#define JENT_LAG_WINDOW_SIZE 50000 /* This is the size of the window used by the predictor. The predictor is reset between windows. */
+#define JENT_LAG_HISTORY_SIZE 128 /*The amount of history to base predictions on. This must be a power of 2.*/
 #define JENT_LAG_MASK (JENT_LAG_HISTORY_SIZE - 1)
-	uint64_t lag_delta_history[JENT_LAG_HISTORY_SIZE];
-	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE];
+	uint64_t lag_delta_history[JENT_LAG_HISTORY_SIZE]; /*The delta history for the lag predictor. */
+	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE]; /* The scoreboard that tracks how successful each predictor lag is. */
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */
