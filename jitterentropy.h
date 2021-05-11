@@ -104,6 +104,9 @@
  */
 #define ENTROPY_SAFETY_FACTOR		64
 
+static const unsigned int jent_lag_global_cutoff_lookup[20] = {25542, 35782, 40021, 42316, 43750, 44730, 45441, 45980, 46403, 46743, 47022, 47255, 47453, 47623, 47771, 47900, 48014, 48115, 48206, 48287};
+static const unsigned int jent_lag_local_cutoff_lookup[20] = {45, 88, 130, 172, 214, 255, 296, 337, 377, 417, 458, 498, 538, 577, 617, 657, 696, 736, 775, 815};
+
 /* The entropy pool */
 struct rand_data
 {
@@ -128,6 +131,21 @@ struct rand_data
 	unsigned int memblocksize; 	/* Size of one memory block in bytes */
 	unsigned int memaccessloops;	/* Number of memory accesses per random
 					 * bit generation */
+
+	/*Lag predictor test to look for reoccuring patterns.*/
+	unsigned int lag_global_cutoff;
+	unsigned int lag_local_cutoff;
+	unsigned int lag_prediction_success_count;
+	unsigned int lag_prediction_success_run;
+	unsigned int lag_prediction_success_run_max;
+	unsigned int lag_best_predictor;
+	unsigned int lag_observations;
+/*This must be a power of 2.*/
+#define JENT_LAG_WINDOW_SIZE 50000
+#define JENT_LAG_HISTORY_SIZE 128
+#define JENT_LAG_MASK (JENT_LAG_HISTORY_SIZE - 1)
+	uint64_t lag_delta_history[JENT_LAG_HISTORY_SIZE];
+	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE];
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */

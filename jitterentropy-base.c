@@ -107,6 +107,111 @@ unsigned int jent_version(void)
 }
 
 /***************************************************************************
+ * Lag Predictor Test
+ *
+ * This test is a vendor-defined conditional test that is designed to detect
+ * a known failure mode where the result becomes mostly deterministic
+ * Note that lag_observations&JENT_LAG_MASK is the index where the next value
+ * provided will be stored.
+ ***************************************************************************/
+
+/**
+ * Reset the lag counters
+ *
+ * @ec [in] Reference to entropy collector
+ */
+static void jent_lag_reset(struct rand_data *ec)
+{
+	if(ec->lag_prediction_success_run > ec->lag_prediction_success_run_max) {
+		ec->lag_prediction_success_run_max = ec->lag_prediction_success_run;
+		//fprintf(stderr, "End New max run %u\n", ec->lag_prediction_success_run_max);
+	}
+	/* Reset Lag counters */
+	fprintf(stderr, "Reset lag\n");
+	fprintf(stderr, "Best Predictor: %u (%u correct predictions)\n", ec->lag_best_predictor, ec->lag_scoreboard[ec->lag_best_predictor]);
+	fprintf(stderr, "Success count: %u\n", ec->lag_prediction_success_count);
+	fprintf(stderr, "Success run max: %u\n", ec->lag_prediction_success_run_max);
+
+	ec->lag_prediction_success_run_max = 0;
+	ec->lag_prediction_success_count = 0;
+	ec->lag_prediction_success_run = 0;
+	ec->lag_best_predictor = 0; //The first guess is basically arbitrary.
+	ec->lag_observations = 0;
+	memset(ec->lag_scoreboard, 0, sizeof(ec->lag_scoreboard));
+	memset(ec->lag_delta_history, 0, sizeof(ec->lag_delta_history));
+}
+
+/**
+ * Insert a new entropy event into APT
+ *
+ * @ec [in] Reference to entropy collector
+ * @current_delta [in] Current time delta
+ */
+static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
+{
+	uint64_t prediction;
+	/* Initialize the delta_history*/
+	if (ec->lag_observations < JENT_LAG_HISTORY_SIZE) {
+		ec->lag_delta_history[ec->lag_observations] = current_delta;
+		ec->lag_observations++;
+		return;
+	}
+
+	/*fprintf(stderr, "lag observations: %u\n", ec->lag_observations);
+	fprintf(stderr, "Prior symbols: ");
+	for(unsigned int i = 0; i < JENT_LAG_HISTORY_SIZE; i++) fprintf(stderr, "%lu ", ec->lag_delta_history[(ec->lag_observations + i)&JENT_LAG_MASK]);
+	fprintf(stderr, "\n");
+	fprintf(stderr, "Input symbol: %lu\n", current_delta);*/
+
+	/* The history is initialized. First make a guess and examine the results. */
+	prediction = ec->lag_delta_history[(ec->lag_observations - ec->lag_best_predictor - 1)&JENT_LAG_MASK];
+	//fprintf(stderr, "Prediction %lu (predictor chosen: %u)\n", prediction, ec->lag_best_predictor);
+	if(prediction == current_delta) {
+		//fprintf(stderr, "Prediction Correct!\n");
+		ec->lag_prediction_success_count++;
+		ec->lag_prediction_success_run++;
+		if((ec->lag_prediction_success_run >= ec->lag_local_cutoff) || (ec->lag_prediction_success_count >= ec->lag_global_cutoff))
+			ec->health_failure = 1;
+	} else {
+		/*The prediction wasn't correct. End any run of successes.*/
+		//fprintf(stderr, "Prediction failed :-(\n");
+		if(ec->lag_prediction_success_run > ec->lag_prediction_success_run_max) {
+			ec->lag_prediction_success_run_max = ec->lag_prediction_success_run;
+			//fprintf(stderr, "New max run %u\n", ec->lag_prediction_success_run_max);
+		}
+		ec->lag_prediction_success_run=0;
+	}
+
+	/* Now update the predictors using the current data. */
+	for(unsigned int i=0; i < JENT_LAG_HISTORY_SIZE; i++) {
+		if(ec->lag_delta_history[(ec->lag_observations - i - 1)&JENT_LAG_MASK] == current_delta) {
+			/*The ith predictor (which guesses i+1 symbols in the past) successfully guessed.*/
+			ec->lag_scoreboard[i] ++;
+			if(ec->lag_scoreboard[i] >= ec->lag_scoreboard[ec->lag_best_predictor])
+				ec->lag_best_predictor = i;
+		}
+	}
+
+	/*fprintf(stderr, "scoreboard: ");
+	for(int i = 0; i < JENT_LAG_HISTORY_SIZE; i++) fprintf(stderr, "%u ", ec->lag_scoreboard[i]);
+	fprintf(stderr, "\n");*/
+
+	/*Finally, update the lag_delta_history array with the newly input value.*/
+	ec->lag_delta_history[(ec->lag_observations) & JENT_LAG_MASK] = current_delta;
+	ec->lag_observations++;
+
+	/* lag_best_predictor now is the index of the predictor with the largest number of correct guesses
+	 * (tie goes to the larger predictor)
+	 * This establishes our next guess.
+	 */
+
+	/* Do we now need a new window? */
+	if (ec->lag_observations >= JENT_LAG_WINDOW_SIZE)
+		jent_lag_reset(ec);
+}
+
+
+/***************************************************************************
  * Adaptive Proportion Test
  *
  * This test complies with SP800-90B section 4.4.2.
@@ -259,6 +364,7 @@ static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	 * deltas.
 	 */
 	jent_apt_insert(ec, current_delta);
+	jent_lag_insert(ec, current_delta);
 
 	if (!current_delta || !delta2 || !delta3) {
 		/* RCT with a stuck bit */
@@ -1035,6 +1141,7 @@ static unsigned int jent_measure_jitter(struct rand_data *ec,
 	 */
 	jent_get_nstime_internal(ec, &time);
 	current_delta = jent_delta(ec->prev_time, time);
+
 	ec->prev_time = time;
 
 	/* Check whether we have a stuck measurement. */
@@ -1217,6 +1324,15 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	if (osr < JENT_MIN_OSR)
 		osr = JENT_MIN_OSR;
 	entropy_collector->osr = osr;
+
+
+	if(osr > 19) {
+		entropy_collector->lag_global_cutoff = jent_lag_global_cutoff_lookup[19];
+		entropy_collector->lag_local_cutoff = jent_lag_local_cutoff_lookup[19];
+	} else {
+		entropy_collector->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr-1];
+		entropy_collector->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr-1];
+	}
 
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
 		entropy_collector->fips_enabled = 1;
