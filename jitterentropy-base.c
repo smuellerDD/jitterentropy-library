@@ -81,7 +81,6 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
-
 /**
  * jent_version() - Return machine-usable version number of jent library
  *
