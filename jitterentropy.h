@@ -105,22 +105,27 @@
 #define ENTROPY_SAFETY_FACTOR		64
 
 /*
- * These cutoffs are configured using an entropy estimate of 1/osr under an alpha value
- * of 2^(-30) for a window size of 50000.
+ * These cutoffs are configured using an entropy estimate of 1/osr under an alpha=2^(-24) 
+ * for a window size of 50000. The other health tests use alpha=2^-30, but operate
+ * on much smaller block sizes, so this larger selection of alpha makes the behavior
+ * per 50,000 sample blocks similar.
+ *
  * The global cutoffs are calculated using the 
  * InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
+ *
  * The local cutoffs are somewhat more complicated. For background, see Feller's 
  * _Introduction to Probability Theory and It's Applications_ Vol. 1, Chapter 13, section 7 
  * (in particular see equation 7.11, where x is a root of the denominator of equation 7.6).
  * We'll proceed using the notation of SP 800-90B Section 6.3.8 (which is developed in
  * Kelsey-McKay-Turan paper "Predictive Models for Min-entropy Estimation".)
- * Here, we set p=2^(-1/osr), seeking probability of less than (1-2^(-30)) 
- * (that is, there is a very very large probability that there is _no_ run of length r).
+ * Here, we set p=2^(-1/osr), seeking probability of less than (1-alpha) 
+ * (that is, there is a very very large probability that there is _no_ run of 
+ * length r).
  * 
- * We have to iteratively look for an appropriate value for r.
+ * We have to iteratively look for an appropriate value for the cutoff r.
  */
-static const unsigned int jent_lag_global_cutoff_lookup[20] = {25607, 35873, 40123, 42424, 43862, 44845, 45558, 46098, 46522, 46863, 47143, 47377, 47575, 47745, 47893, 48023, 48137, 48238, 48329, 48411};
-static const unsigned int jent_lag_local_cutoff_lookup[20] = {45, 88, 130, 172, 214, 255, 296, 337, 377, 417, 458, 498, 538, 577, 617, 657, 696, 736, 775, 815};
+static const unsigned int jent_lag_global_cutoff_lookup[20] = {25527, 35801, 40059, 42367, 43810, 44796, 45512, 46055, 46481, 46824, 47105, 47341, 47541, 47712, 47861, 47992, 48107, 48209, 48301, 48383};
+static const unsigned int jent_lag_local_cutoff_lookup[20] = {39, 76, 112, 148, 184, 219, 254, 289, 323, 357, 392, 426, 460, 494, 527, 561, 595, 628, 661, 695};
 
 /* The entropy pool */
 struct rand_data
