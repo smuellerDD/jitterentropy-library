@@ -105,8 +105,8 @@
 #define ENTROPY_SAFETY_FACTOR		64
 
 /*
- * These cutoffs are configured using an entropy estimate of 1/osr under an alpha=2^(-25)
- * for a window size of 16384. The other health tests use alpha=2^-30, but operate
+ * These cutoffs are configured using an entropy estimate of 1/osr under an alpha=2^(-22)
+ * for a window size of 131072. The other health tests use alpha=2^-30, but operate
  * on much smaller window sizes. This larger selection of alpha makes the behavior
  * per-lag-window similar to the APT test.
  *
@@ -124,8 +124,8 @@
  *
  * We have to iteratively look for an appropriate value for the cutoff r.
  */
-static const unsigned int jent_lag_global_cutoff_lookup[20] = {8473, 11807, 13179, 13919, 14380, 14694, 14921, 15093, 15228, 15336, 15424, 15498, 15561, 15615, 15661, 15702, 15737, 15769, 15798, 15823};
-static const unsigned int jent_lag_local_cutoff_lookup[20] = {38, 75, 111, 146, 181, 215, 249, 283, 317, 351, 385, 418, 451, 485, 518, 551, 583, 616, 649, 682};
+static const unsigned int jent_lag_global_cutoff_lookup[20] = {66443, 93504, 104761, 110875, 114707, 117330, 119237, 120686, 121823, 122739, 123493, 124124, 124660, 125120, 125520, 125871, 126181, 126457, 126704, 126926};
+static const unsigned int jent_lag_local_cutoff_lookup[20] = {38, 75, 111, 146, 181, 215, 250, 284, 318, 351, 385, 419, 452, 485, 518, 551, 584, 617, 650, 683};
 
 /* The entropy pool */
 struct rand_data
@@ -159,8 +159,8 @@ struct rand_data
 	unsigned int lag_prediction_success_run; /* The size of the current run of successes. Compared to the local cutoff. */
 	unsigned int lag_best_predictor; /* The currently selected predictor lag (-1). */
 	unsigned int lag_observations; /* The total number of collected observations since the health test was last reset. */
-#define JENT_LAG_WINDOW_SIZE 16384 /* This is the size of the window used by the predictor. The predictor is reset between windows. */
-#define JENT_LAG_HISTORY_SIZE 128 /*The amount of history to base predictions on. This must be a power of 2.*/
+#define JENT_LAG_WINDOW_SIZE (1U<<17) /* This is the size of the window used by the predictor. The predictor is reset between windows. */
+#define JENT_LAG_HISTORY_SIZE 8 /*The amount of history to base predictions on. This must be a power of 2.*/
 #define JENT_LAG_MASK (JENT_LAG_HISTORY_SIZE - 1)
 	uint64_t lag_delta_history[JENT_LAG_HISTORY_SIZE]; /*The delta history for the lag predictor. */
 	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE]; /* The scoreboard that tracks how successful each predictor lag is. */
