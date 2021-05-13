@@ -81,7 +81,6 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
-
 /**
  * jent_version() - Return machine-usable version number of jent library
  *
@@ -140,7 +139,6 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		ec->apt_base_set = 1;
 		return;
 	}
-
 
 	if (current_delta == ec->apt_base) {
 		ec->apt_count++;
@@ -1316,7 +1314,6 @@ static uint64_t jent_gcd64(uint64_t a, uint64_t b) {
   return a;
 }
 
-
 static int jent_time_entropy_init(unsigned int enable_notime)
 {
 	uint64_t delta_sum = 0;
@@ -1447,7 +1444,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		/* test whether we have an increasing timer */
 		if (!(time2 > time))
 			time_backwards++;
-
 
 		/* Watch for common adjacent GCD values */
 		delta_gcd[i-CLEARCACHE] = jent_gcd64(delta, old_delta);
