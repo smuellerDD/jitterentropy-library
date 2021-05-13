@@ -142,7 +142,6 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		return;
 	}
 
-
 	if (current_delta == ec->apt_base) {
 		ec->apt_count++;
 
@@ -1277,7 +1276,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	int count_stuck = 0;
 	int ret = 0;
 	struct rand_data ec;
-
 
 	memset(&ec, 0, sizeof(ec));
 
