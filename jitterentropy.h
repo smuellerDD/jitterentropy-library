@@ -105,27 +105,27 @@
 #define ENTROPY_SAFETY_FACTOR		64
 
 /*
- * These cutoffs are configured using an entropy estimate of 1/osr under an alpha=2^(-24) 
- * for a window size of 50000. The other health tests use alpha=2^-30, but operate
- * on much smaller block sizes, so this larger selection of alpha makes the behavior
- * per 50,000 sample blocks similar.
+ * These cutoffs are configured using an entropy estimate of 1/osr under an alpha=2^(-25)
+ * for a window size of 16384. The other health tests use alpha=2^-30, but operate
+ * on much smaller window sizes. This larger selection of alpha makes the behavior
+ * per-lag-window similar to the APT test.
  *
- * The global cutoffs are calculated using the 
+ * The global cutoffs are calculated using the
  * InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
  *
- * The local cutoffs are somewhat more complicated. For background, see Feller's 
- * _Introduction to Probability Theory and It's Applications_ Vol. 1, Chapter 13, section 7 
+ * The local cutoffs are somewhat more complicated. For background, see Feller's
+ * _Introduction to Probability Theory and It's Applications_ Vol. 1, Chapter 13, section 7
  * (in particular see equation 7.11, where x is a root of the denominator of equation 7.6).
  * We'll proceed using the notation of SP 800-90B Section 6.3.8 (which is developed in
  * Kelsey-McKay-Turan paper "Predictive Models for Min-entropy Estimation".)
- * Here, we set p=2^(-1/osr), seeking probability of less than (1-alpha) 
- * (that is, there is a very very large probability that there is _no_ run of 
- * length r).
- * 
+ * Here, we set p=2^(-1/osr), seeking a run of successful guesses (r) with probability of
+ * less than (1-alpha). That is, it is very very likely (probability 1-alpha) that there is
+ * _no_ run of length r in a block of size JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE.
+ *
  * We have to iteratively look for an appropriate value for the cutoff r.
  */
-static const unsigned int jent_lag_global_cutoff_lookup[20] = {25527, 35801, 40059, 42367, 43810, 44796, 45512, 46055, 46481, 46824, 47105, 47341, 47541, 47712, 47861, 47992, 48107, 48209, 48301, 48383};
-static const unsigned int jent_lag_local_cutoff_lookup[20] = {39, 76, 112, 148, 184, 219, 254, 289, 323, 357, 392, 426, 460, 494, 527, 561, 595, 628, 661, 695};
+static const unsigned int jent_lag_global_cutoff_lookup[20] = {8473, 11807, 13179, 13919, 14380, 14694, 14921, 15093, 15228, 15336, 15424, 15498, 15561, 15615, 15661, 15702, 15737, 15769, 15798, 15823};
+static const unsigned int jent_lag_local_cutoff_lookup[20] = {38, 75, 111, 146, 181, 215, 249, 283, 317, 351, 385, 418, 451, 485, 518, 551, 583, 616, 649, 682};
 
 /* The entropy pool */
 struct rand_data
@@ -159,7 +159,7 @@ struct rand_data
 	unsigned int lag_prediction_success_run; /* The size of the current run of successes. Compared to the local cutoff. */
 	unsigned int lag_best_predictor; /* The currently selected predictor lag (-1). */
 	unsigned int lag_observations; /* The total number of collected observations since the health test was last reset. */
-#define JENT_LAG_WINDOW_SIZE 50000 /* This is the size of the window used by the predictor. The predictor is reset between windows. */
+#define JENT_LAG_WINDOW_SIZE 16384 /* This is the size of the window used by the predictor. The predictor is reset between windows. */
 #define JENT_LAG_HISTORY_SIZE 128 /*The amount of history to base predictions on. This must be a power of 2.*/
 #define JENT_LAG_MASK (JENT_LAG_HISTORY_SIZE - 1)
 	uint64_t lag_delta_history[JENT_LAG_HISTORY_SIZE]; /*The delta history for the lag predictor. */
