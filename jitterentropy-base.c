@@ -1299,7 +1299,6 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 		osr = JENT_MIN_OSR;
 	entropy_collector->osr = osr;
 
-
 	/* Establish the lag global and local cutoffs based on the presumed entropy rate of 1/osr. */
 	if(osr >= ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
 		entropy_collector->lag_global_cutoff = jent_lag_global_cutoff_lookup[ARRAY_SIZE(jent_lag_global_cutoff_lookup)-1];
