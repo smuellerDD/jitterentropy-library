@@ -184,6 +184,19 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 		jent_lag_reset(ec);
 }
 
+/**
+ * Return a prior delta value using the lag test's history.
+ *
+ * @ec [in] Reference to entropy collector
+ * @back [in] The number of elements back in history (0 is the prior element)
+ *
+ * @return
+ * 	The prior delta value (if there was a prior value) or 0 otherwise.
+ */
+static uint64_t jent_last_delta(struct rand_data *ec, unsigned int back)
+{
+	return ec->lag_delta_history[(ec->lag_observations - back - 1)&JENT_LAG_MASK];
+}
 
 /***************************************************************************
  * Adaptive Proportion Test
@@ -327,11 +340,12 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
  */
 static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
-	uint64_t delta2 = jent_delta(ec->last_delta, current_delta);
-	uint64_t delta3 = jent_delta(ec->last_delta2, delta2);
-
-	ec->last_delta = current_delta;
-	ec->last_delta2 = delta2;
+	/* Note that delta2_n = delta_n - delta_{n-1} */
+	uint64_t delta2 = jent_delta(jent_last_delta(ec, 0U), current_delta);
+	/* Note that delta3_n = delta2_n - delta2_{n-1}
+	 *                    = delta2_n - (delta_{n-1} - delta_{n-2})
+	 */
+	uint64_t delta3 = jent_delta(jent_delta(jent_last_delta(ec, 1U), jent_last_delta(ec, 0U)), delta2);
 
 	/*
 	 * Insert the result of the comparison of two back-to-back time
@@ -1386,28 +1400,27 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * following sanity checks verify that we have a high-resolution
 	 * timer.
 	 */
+	/* To initialize the prior time. */
+	jent_measure_jitter(&ec, 0, NULL);
 
 #define CLEARCACHE 100
 	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
-		uint64_t time = 0;
-		uint64_t time2 = 0;
+		uint64_t prior_time = 0;
+		uint64_t current_time = 0;
 		uint64_t delta = 0;
 		unsigned int lowdelta = 0;
 		unsigned int stuck;
 
 		/* Invoke core entropy collection logic */
-		jent_get_nstime_internal(&ec, &time);
-		ec.prev_time = time;
-		jent_memaccess(&ec, 0);
-		jent_hash_time(&ec, time, 0, 0);
-		jent_get_nstime_internal(&ec, &time2);
+		stuck = jent_measure_jitter(&ec, 0, &delta);
+		prior_time = ec.prev_time - delta;
+		current_time = ec.prev_time;
 
 		/* test whether timer works */
-		if (!time || !time2) {
+		if (!current_time || !current_time) {
 			ret = ENOTIME;
 			goto out;
 		}
-		delta = jent_delta(time, time2);
 		/*
 		 * test whether timer is fine grained enough to provide
 		 * delta even when called shortly after each other -- this
@@ -1417,8 +1430,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 			ret = ECOARSETIME;
 			goto out;
 		}
-
-		stuck = jent_stuck(&ec, delta);
 
 		/*
 		 * up to here we did not modify any variable that will be
@@ -1461,11 +1472,11 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		}
 
 		/* test whether we have an increasing timer */
-		if (!(time2 > time))
+		if (!(current_time > prior_time))
 			time_backwards++;
 
 		/* use 32 bit value to ensure compilation on 32 bit arches */
-		lowdelta = (unsigned int)(time2 - time);
+		lowdelta = (unsigned int)(current_time - prior_time);
 		if (!(lowdelta % 100))
 			count_mod++;
 

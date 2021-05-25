@@ -137,8 +137,6 @@ struct rand_data
 	uint8_t data[SHA3_256_SIZE_DIGEST]; /* SENSITIVE Actual random number */
 	uint64_t prev_time;		/* SENSITIVE Previous time stamp */
 #define DATA_SIZE_BITS (SHA3_256_SIZE_DIGEST_BITS)
-	uint64_t last_delta;		/* SENSITIVE stuck test */
-	uint64_t last_delta2;		/* SENSITIVE stuck test */
 	unsigned int osr;		/* Oversampling rate */
 #define JENT_MEMORY_BLOCKS 64
 #define JENT_MEMORY_BLOCKSIZE 32
@@ -160,7 +158,7 @@ struct rand_data
 	unsigned int lag_best_predictor; /* The currently selected predictor lag (-1). */
 	unsigned int lag_observations; /* The total number of collected observations since the health test was last reset. */
 #define JENT_LAG_WINDOW_SIZE (1U<<17) /* This is the size of the window used by the predictor. The predictor is reset between windows. */
-#define JENT_LAG_HISTORY_SIZE 8 /*The amount of history to base predictions on. This must be a power of 2.*/
+#define JENT_LAG_HISTORY_SIZE 8 /*The amount of history to base predictions on. This must be a power of 2. Must be 4 or greater.*/
 #define JENT_LAG_MASK (JENT_LAG_HISTORY_SIZE - 1)
 	uint64_t lag_delta_history[JENT_LAG_HISTORY_SIZE]; /*The delta history for the lag predictor. */
 	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE]; /* The scoreboard that tracks how successful each predictor lag is. */
