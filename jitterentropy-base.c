@@ -1304,14 +1304,16 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
 		uint64_t prior_time = 0;
 		uint64_t current_time = 0;
+		uint64_t iteration_time = 0;
 		uint64_t delta = 0;
 		unsigned int lowdelta = 0;
 		unsigned int stuck;
 
 		/* Invoke core entropy collection logic */
+		jent_get_nstime_internal(&ec, &prior_time);
 		stuck = jent_measure_jitter(&ec, 0, &delta);
-		prior_time = ec.prev_time - delta;
-		current_time = ec.prev_time;
+		jent_get_nstime_internal(&ec, &current_time);
+		iteration_time = current_time - prior_time;
 
 		/* test whether timer works */
 		if (!prior_time || !current_time) {
@@ -1323,7 +1325,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		 * delta even when called shortly after each other -- this
 		 * implies that we also have a high resolution timer
 		 */
-		if (!delta) {
+		if (!delta || !iteration_time) {
 			ret = ECOARSETIME;
 			goto out;
 		}
@@ -1340,31 +1342,18 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 
 		if (stuck)
 			count_stuck++;
-		else {
+		else 
 			nonstuck++;
-
-			/*
-			 * Ensure that the APT succeeded.
-			 *
-			 * With the check below that count_stuck must be less
-			 * than 10% of the overall generated raw entropy values
-			 * it is guaranteed that the APT is invoked at
-			 * floor((JENT_POWERUP_TESTLOOPCOUNT * 0.9) / 64) == 14
-			 * times.
-			 */
-			if ((nonstuck % JENT_APT_WINDOW_SIZE) == 0) {
-				jent_apt_reset(&ec,
-					       delta & JENT_APT_WORD_MASK);
-				if (jent_health_failure(&ec)) {
-					ret = EHEALTH;
-					goto out;
-				}
-			}
-		}
 
 		/* Validate RCT */
 		if (jent_rct_failure(&ec)) {
 			ret = ERCT;
+			goto out;
+		}
+
+		/* Ensure that the other health tests succeeded. */
+		if (jent_health_failure(&ec)) {
+			ret = EHEALTH;
 			goto out;
 		}
 
@@ -1387,6 +1376,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 			delta_sum += (delta - old_delta);
 		else
 			delta_sum += (old_delta - delta);
+
 		old_delta = delta;
 	}
 
