@@ -1348,6 +1348,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	if (jent_fips_enabled())
 		ec.fips_enabled = 1;
 
+	/* Required by jent_measure_jitter */
+	jent_common_timer_gcd = 1;
+
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
 	 * loop counts may show some slight skew and we produce
@@ -1589,11 +1592,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 			 */
 			jent_common_timer_gcd = most_common_gcd;
 		}
-	} else {
-			/*
-			 * No dominant GCD was found.
-			 */
-			jent_common_timer_gcd = 1;
 	}
 
 	/*
