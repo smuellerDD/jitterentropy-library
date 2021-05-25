@@ -1259,7 +1259,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	int i;
 	uint64_t delta_sum = 0;
 	uint64_t old_delta = 0;
-	unsigned int nonstuck = 0;
 	int time_backwards = 0;
 	int count_mod = 0;
 	int count_stuck = 0;
@@ -1342,8 +1341,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 
 		if (stuck)
 			count_stuck++;
-		else 
-			nonstuck++;
 
 		/* Validate RCT */
 		if (jent_rct_failure(&ec)) {
