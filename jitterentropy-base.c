@@ -58,7 +58,7 @@
 #define MINVERSION 0 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 2 /* API / ABI compatible, no functional changes, no
+#define PATCHLEVEL 3 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
 /***************************************************************************
@@ -1058,7 +1058,10 @@ static unsigned int jent_measure_jitter(struct rand_data *ec,
  */
 static void jent_random_data(struct rand_data *ec)
 {
-	unsigned int k = 0;
+	unsigned int k = 0, safety_factor = ENTROPY_SAFETY_FACTOR;
+
+	if (!ec->fips_enabled)
+		safety_factor = 0;
 
 	/* priming of the ->prev_time value */
 	jent_measure_jitter(ec, 0, NULL);
@@ -1072,7 +1075,7 @@ static void jent_random_data(struct rand_data *ec)
 		 * We multiply the loop value with ->osr to obtain the
 		 * oversampling rate requested by the caller
 		 */
-		if (++k >= ((DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR) * ec->osr))
+		if (++k >= ((DATA_SIZE_BITS + safety_factor) * ec->osr))
 			break;
 	}
 }
