@@ -19,6 +19,8 @@ jitterentropy \- CPU Jitter Random Number Generator
 .nf
 .B #include <jitterentropy.h>
 .sp
+.BI "int jent_entropy_switch_notime_impl(struct jent_notime_thread *" new_thread );
+.sp
 .BI "int jent_entropy_init(" void ");
 .sp
 .BI "struct rand_data *jent_entropy_collector_alloc(unsigned int " osr ",
@@ -54,6 +56,16 @@ on a centrally maintained source of entropy like
 .IR /dev/random
 or
 .IR /dev/urandom .
+.LP
+.BR jent_entropy_switch_notime_impl ()
+allows the caller to set a thread handler that is used by the
+Jitter RNG if it operates in the timer-less mode. See
+.IR jitterentropy.h
+for a documentation of
+.IR new_thread .
+This function must be called before
+.BR jent_entropy_init ()
+as after this call, the change of the thread handler is denied.
 .LP
 .BR jent_entropy_init ()
 initializes the CPU Jitter Random Number Generator. The function

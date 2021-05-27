@@ -104,6 +104,50 @@
  */
 #define ENTROPY_SAFETY_FACTOR		64
 
+/**
+ * Function pointer data structure to register an external thread handler
+ * used for the timer-less mode of the Jitter RNG.
+ *
+ * The external caller provides these function pointers to handle the
+ * management of the timer thread that is spawned by the Jitter RNG.
+ *
+ * @var jent_notime_init This function is intended to initialze the threading
+ *	support. All data that is required by the threading code must be
+ *	held in the data structure @param ctx. The Jitter RNG maintains the
+ *	data structure and uses it for every invocation of the following calls.
+ *
+ * @var jent_notime_fini This function shall terminate the threading support.
+ *	The function must dispose of all memory and resources used for the
+ *	threading operation. It must also dispose of the @param ctx memory.
+ *
+ * @var jent_notime_start This function is called when the Jitter RNG wants
+ *	to start a thread. Besides providing a pointer to the @param ctx
+ *	allocated during initialization time, the Jitter RNG provides a
+ *	pointer to the function the thread shall execute and the argument
+ *	the function shall be invoked with. These two parameters have the
+ *	same purpose as the trailing two parameters of pthread_create(3).
+ *
+ * @var jent_notime_stop This function is invoked by the Jitter RNG when the
+ *	thread should be stopped. Note, the Jitter RNG intends to start/stop
+ *	the thread frequently.
+ *
+ * An example implementation is found in the Jitter RNG itself with its
+ * default thread handler of jent_notime_thread_builtin.
+ *
+ * If the caller wants to register its own thread handler, it must be done
+ * with the API call jent_entropy_switch_notime_impl as the first
+ * call to interact with the Jitter RNG, even before jent_entropy_init.
+ * After jent_entropy_init is called, changing of the threading implementation
+ * is not allowed.
+ */
+struct jent_notime_thread {
+	int (*jent_notime_init)(void **ctx);
+	void (*jent_notime_fini)(void *ctx);
+	int (*jent_notime_start)(void *ctx,
+				 void *(*start_routine) (void *), void *arg);
+	void (*jent_notime_stop)(void *ctx);
+};
+
 /* The entropy pool */
 struct rand_data
 {
@@ -151,8 +195,7 @@ struct rand_data
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
 	volatile uint64_t notime_timer;		/* high-res timer mock-up */
 	uint64_t notime_prev_timer;		/* previous timer value */
-	pthread_attr_t notime_pthread_attr;	/* pthreads library */
-	pthread_t notime_thread_id;		/* pthreads thread ID */
+	void *notime_thread_ctx;		/* register thread data */
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 };
 
@@ -213,6 +256,10 @@ int jent_entropy_init(void);
 /* return version number of core library */
 JENT_PRIVATE_STATIC
 unsigned int jent_version(void);
+
+/* Set a different thread handling logic for the notimer support */
+JENT_PRIVATE_STATIC
+int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread);
 
 /* -- END of Main interface functions -- */
 

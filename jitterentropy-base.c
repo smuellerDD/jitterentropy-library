@@ -676,6 +676,69 @@ static int sha3_tester(void)
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
 /***************************************************************************
+ * Thread handler
+ ***************************************************************************/
+
+struct jent_notime_ctx {
+	pthread_attr_t notime_pthread_attr;	/* pthreads library */
+	pthread_t notime_thread_id;		/* pthreads thread ID */
+};
+
+static int jent_notime_init(void **ctx)
+{
+	struct jent_notime_ctx *thread_ctx;
+
+	thread_ctx = calloc(1, sizeof(struct jent_notime_ctx));
+	if (!thread_ctx)
+		return -errno;
+
+	*ctx = thread_ctx;
+
+	return 0;
+}
+
+static void jent_notime_fini(void *ctx)
+{
+	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
+
+	if (thread_ctx)
+		free(thread_ctx);
+}
+
+static int jent_notime_start(void *ctx,
+			     void *(*start_routine) (void *), void *arg)
+{
+	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
+	int ret;
+
+	if (!thread_ctx)
+		return -EINVAL;
+
+	ret = -pthread_attr_init(&thread_ctx->notime_pthread_attr);
+	if (ret)
+		return ret;
+
+	return -pthread_create(&thread_ctx->notime_thread_id,
+			       &thread_ctx->notime_pthread_attr,
+			       start_routine, arg);
+}
+
+static void jent_notime_stop(void *ctx)
+{
+	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
+
+	pthread_join(thread_ctx->notime_thread_id, NULL);
+	pthread_attr_destroy(&thread_ctx->notime_pthread_attr);
+}
+
+static struct jent_notime_thread jent_notime_thread_builtin = {
+	.jent_notime_init  = jent_notime_init,
+	.jent_notime_fini  = jent_notime_fini,
+	.jent_notime_start = jent_notime_start,
+	.jent_notime_stop  = jent_notime_stop
+};
+
+/***************************************************************************
  * Timer-less timer replacement
  *
  * If there is no high-resolution hardware timer available, we create one
@@ -684,6 +747,9 @@ static int sha3_tester(void)
  ***************************************************************************/
 
 static int jent_force_internal_timer = 0;
+static int jent_notime_switch_blocked = 0;
+
+static struct jent_notime_thread *notime_thread = &jent_notime_thread_builtin;
 
 /**
  * Timer-replacement loop
@@ -717,32 +783,24 @@ static void *jent_notime_sample_timer(void *arg)
  */
 static inline int jent_notime_settick(struct rand_data *ec)
 {
-	int ret;
-
-	if (!ec->enable_notime)
+	if (!ec->enable_notime || !notime_thread)
 		return 0;
-
-	ret = -pthread_attr_init(&ec->notime_pthread_attr);
-	if (ret)
-		return ret;
 
 	ec->notime_interrupt = 0;
 	ec->notime_prev_timer = 0;
 	ec->notime_timer = 0;
 
-	return -pthread_create(&ec->notime_thread_id,
-			       &ec->notime_pthread_attr,
-			       jent_notime_sample_timer, ec);
+	return notime_thread->jent_notime_start(ec->notime_thread_ctx,
+					       jent_notime_sample_timer, ec);
 }
 
 static inline void jent_notime_unsettick(struct rand_data *ec)
 {
-	if (!ec->enable_notime)
+	if (!ec->enable_notime || !notime_thread)
 		return;
 
 	ec->notime_interrupt = 1;
-	pthread_join(ec->notime_thread_id, NULL);
-	pthread_attr_destroy(&ec->notime_pthread_attr);
+	notime_thread->jent_notime_stop(ec->notime_thread_ctx);
 }
 
 static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
@@ -767,6 +825,19 @@ static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 	}
 }
 
+static inline int jent_notime_enable_thread(struct rand_data *ec)
+{
+	if (notime_thread)
+		return notime_thread->jent_notime_init(&ec->notime_thread_ctx);
+	return 0;
+}
+
+static inline void jent_notime_disable_thread(struct rand_data *ec)
+{
+	if (notime_thread)
+		notime_thread->jent_notime_fini(ec->notime_thread_ctx);
+}
+
 static int jent_time_entropy_init(unsigned int enable_notime);
 static int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 {
@@ -779,6 +850,14 @@ static int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 		ec->enable_notime = 1;
 	}
 
+	return jent_notime_enable_thread(ec);
+}
+
+static inline int jent_notime_switch(struct jent_notime_thread *new_thread)
+{
+	if (jent_notime_switch_blocked)
+		return -EAGAIN;
+	notime_thread = new_thread;
 	return 0;
 }
 
@@ -789,6 +868,20 @@ static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 	(void)ec;
 	jent_get_nstime(out);
 }
+
+static inline int jent_notime_enable_thread(struct rand_data *ec)
+{
+	(void)ec;
+	(void)flags;
+	return 0;
+}
+
+static inline void jent_notime_disable_thread(struct rand_data *ec)
+{
+	(void)ec;
+	return 0;
+}
+
 
 static inline int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 {
@@ -808,6 +901,12 @@ static inline int jent_notime_settick(struct rand_data *ec)
 }
 
 static inline void jent_notime_unsettick(struct rand_data *ec) { (void)ec; }
+
+static inline int jent_notime_switch(struct jent_notime_thread *new_thread)
+{
+	(void)new_thread;
+	return -EOPNOTSUPP;
+}
 
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
@@ -1246,6 +1345,7 @@ JENT_PRIVATE_STATIC
 void jent_entropy_collector_free(struct rand_data *entropy_collector)
 {
 	if (entropy_collector != NULL) {
+		jent_notime_disable_thread(entropy_collector);
 		if (entropy_collector->mem != NULL) {
 			jent_zfree(entropy_collector->mem, JENT_MEMORY_SIZE);
 			entropy_collector->mem = NULL;
@@ -1270,6 +1370,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 
 	if (enable_notime) {
 		ec.enable_notime = 1;
+		ret = jent_notime_enable_thread(&ec);
+		if (ret)
+			return ret;
 		jent_notime_settick(&ec);
 	}
 
@@ -1434,6 +1537,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 out:
 	if (enable_notime)
 		jent_notime_unsettick(&ec);
+	jent_notime_disable_thread(&ec);
 
 	return ret;
 }
@@ -1442,6 +1546,8 @@ JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
 {
 	int ret;
+
+	jent_notime_switch_blocked = 1;
 
 	if (sha3_tester())
 		return EHASH;
@@ -1458,4 +1564,10 @@ int jent_entropy_init(void)
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	return ret;
+}
+
+JENT_PRIVATE_STATIC
+int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread)
+{
+	return jent_notime_switch(new_thread);
 }
