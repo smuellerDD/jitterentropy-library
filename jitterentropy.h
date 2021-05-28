@@ -234,7 +234,7 @@ struct rand_data
 #ifdef JENT_PRIVATE_COMPILE
 # define JENT_PRIVATE_STATIC static
 #else /* JENT_PRIVATE_COMPILE */
-# define JENT_PRIVATE_STATIC
+# define JENT_PRIVATE_STATIC __attribute__((visibility("default")))
 #endif
 
 /* Number of low bits of the time value that we want to consider */
