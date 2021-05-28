@@ -679,12 +679,8 @@ static int sha3_tester(void)
  * Thread handler
  ***************************************************************************/
 
-struct jent_notime_ctx {
-	pthread_attr_t notime_pthread_attr;	/* pthreads library */
-	pthread_t notime_thread_id;		/* pthreads thread ID */
-};
-
-static int jent_notime_init(void **ctx)
+JENT_PRIVATE_STATIC
+int jent_notime_init(void **ctx)
 {
 	struct jent_notime_ctx *thread_ctx;
 
@@ -697,7 +693,8 @@ static int jent_notime_init(void **ctx)
 	return 0;
 }
 
-static void jent_notime_fini(void *ctx)
+JENT_PRIVATE_STATIC
+void jent_notime_fini(void *ctx)
 {
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
 
