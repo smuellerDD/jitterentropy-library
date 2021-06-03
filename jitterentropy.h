@@ -115,7 +115,7 @@
  * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that renders the
  * test unable to fail)
  */
-static const unsigned int jent_apt_cutoff_lookup[14]={324, 421, 458, 476, 487, 493, 498, 501, 504, 506, 507, 508, 509, 510};
+static const unsigned int jent_apt_cutoff_lookup[15]={324, 421, 458, 476, 487, 493, 498, 501, 504, 506, 507, 508, 509, 510, 511};
 
 /* The entropy pool */
 struct rand_data
