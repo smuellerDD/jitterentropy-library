@@ -1382,6 +1382,10 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	if (jent_fips_enabled())
 		ec.fips_enabled = 1;
 
+	/* Setup the cutoff for the Lag test. */
+	ec.lag_global_cutoff = jent_lag_global_cutoff_lookup[JENT_MIN_OSR - 1];
+	ec.lag_local_cutoff = jent_lag_local_cutoff_lookup[JENT_MIN_OSR - 1];
+
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
 	 * loop counts may show some slight skew and we produce
