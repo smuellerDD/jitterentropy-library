@@ -1317,24 +1317,24 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		jent_notime_settick(&ec);
 	}
 
-	/* Required for RCT */
-	ec.osr = 1;
-	if (jent_fips_enabled())
-		ec.fips_enabled = 1;
+	/* Required for RCT. It is not clear what value should be chosen here. */
+	ec.osr = JENT_MIN_OSR;
+
+	/* If the start-up health tests (including the APT and RCT) are not run, then the entropy
+	 * source is not 90B compliant. We could test if fips_enabled should be set using the
+	 * jent_fips_enabled() function, but this can be overridden using the JENT_FORCE_FIPS
+	 * flag, which isn't passed in yet. It is better to run the tests on the small amount
+	 * of data that we have, which should not fail unless things are really bad.
+	 */
+	ec.fips_enabled = 1;
 
 	/* Required by jent_measure_jitter */
 	jent_common_timer_gcd = 1;
 
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
-	 * loop counts may show some slight skew and we produce
+	 * loop counts may show some slight skew leading to
 	 * false positives.
-	 *
-	 * Moreover, only old systems show potentially problematic
-	 * jitter entropy that could potentially be caught here. But
-	 * the RNG is intended for hardware that is available or widely
-	 * used, but not old systems that are long out of favor. Thus,
-	 * no statistical tests.
 	 */
 
 	/*
@@ -1343,9 +1343,6 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * following sanity checks verify that we have a high-resolution
 	 * timer.
 	 */
-
-	/* To initialize the prior time. */
-	jent_measure_jitter(&ec, 0, NULL);
 
 #define CLEARCACHE 100
 	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
@@ -1432,10 +1429,12 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	/* Now look at the stored delta values in more detail (
 	 * without perturbing the main init loop timing). 
 	 */
+	/* First initilize the analysis state. */
 	if(delta_history[0] % 100 == 0) count_mod=1;
 	else count_mod=0;
 	running_gcd = delta_history[0];
 
+	/* Now perform the analysis on the accumulated delta data. */
 	for (i = 1; JENT_POWERUP_TESTLOOPCOUNT > i; i++) {
 		if (delta_history[i] % 100 == 0)
 			count_mod++;
@@ -1452,11 +1451,13 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 			delta_sum +=  delta_history[i-1] - delta_history[i];
 
 		/*
+		 * This calculates the gcd of all the delta values.
+		 * that is gcd(delta_1, delta_2, ..., delta_JENT_POWERUP_TESTLOOPCOUNT)
 		 * Some timers increment by a fixed (non-1) amount each step.
 		 * This code checks for such increments, and allows the library
 		 * to output the number of such changes have occurred.
 		 */
-		running_gcd = jent_gcd64(running_gcd, delta_history[i]);
+		running_gcd = jent_gcd64(delta_history[i], running_gcd);
 	}
 
 	/*
