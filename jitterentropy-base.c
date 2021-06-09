@@ -1192,8 +1192,10 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	 * and the user requests it not to be used, do not allocate
 	 * the Jitter RNG instance.
 	 */
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	if (jent_force_internal_timer && (flags & JENT_DISABLE_INTERNAL_TIMER))
 		return NULL;
+#endif
 
 	entropy_collector = jent_zalloc(sizeof(struct rand_data));
 	if (NULL == entropy_collector)
