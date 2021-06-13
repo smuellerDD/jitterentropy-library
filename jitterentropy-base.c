@@ -1321,6 +1321,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 */
 	ec.mem = (unsigned char *)jent_zalloc(JENT_MEMORY_SIZE);
 	if(ec.mem == NULL) {
+		ret = EMEM;
 		goto out;
 	}
 	ec.memblocksize = JENT_MEMORY_BLOCKSIZE;
