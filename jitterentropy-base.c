@@ -115,6 +115,10 @@ unsigned int jent_version(void)
  * provided will be stored.
  ***************************************************************************/
 
+/*A macro for accessing the history. Index 0 is the last observed symbol
+ *index 1 is the symbol observed two inputs ago, etc. */
+#define JENT_LAG_HISTORY(EC,LOC) (EC)->lag_delta_history[((EC)->lag_observations - (LOC) - 1)&JENT_LAG_MASK]
+
 /**
  * Reset the lag counters
  *
@@ -148,7 +152,7 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 	}
 
 	/* The history is initialized. First make a guess and examine the results. */
-	prediction = ec->lag_delta_history[(ec->lag_observations - ec->lag_best_predictor - 1)&JENT_LAG_MASK];
+	prediction = JENT_LAG_HISTORY(ec, ec->lag_best_predictor);
 	if(prediction == current_delta) {
 		/* The prediction was correct. */
 		ec->lag_prediction_success_count++;
@@ -162,7 +166,7 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 
 	/* Now update the predictors using the current data. */
 	for(unsigned int i=0; i < JENT_LAG_HISTORY_SIZE; i++) {
-		if(ec->lag_delta_history[(ec->lag_observations - i - 1)&JENT_LAG_MASK] == current_delta) {
+		if(JENT_LAG_HISTORY(ec, i) == current_delta) {
 			/*The ith predictor (which guesses i+1 symbols in the past) successfully guessed.*/
 			ec->lag_scoreboard[i] ++;
 			//Keep track of the best predictor (tie goes to the shortest lag)
@@ -182,20 +186,6 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 	/* Do we now need a new window? */
 	if (ec->lag_observations >= JENT_LAG_WINDOW_SIZE)
 		jent_lag_reset(ec);
-}
-
-/**
- * Return a prior delta value using the lag test's history.
- *
- * @ec [in] Reference to entropy collector
- * @back [in] The number of elements back in history (0 is the prior element)
- *
- * @return
- * 	The prior delta value (if there was a prior value) or 0 otherwise.
- */
-static uint64_t jent_last_delta(struct rand_data *ec, unsigned int back)
-{
-	return ec->lag_delta_history[(ec->lag_observations - back - 1)&JENT_LAG_MASK];
 }
 
 /***************************************************************************
@@ -341,11 +331,11 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
 	/* Note that delta2_n = delta_n - delta_{n-1} */
-	uint64_t delta2 = jent_delta(jent_last_delta(ec, 0U), current_delta);
+	uint64_t delta2 = jent_delta(JENT_LAG_HISTORY(ec, 0), current_delta);
 	/* Note that delta3_n = delta2_n - delta2_{n-1}
 	 *                    = delta2_n - (delta_{n-1} - delta_{n-2})
 	 */
-	uint64_t delta3 = jent_delta(jent_delta(jent_last_delta(ec, 1U), jent_last_delta(ec, 0U)), delta2);
+	uint64_t delta3 = jent_delta(jent_delta(JENT_LAG_HISTORY(ec, 1), JENT_LAG_HISTORY(ec, 0)), delta2);
 
 	/*
 	 * Insert the result of the comparison of two back-to-back time
