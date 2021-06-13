@@ -58,7 +58,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	}
 
 	ret = jent_entropy_init();
-	if(!ret) {
+	if(ret) {
 		printf("The initialization failed with error code %d\n", ret);
 		goto out;
 	}
