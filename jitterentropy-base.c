@@ -143,7 +143,12 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 	if (current_delta == ec->apt_base) {
 		ec->apt_count++;
 
-		if (ec->apt_count >= JENT_APT_CUTOFF)
+		/*
+		 * Note, ec->apt_count starts with zero. Hence we need to
+		 * subtract one from the cutoff value as calculated following
+		 * SP800-90B.
+		 */
+		if (ec->apt_count >= (JENT_APT_CUTOFF - 1))
 			ec->health_failure = 1;
 	}
 
@@ -201,7 +206,7 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		 * we need to subtract one from the cutoff value as calculated
 		 * following SP800-90B.
 		 */
-		if ((unsigned int)ec->rct_count >= (31 * ec->osr)) {
+		if ((unsigned int)ec->rct_count >= (30 * ec->osr)) {
 			ec->rct_count = -1;
 			ec->health_failure = 1;
 		}
