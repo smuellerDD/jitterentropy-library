@@ -109,13 +109,11 @@
  * In in the syntax of R, this is C = 2 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
  * (The original formula wasn't correct because the first symbol must necessarily
  * have been observed, so there is no chance of observing 0 of these symbols.)
- * This library doesn't count the first instance of the symbol, so we actually need
- * C = 1 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
- * For any value above 14, this yields the maximal allowable value of 511
+ * For any value above 14, this yields the maximal allowable value of 512
  * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that renders the
  * test unable to fail)
  */
-static const unsigned int jent_apt_cutoff_lookup[15]={324, 421, 458, 476, 487, 493, 498, 501, 504, 506, 507, 508, 509, 510, 511};
+static const unsigned int jent_apt_cutoff_lookup[15]={325, 422, 459, 477, 488, 494, 499, 502, 505, 507, 508, 509, 510, 511, 512};
 
 /* The entropy pool */
 struct rand_data
@@ -149,8 +147,8 @@ struct rand_data
 	unsigned int apt_cutoff; /* Calculated using a corrected version of the SP800-90B sec 4.4.2 formula*/
 #define JENT_APT_WINDOW_SIZE	512	/* Data window size */
 	/* LSB of time stamp to process */
-	unsigned int apt_observations;	/* Number of collected observations */
-	unsigned int apt_count;		/* APT counter */
+	unsigned int apt_observations;	/* Number of collected observations in the current window. */
+	unsigned int apt_count;		/* The number of  times the reference symbol been encounted in the window. */
 	uint64_t apt_base;		/* APT base reference */
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 

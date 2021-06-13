@@ -119,9 +119,6 @@ unsigned int jent_version(void)
  */
 static void jent_apt_reset(struct rand_data *ec)
 {
-	/* Reset APT counter */
-	ec->apt_count = 0; /*Note that the first observation is not counted, so the SP 800-90B cutoff is one higher than we want.*/
-	ec->apt_observations = 0;
 	/*When reset, we need to accept the _next_ value input as the new base.*/
 	ec->apt_base_set = 0;
 }
@@ -136,13 +133,19 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 {
 	/* Initialize the base reference */
 	if (!ec->apt_base_set) {
-		ec->apt_base = current_delta;
-		ec->apt_base_set = 1;
+		ec->apt_base = current_delta; //APT Step 1
+		ec->apt_base_set = 1; //APT Step 2
+		/* Reset APT counter */
+		ec->apt_count=1; // B = 1
+
+		/* Note that we've taken in the first symbol in the window. */
+		ec->apt_observations=1;
 		return;
 	}
 
+	//APT Step 3
 	if (current_delta == ec->apt_base) {
-		ec->apt_count++;
+		ec->apt_count++; // B = B+1
 
 		if (ec->apt_count >= ec->apt_cutoff)
 			ec->health_failure = 1;
@@ -152,7 +155,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 
 	/*We just processed one complete window, so the next symbol input will be the new apt_base.*/
 	if (ec->apt_observations >= JENT_APT_WINDOW_SIZE)
-		jent_apt_reset(ec);
+		jent_apt_reset(ec); //APT Step 4
 }
 
 /***************************************************************************
