@@ -124,7 +124,7 @@ do
 
 		for bits in $bits_list
 		do	
-			outfile=$RESULTS_DIR/${filepath}.minentropy_${mask}_${bits}bits.single.txt
+			outfile=${filepath}.minentropy_${mask}_${bits}bits.single.txt
 			inprocess_file=$outfile
 			if [ ! -f $outfile ]
 			then
@@ -135,7 +135,7 @@ do
 				echo "File $outfile already generated"
 			fi
 
-			outfile=$RESULTS_DIR/${filepath}.minentropy_${mask}_${bits}bits.var.txt
+			outfile=${filepath}.minentropy_${mask}_${bits}bits.var.txt
 			inprocess_file=$outfile
 			if [ ! -f $outfile ]
 			then
