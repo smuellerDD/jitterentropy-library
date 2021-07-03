@@ -210,6 +210,19 @@ static inline void jent_memset_secure(void *s, size_t n)
 	__asm__ __volatile__("" : : "r" (s) : "memory");
 }
 
+static inline long jent_ncpu(void)
+{
+	long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+
+	if (ncpu == -1)
+		return -errno;
+
+	if (ncpu == 0)
+		return -EFAULT;
+
+	return ncpu;
+}
+
 /* --- helpers needed in user space -- */
 
 static inline uint64_t rol64(uint64_t x, int n)

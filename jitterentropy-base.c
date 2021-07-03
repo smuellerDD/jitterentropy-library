@@ -688,6 +688,14 @@ JENT_PRIVATE_STATIC
 int jent_notime_init(void **ctx)
 {
 	struct jent_notime_ctx *thread_ctx;
+	long ncpu = jent_ncpu();
+
+	if (ncpu < 0)
+		return (int)ncpu;
+
+	/* We need at least two CPUs to enable the timer thread */
+	if (ncpu < 2)
+		return -EOPNOTSUPP;
 
 	thread_ctx = calloc(1, sizeof(struct jent_notime_ctx));
 	if (!thread_ctx)
@@ -850,9 +858,10 @@ static int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 			return EHEALTH;
 
 		ec->enable_notime = 1;
+		return jent_notime_enable_thread(ec);
 	}
 
-	return jent_notime_enable_thread(ec);
+	return 0;
 }
 
 static inline int jent_notime_switch(struct jent_notime_thread *new_thread)

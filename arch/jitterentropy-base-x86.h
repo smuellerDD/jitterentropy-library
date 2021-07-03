@@ -97,6 +97,15 @@ static inline void jent_memset_secure(void *s, size_t n)
 	__asm__ __volatile__("" : : "r" (s) : "memory");
 }
 
+static inline long jent_ncpu(void)
+{
+	/*
+	 * TODO: return number of available CPUs -
+	 * this code disables timer thread as only one CPU is "detected".
+	 */
+	return 1;
+}
+
 /* --- helpers needed in user space -- */
 
 static inline uint64_t rol64(uint64_t x, int n)
