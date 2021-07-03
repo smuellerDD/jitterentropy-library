@@ -7,13 +7,13 @@
 ############################################################
 
 # point to the directory that contains the results from the entropy collection
-ENTROPYDATA_DIR="../results-measurements"
+ENTROPYDATA_DIR=${ENTROPYDATA_DIR:-"../results-measurements"}
 
 NONIID_DATA="jent-raw-noise-0001.data"
 IID_DATA="jent-conditioned.data"
 
 # this is where the resulting data and the entropy analysis will be stored
-RESULTS_DIR="../results-analysis-runtime"
+RESULTS_DIR=${RESULTS_DIR:-"../results-analysis-runtime"}
 
 # location of log file
 LOGFILE="$RESULTS_DIR/processdata.log"
@@ -23,7 +23,7 @@ EATOOL_NONIID="../../SP800-90B_EntropyAssessment/cpp/ea_non_iid"
 EATOOL_IID="../../SP800-90B_EntropyAssessment/cpp/ea_iid"
 
 # specify if you want to compile the extractlsb program in this script
-BUILD_EXTRACT="yes"
+BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
 
 # specify the list of significant bits and length that you want to analize. 
 # Indicate first the mask in hexa format and then the number of 
@@ -74,7 +74,7 @@ fi
 
 rm -f $RESULTS_DIR/*.txt $RESULTS_DIR/*.data  $RESULTS_DIR/*.log
 
-trap "make clean" 0 1 2 3 15
+trap "if [ "$BUILD_EXTRACT" = "yes" ]; then make clean; fi" 0 1 2 3 15
 
 
 if [ "$BUILD_EXTRACT" = "yes" ]

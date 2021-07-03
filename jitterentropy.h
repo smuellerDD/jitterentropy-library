@@ -161,8 +161,12 @@ struct rand_data
 	uint64_t last_delta;		/* SENSITIVE stuck test */
 	uint64_t last_delta2;		/* SENSITIVE stuck test */
 	unsigned int osr;		/* Oversampling rate */
-#define JENT_MEMORY_BLOCKS 64
-#define JENT_MEMORY_BLOCKSIZE 32
+#ifndef JENT_MEMORY_BLOCKS
+# define JENT_MEMORY_BLOCKS 64
+#endif
+#ifndef JENT_MEMORY_BLOCKSIZE
+# define JENT_MEMORY_BLOCKSIZE 32
+#endif
 #define JENT_MEMORY_ACCESSLOOPS 128
 #define JENT_MEMORY_SIZE (JENT_MEMORY_BLOCKS*JENT_MEMORY_BLOCKSIZE)
 	unsigned char *mem;		/* Memory access location with size of

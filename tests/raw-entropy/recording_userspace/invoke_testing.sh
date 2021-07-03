@@ -67,6 +67,6 @@ raw_entropy()
 }
 
 initialization
-lfsroutput
+#lfsroutput
 raw_entropy
 raw_entropy_restart
