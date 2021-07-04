@@ -50,6 +50,7 @@
  */
 
 #include "jitterentropy.h"
+#include "jitterentropy-gcd.h"
 
 #define MAJVERSION 3 /* API / ABI incompatible changes, functional changes that
 		      * require consumer to be updated (as long as this number
@@ -1144,7 +1145,8 @@ static unsigned int jent_measure_jitter(struct rand_data *ec,
 	 * invocation to measure the timing variations
 	 */
 	jent_get_nstime_internal(ec, &time);
-	current_delta = jent_delta(ec->prev_time, time);
+	current_delta = jent_delta(ec->prev_time, time) /
+						ec->jent_common_timer_gcd;
 	ec->prev_time = time;
 
 	/* Check whether we have a stuck measurement. */
@@ -1333,6 +1335,16 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
 		entropy_collector->fips_enabled = 1;
 
+	/* Was jent_entropy_init run (establishing the common GCD)? */
+	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {
+		/*
+		 * It was not. This should probably be an error, but this
+		 * behavior breaks the test code. Set the gcd to a value that
+		 * won't hurt anything.
+		 */
+		entropy_collector->jent_common_timer_gcd = 1;
+	}
+
 	/* Use timer-less noise source */
 	if (!(flags & JENT_DISABLE_INTERNAL_TIMER)) {
 		if (jent_notime_enable(entropy_collector, flags))
@@ -1369,16 +1381,15 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 
 static int jent_time_entropy_init(unsigned int enable_notime)
 {
-	uint64_t delta_sum = 0;
-	uint64_t old_delta = 0;
-	unsigned int nonstuck = 0;
-	int time_backwards = 0;
-	int count_mod = 0;
-	int count_stuck = 0;
-	int ret = 0;
 	struct rand_data ec;
+	uint64_t i, delta_sum = 0, old_delta = 0;
+	unsigned int nonstuck = 0;
+	int time_backwards = 0, count_stuck = 0, ret = 0;
 
 	memset(&ec, 0, sizeof(ec));
+
+	if (jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT))
+		return EMEM;
 
 	if (enable_notime) {
 		ec.enable_notime = 1;
@@ -1392,6 +1403,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	ec.osr = 1;
 	if (jent_fips_enabled())
 		ec.fips_enabled = 1;
+
+	/* Required by jent_measure_jitter */
+	ec.jent_common_timer_gcd = 1;
 
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
@@ -1413,11 +1427,8 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 */
 
 #define CLEARCACHE 100
-	for (int i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
-		uint64_t time = 0;
-		uint64_t time2 = 0;
-		uint64_t delta = 0;
-		unsigned int lowdelta = 0;
+	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
+		uint64_t time = 0, time2 = 0, delta = 0;
 		unsigned int stuck;
 
 		/* Invoke core entropy collection logic */
@@ -1452,8 +1463,10 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		 * etc. with the goal to clear it to get the worst case
 		 * measurements.
 		 */
-		if (CLEARCACHE > i)
+		if (CLEARCACHE > i) {
+			old_delta = delta;
 			continue;
+		}
 
 		if (stuck)
 			count_stuck++;
@@ -1489,10 +1502,8 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		if (!(time2 > time))
 			time_backwards++;
 
-		/* use 32 bit value to ensure compilation on 32 bit arches */
-		lowdelta = (unsigned int)(time2 - time);
-		if (!(lowdelta % 100))
-			count_mod++;
+		/* Watch for common adjacent GCD values */
+		jent_gcd_add_value(delta, old_delta, i - CLEARCACHE);
 
 		/*
 		 * ensure that we have a varying delta timer which is necessary
@@ -1529,15 +1540,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		goto out;
 	}
 
-	/*
-	 * Ensure that we have variations in the time stamp below 10 for at
-	 * least 10% of all checks -- on some platforms, the counter increments
-	 * in multiples of 100, but not always
-	 */
-	if (JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT) < count_mod) {
-		ret = ECOARSETIME;
+	ret = jent_gcd_analyze(JENT_POWERUP_TESTLOOPCOUNT);
+	if (ret)
 		goto out;
-	}
 
 	/*
 	 * If we have more than 90% stuck results, then this Jitter RNG is
@@ -1547,6 +1552,8 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		ret = ESTUCK;
 
 out:
+	jent_gcd_fini(JENT_POWERUP_TESTLOOPCOUNT);
+
 	if (enable_notime)
 		jent_notime_unsettick(&ec);
 	jent_notime_disable_thread(&ec);

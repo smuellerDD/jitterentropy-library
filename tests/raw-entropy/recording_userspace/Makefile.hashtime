@@ -19,13 +19,15 @@ else
   CFLAGS += -fstack-protector-all
 endif
 
+JENT_DIR := jitterentropy
+
 program_NAME := jitterentropy-hashtime
 #program_C_SRCS := $(wildcard *.c) 
 program_C_SRCS := jitterentropy-hashtime.c
 program_C_OBJS := ${program_C_SRCS:.c=.o}
 program_OBJS := $(program_C_OBJS)
 
-program_INCLUDE_DIRS :=
+program_INCLUDE_DIRS := $(JENT_DIR)
 program_LIBRARY_DIRS :=
 program_LIBRARIES := rt pthread
 

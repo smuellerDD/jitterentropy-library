@@ -35,8 +35,7 @@ LIBMINOR=$(shell cat jitterentropy-base.c | grep define | grep MINVERSION | awk 
 LIBPATCH=$(shell cat jitterentropy-base.c | grep define | grep PATCHLEVEL | awk '{print $$3}')
 LIBVERSION := $(LIBMAJOR).$(LIBMINOR).$(LIBPATCH)
 
-#C_SRCS := $(wildcard *.c) 
-C_SRCS := jitterentropy-base.c
+C_SRCS := $(wildcard *.c) 
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 

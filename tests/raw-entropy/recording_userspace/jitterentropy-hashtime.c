@@ -25,6 +25,24 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "jitterentropy-gcd.h"
+
+void jent_gcd_add_value(uint64_t delta, uint64_t old_delta, uint64_t idx)
+{
+	(void)delta;
+	(void)old_delta;
+	(void)idx;
+}
+
+int jent_gcd_analyze(size_t nelem) { (void)nelem; return 0; }
+int jent_gcd_init(size_t nelem) { (void)nelem; return 0; }
+void jent_gcd_fini(size_t nelem) { (void)nelem; }
+int jent_gcd_get(uint64_t *value)
+{
+	*value = 1;
+	return 0;
+}
+
 #include "jitterentropy-base.c"
 
 /***************************************************************************
@@ -58,7 +76,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	}
 
 	ret = jent_entropy_init();
-	if(!ret) {
+	if (ret) {
 		printf("The initialization failed with error code %d\n", ret);
 		goto out;
 	}
