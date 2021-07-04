@@ -19,12 +19,15 @@ else
   CFLAGS += -fstack-protector-all
 endif
 
+JENT_DIR := jitterentropy
+JENT_SRCS := $(wildcard $(JENT_DIR)/*.c)
+
 NAME := jitterentropy-lfsroutput
-C_SRCS := jitterentropy-base.c jitterentropy-lfsroutput.c
+C_SRCS := $(JENT_SRCS) jitterentropy-lfsroutput.c
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 
-INCLUDE_DIRS :=
+INCLUDE_DIRS := $(JENT_DIR)
 LIBRARY_DIRS :=
 LIBRARIES := rt pthread
 

@@ -201,6 +201,8 @@ struct rand_data
 	uint64_t notime_prev_timer;		/* previous timer value */
 	void *notime_thread_ctx;		/* register thread data */
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
+	uint64_t jent_common_timer_gcd;	/* Common divisor for all time deltas */
 };
 
 /* Flags that can be used to initialize the RNG */
@@ -304,6 +306,7 @@ static inline void jent_notime_fini(void *ctx) { (void)ctx; }
 #define EHEALTH		9 /* Health test failed during initialization */
 #define ERCT		10 /* RCT failed during initialization */
 #define EHASH		11 /* Hash self test failed */
+#define EMEM		12 /* Can't allocate memory for initialization */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */
 

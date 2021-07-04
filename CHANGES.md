@@ -2,6 +2,13 @@
  * Add link call to pthreads library as suggested by Mikhail Novosyolov
  * Add ENTROPY_SAFETY_FACTOR to apply consideration of asymptotically reaching
    full entropy following SP800-90C suggested by Joshua Hill
+ * Add test for finiding more entropy by changing the memory buffer size
+   used for the memory access loop
+ * Increase the memory buffer size to 512 kBytes per default based on
+   measurements on systems with low entropy.
+ * Add jent_ncpu() detecting the number of existing CPUs. Only when more than
+   one CPU is in the system, the internal timer thread is started.
+ * add GCD testing and analysis
 
 3.0.2
  * Small fixes suggested by Joshua Hill
