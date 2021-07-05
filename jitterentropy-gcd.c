@@ -1,4 +1,5 @@
 /*
+ * Copyright (C) 2021, Joshua E. Hill <josh@keypair.us>
  * Copyright (C) 2021, Stephan Mueller <smueller@chronox.de>
  *
  * License: see LICENSE file in root directory
@@ -19,12 +20,11 @@
 
 #include "jitterentropy.h"
 #include "jitterentropy-gcd.h"
-#include "qsort.h"
 
 /* The common divisor for all timestamp deltas */
 static uint64_t jent_common_timer_gcd = 0;
 
-static uint64_t *delta_gcd = NULL;
+static uint64_t *delta_history = NULL;
 
 static inline int jent_gcd_tested(void)
 {
@@ -54,156 +54,79 @@ static inline uint64_t jent_gcd64(uint64_t a, uint64_t b)
 	return a;
 }
 
-static inline void jent_qsort(uint64_t *array, size_t nelem)
-{
-	uint64_t tmp;
-
-#define LESS(i, j)	array[i] < array[j]
-#define SWAP(i, j)	tmp = array[i], array[i] = array[j], array[j] = tmp
-	QSORT(nelem, LESS, SWAP);
-#undef LESS
-#undef SWAP
-}
-
-void jent_gcd_add_value(uint64_t delta, uint64_t old_delta, uint64_t idx)
+void jent_gcd_add_value(uint64_t delta, uint64_t idx)
 {
 	/* Watch for common adjacent GCD values */
-	if (delta_gcd)
-		delta_gcd[idx] = jent_gcd64(delta, old_delta);
+	if (delta_history)
+		delta_history[idx] = delta;
 }
 
 int jent_gcd_analyze(size_t nelem)
 {
-	uint64_t i, j , cur_gcd = 0, cur_gcd_count = 0, most_common_gcd = 0;
-	uint64_t *gcd_table;
-	unsigned int distinct_gcd_count = 0, distinct_gcd_count2 = 0;
+	uint64_t running_gcd = 0, delta_sum = 0;
+	size_t i, count_mod;
 	int ret = 0;
 
-	if (!delta_gcd)
+	if (!delta_history)
 		return 0;
 
-	/*
-	 * Ensure that delta predominately change in integer multiples.
-	 * Some timers increment by a fixed (non-1) amount each step.
-	 * This code checks for such increments, and allows the library
-	 * to output the number of such changes have occurred.
-         * A candidate divisor must divide at least 90% of the test values.
-	 * The largest such value is used.
-	 */
-	/* First, sort the delta gcd values. */
-	jent_qsort(delta_gcd, nelem);
+	/* First initialize the analysis state. */
+	if (delta_history[0] % 100 == 0)
+		count_mod = 1;
+	else
+		count_mod = 0;
 
 	/* How many distinct gcd values were found? */
-	for (i = 0; nelem > i; i++) {
-		if (delta_gcd[i] != cur_gcd) {
-			cur_gcd = delta_gcd[i];
-			distinct_gcd_count++;
-		}
-	}
+	for (i = 0; i < nelem; i++) {
+		if (delta_history[i] % 100 == 0)
+			count_mod++;
 
-	/* Need to count the last one as well. */
-	if (cur_gcd != 0)
-		distinct_gcd_count++;
+		/*
+		 * ensure that we have a varying delta timer which is necessary
+		 * for the calculation of entropy -- perform this check
+		 * only after the first loop is executed as we need to prime
+		 * the old_data value
+		 */
+		if (delta_history[i] >= delta_history[i - 1])
+			delta_sum +=  delta_history[i] - delta_history[i - 1];
+		else
+			delta_sum +=  delta_history[i - 1] - delta_history[i];
 
-	/* Guarantee to always have one entry */
-	if (!distinct_gcd_count)
-		distinct_gcd_count++;
+		/*
+		 * This calculates the gcd of all the delta values. that is
+		 * gcd(delta_1, delta_2, ..., delta_nelem)
 
-	/*
-	 * Now we'll determine the number of times that each distinct gcd
-	 * occurs.
-	 *
-	 * We could have done this in the above pass at the cost of more
-	 * memory.
-	 */
-	gcd_table = jent_zalloc(distinct_gcd_count * 2 * sizeof(uint64_t));
-	if (!gcd_table)
-		return EMEM;
-
-	cur_gcd = 0;
-
-	/* Populate the gcd table with the gcd values and their counts. */
-	for (i = 0; nelem > i; i++) {
-		if (delta_gcd[i] == cur_gcd) {
-			cur_gcd_count++;
-		} else {
-			if (cur_gcd_count > 0) {
-				/* Save the gcd. */
-				gcd_table[2 * distinct_gcd_count2] = cur_gcd;
-				gcd_table[2 * distinct_gcd_count2 + 1] =
-								cur_gcd_count;
-				distinct_gcd_count2++;
-			}
-			cur_gcd_count = 1;
-			cur_gcd = delta_gcd[i];
-		}
+		 * Some timers increment by a fixed (non-1) amount each step.
+		 * This code checks for such increments, and allows the library
+		 * to output the number of such changes have occurred.
+		 */
+		running_gcd = jent_gcd64(delta_history[i], running_gcd);
 	}
 
 	/*
-	 * Save the last gcd.
+	 * Variations of deltas of time must on average be larger than 1 to
+	 * ensure the entropy estimation implied with 1 is preserved.
 	 */
-	if (cur_gcd_count > 0) {
-		gcd_table[2 * distinct_gcd_count2] = cur_gcd;
-		gcd_table[2 * distinct_gcd_count2 + 1] = cur_gcd_count;
-		distinct_gcd_count2++;
+	if (delta_sum <= nelem - 1) {
+		ret = EMINVARVAR;
+		goto out;
 	}
 
 	/*
-	 * The number of times a specific GCD "works" isn't the number of times
-	 * it directly appeared. We also need to include each GCD value that
-	 * some integer multiple of that value occurs as a GCD. For example,
-	 * if the GCD 2 occurred 10 times, the GCD 3 occurred 5 times and the
-	 * GCD 6 occurred 5 times, then a GCD of 2 occurred should be counted
-	 * as 15 times (10 for the value '2', and 5 for the value '6'),  the
-	 * GCD 3 should be counted as 10 times, and the value 6 should be
-	 * counted 5 times.
+	 * Ensure that we have variations in the time stamp below 100 for at
+	 * least 10% of all checks -- on some platforms, the counter increments
+	 * in multiples of 100, but not always
 	 */
-	for (i = 0; distinct_gcd_count2 > i; i++) {
-		for (j = 0; i > j; j++) {
-			/* Safety check */
-			if (gcd_table[2 * j] == 0)
-				continue;
-
-			/*
-			 * Account for all lower gcds that are divisors of the
-			 * current gcd.
-			 */
-			if ((gcd_table[2 * i] % gcd_table[2 * j]) == 0)
-				gcd_table[2 * j + 1] += gcd_table[2 * i + 1];
-		}
+	if ((JENT_STUCK_INIT_THRES(nelem) < count_mod) ||
+	    (running_gcd >= 100)) {
+		ret = ECOARSETIME;
+		goto out;
 	}
 
-	/*
-	 * We can now establish the largest GCD such that over 90% of the
-	 * tested values are divisible by this value.
-	 */
-	for (i = 0; distinct_gcd_count2 > i; i++) {
-		if (gcd_table[2 * i + 1] >
-			JENT_STUCK_INIT_THRES(nelem)) {
-			most_common_gcd = gcd_table[2 * i];
-		}
-	}
-
-	if (most_common_gcd > 0) {
-		if (most_common_gcd >= 100) {
-			/* We found some divisor, and it is 100 or greater. */
-			ret = ECOARSETIME;
-			goto out;
-		} else {
-			/*
-			 * We found a divisor, but it is small. Adjust all
-			 * deltas by removing this factor.
-			 */
-			jent_common_timer_gcd = most_common_gcd;
-		}
-	}
+	/*  Adjust all deltas by the observed (small) common factor. */
+	jent_common_timer_gcd = running_gcd;
 
 out:
-	if (gcd_table != NULL) {
-		jent_zfree(gcd_table, distinct_gcd_count * 2 *
-				      (unsigned int)sizeof(uint64_t));
-	}
-
 	return ret;
 }
 
@@ -213,11 +136,11 @@ int jent_gcd_init(size_t nelem)
 	if (jent_gcd_tested())
 		return 0;
 
-	if (delta_gcd)
+	if (delta_history)
 		return 1;
 
-	delta_gcd = jent_zalloc(nelem * sizeof(uint64_t));
-	if (!delta_gcd)
+	delta_history = jent_zalloc(nelem * sizeof(uint64_t));
+	if (!delta_history)
 		return 1;
 
 	return 0;
@@ -225,10 +148,10 @@ int jent_gcd_init(size_t nelem)
 
 void jent_gcd_fini(size_t nelem)
 {
-	if (delta_gcd)
-		jent_zfree(delta_gcd,
+	if (delta_history)
+		jent_zfree(delta_history,
 			   (unsigned int)(nelem * sizeof(uint64_t)));
-	delta_gcd = NULL;
+	delta_history = NULL;
 }
 
 int jent_gcd_get(uint64_t *value)

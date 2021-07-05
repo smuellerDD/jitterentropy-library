@@ -27,10 +27,9 @@
 
 #include "jitterentropy-gcd.h"
 
-void jent_gcd_add_value(uint64_t delta, uint64_t old_delta, uint64_t idx)
+void jent_gcd_add_value(uint64_t delta, uint64_t idx)
 {
 	(void)delta;
-	(void)old_delta;
 	(void)idx;
 }
 

@@ -25,7 +25,7 @@ extern "C"
 {
 #endif
 
-void jent_gcd_add_value(uint64_t delta, uint64_t old_delta, uint64_t idx);
+void jent_gcd_add_value(uint64_t delta, uint64_t idx);
 int jent_gcd_analyze(size_t nelem);
 int jent_gcd_init(size_t nelem);
 void jent_gcd_fini(size_t nelem);
