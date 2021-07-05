@@ -41,15 +41,14 @@ int main(int argc, char * argv[])
 		return 1;
 
 	ret = jent_entropy_init();
-	
 	if (ret) {
 		printf("The initialization failed with error code %d\n", ret);
 		return ret;
 	}
 
 	ec_nostir = jent_entropy_collector_alloc(0, (argc == 3) ?
-						JENT_FORCE_INTERNAL_TIMER : 0);
-	if(!ec_nostir)
+						 JENT_FORCE_INTERNAL_TIMER : 0);
+	if (!ec_nostir)
 		return 1;
 
 	for (size = 0; size < rounds; size++) {
@@ -66,4 +65,3 @@ int main(int argc, char * argv[])
 
 	return 0;
 }
-

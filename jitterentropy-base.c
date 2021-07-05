@@ -1285,9 +1285,9 @@ err:
  * Initialization logic
  ***************************************************************************/
 
-JENT_PRIVATE_STATIC
-struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
-					       unsigned int flags)
+static struct rand_data
+*jent_entropy_collector_alloc_internal(unsigned int osr,
+				       unsigned int flags)
 {
 	struct rand_data *entropy_collector;
 
@@ -1351,12 +1351,6 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 			goto err;
 	}
 
-	/* fill the data pad with non-zero values */
-	if (jent_notime_settick(entropy_collector))
-		goto err;
-	jent_random_data(entropy_collector);
-	jent_notime_unsettick(entropy_collector);
-
 	return entropy_collector;
 
 err:
@@ -1364,6 +1358,27 @@ err:
 		jent_zfree(entropy_collector->mem, JENT_MEMORY_SIZE);
 	jent_zfree(entropy_collector, sizeof(struct rand_data));
 	return NULL;
+}
+
+JENT_PRIVATE_STATIC
+struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
+					       unsigned int flags)
+{
+	struct rand_data *ec = jent_entropy_collector_alloc_internal(osr,
+								     flags);
+
+	if (!ec)
+		return ec;
+
+	/* fill the data pad with non-zero values */
+	if (jent_notime_settick(ec)) {
+		jent_entropy_collector_free(ec);
+		return NULL;
+	}
+	jent_random_data(ec);
+	jent_notime_unsettick(ec);
+
+	return ec;
 }
 
 JENT_PRIVATE_STATIC
@@ -1381,42 +1396,43 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 
 static int jent_time_entropy_init(unsigned int enable_notime)
 {
-	struct rand_data ec;
-	uint64_t i, delta_sum = 0, old_delta = 0;
-	unsigned int nonstuck = 0;
+	struct rand_data *ec;
+	uint64_t i;
 	int time_backwards = 0, count_stuck = 0, ret = 0;
 
-	memset(&ec, 0, sizeof(ec));
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	if (enable_notime)
+		jent_force_internal_timer = 1;
+#endif
 
 	if (jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT))
 		return EMEM;
 
-	if (enable_notime) {
-		ec.enable_notime = 1;
-		ret = jent_notime_enable_thread(&ec);
-		if (ret)
-			return ret;
-		jent_notime_settick(&ec);
+	/*
+	 * If the start-up health tests (including the APT and RCT) are not
+	 * run, then the entropy source is not 90B compliant. We could test if
+	 * fips_enabled should be set using the jent_fips_enabled() function,
+	 * but this can be overridden using the JENT_FORCE_FIPS flag, which
+	 * isn't passed in yet. It is better to run the tests on the small
+	 * amount of data that we have, which should not fail unless things
+	 * are really bad.
+	 */
+	ec = jent_entropy_collector_alloc_internal(0, JENT_FORCE_FIPS |
+				(enable_notime ? JENT_FORCE_INTERNAL_TIMER :
+						 JENT_DISABLE_INTERNAL_TIMER));
+	if (!ec) {
+		ret = EMEM;
+		goto out;
 	}
 
-	/* Required for RCT */
-	ec.osr = 1;
-	if (jent_fips_enabled())
-		ec.fips_enabled = 1;
-
-	/* Required by jent_measure_jitter */
-	ec.jent_common_timer_gcd = 1;
+	if (jent_notime_settick(ec)) {
+		ret = EMEM;
+		goto out;
+	}
 
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
-	 * loop counts may show some slight skew and we produce
-	 * false positives.
-	 *
-	 * Moreover, only old systems show potentially problematic
-	 * jitter entropy that could potentially be caught here. But
-	 * the RNG is intended for hardware that is available or widely
-	 * used, but not old systems that are long out of favor. Thus,
-	 * no statistical tests.
+	 * loop counts may show some slight skew leading to false positives.
 	 */
 
 	/*
@@ -1425,36 +1441,31 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * following sanity checks verify that we have a high-resolution
 	 * timer.
 	 */
-
 #define CLEARCACHE 100
 	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
-		uint64_t time = 0, time2 = 0, delta = 0;
+		uint64_t start_time = 0, end_time = 0, delta = 0;
 		unsigned int stuck;
 
 		/* Invoke core entropy collection logic */
-		jent_get_nstime_internal(&ec, &time);
-		ec.prev_time = time;
-		jent_memaccess(&ec, 0);
-		jent_hash_time(&ec, time, 0, 0);
-		jent_get_nstime_internal(&ec, &time2);
+		jent_get_nstime_internal(ec, &start_time);
+		stuck = jent_measure_jitter(ec, 0, &delta);
+		jent_get_nstime_internal(ec, &end_time);
 
 		/* test whether timer works */
-		if (!time || !time2) {
+		if (!start_time || !end_time) {
 			ret = ENOTIME;
 			goto out;
 		}
-		delta = jent_delta(time, time2);
+
 		/*
 		 * test whether timer is fine grained enough to provide
 		 * delta even when called shortly after each other -- this
 		 * implies that we also have a high resolution timer
 		 */
-		if (!delta) {
+		if (!delta || (end_time == start_time)) {
 			ret = ECOARSETIME;
 			goto out;
 		}
-
-		stuck = jent_stuck(&ec, delta);
 
 		/*
 		 * up to here we did not modify any variable that will be
@@ -1463,80 +1474,30 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		 * etc. with the goal to clear it to get the worst case
 		 * measurements.
 		 */
-		if (CLEARCACHE > i) {
-			old_delta = delta;
+		if (CLEARCACHE > i)
 			continue;
-		}
 
 		if (stuck)
 			count_stuck++;
-		else {
-			nonstuck++;
-
-			/*
-			 * Ensure that the APT succeeded.
-			 *
-			 * With the check below that count_stuck must be less
-			 * than 10% of the overall generated raw entropy values
-			 * it is guaranteed that the APT is invoked at
-			 * floor((JENT_POWERUP_TESTLOOPCOUNT * 0.9) / 64) == 14
-			 * times.
-			 */
-			if ((nonstuck % JENT_APT_WINDOW_SIZE) == 0) {
-				jent_apt_reset(&ec,
-					       delta & JENT_APT_WORD_MASK);
-				if (jent_health_failure(&ec)) {
-					ret = EHEALTH;
-					goto out;
-				}
-			}
-		}
-
-		/* Validate RCT */
-		if (jent_rct_failure(&ec)) {
-			ret = ERCT;
-			goto out;
-		}
 
 		/* test whether we have an increasing timer */
-		if (!(time2 > time))
+		if (!(end_time > start_time))
 			time_backwards++;
 
 		/* Watch for common adjacent GCD values */
-		jent_gcd_add_value(delta, old_delta, i - CLEARCACHE);
-
-		/*
-		 * ensure that we have a varying delta timer which is necessary
-		 * for the calculation of entropy -- perform this check
-		 * only after the first loop is executed as we need to prime
-		 * the old_data value
-		 */
-		if (delta > old_delta)
-			delta_sum += (delta - old_delta);
-		else
-			delta_sum += (old_delta - delta);
-		old_delta = delta;
+		jent_gcd_add_value(delta, i - CLEARCACHE);
 	}
 
-	/*
-	 * we allow up to three times the time running backwards.
-	 * CLOCK_REALTIME is affected by adjtime and NTP operations. Thus,
-	 * if such an operation just happens to interfere with our test, it
-	 * should not fail. The value of 3 should cover the NTP case being
-	 * performed during our test run.
-	 */
-	if (time_backwards > 3) {
-		ret = ENOMONOTONIC;
+	/* First, did we encounter a health test failure? */
+	/* Validate RCT */
+	if (jent_rct_failure(ec)) {
+		ret = ERCT;
 		goto out;
 	}
 
-	/*
-	 * Variations of deltas of time must on average be larger
-	 * than 1 to ensure the entropy estimation
-	 * implied with 1 is preserved
-	 */
-	if (delta_sum <= JENT_POWERUP_TESTLOOPCOUNT) {
-		ret = EMINVARVAR;
+	/* Ensure that the other health tests succeeded. */
+	if (jent_health_failure(ec)) {
+		ret = EHEALTH;
 		goto out;
 	}
 
@@ -1554,9 +1515,10 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 out:
 	jent_gcd_fini(JENT_POWERUP_TESTLOOPCOUNT);
 
-	if (enable_notime)
-		jent_notime_unsettick(&ec);
-	jent_notime_disable_thread(&ec);
+	if (enable_notime && ec)
+		jent_notime_unsettick(ec);
+
+	jent_entropy_collector_free(ec);
 
 	return ret;
 }
@@ -1575,11 +1537,8 @@ int jent_entropy_init(void)
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	jent_force_internal_timer = 0;
-	if (ret) {
+	if (ret)
 		ret = jent_time_entropy_init(1);
-		if (!ret)
-			jent_force_internal_timer = 1;
-	}
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	return ret;
