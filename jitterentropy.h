@@ -181,13 +181,14 @@ struct rand_data
 	int rct_count;			/* Number of stuck values */
 
 	/* Adaptive Proportion Test for a significance level of 2^-30 */
-#define JENT_APT_CUTOFF		325	/* Taken from SP800-90B sec 4.4.2 */
+	unsigned int apt_cutoff;	/* Calculated using a corrected version
+					 * of the SP800-90B sec 4.4.2 formula */
 #define JENT_APT_WINDOW_SIZE	512	/* Data window size */
-	/* LSB of time stamp to process */
-#define JENT_APT_LSB		16
-#define JENT_APT_WORD_MASK	(JENT_APT_LSB - 1)
-	unsigned int apt_observations;	/* Number of collected observations */
-	unsigned int apt_count;		/* APT counter */
+	unsigned int apt_observations;	/* Number of collected observations in
+					 * current window. */
+	unsigned int apt_count;		/* The number of times the reference
+					 * symbol been encountered in the
+					 * window. */
 	uint64_t apt_base;		/* APT base reference */
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 

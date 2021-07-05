@@ -9,6 +9,7 @@
  * Add jent_ncpu() detecting the number of existing CPUs. Only when more than
    one CPU is in the system, the internal timer thread is started.
  * add GCD testing and analysis
+ * add fixes to APT
 
 3.0.2
  * Small fixes suggested by Joshua Hill
