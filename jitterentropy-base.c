@@ -118,12 +118,10 @@ unsigned int jent_version(void)
  *
  * @ec [in] Reference to entropy collector
  */
-static void jent_apt_reset(struct rand_data *ec, uint64_t current_delta)
+static void jent_apt_reset(struct rand_data *ec)
 {
-	/* Reset APT counter */
-	ec->apt_count = 0;
-	ec->apt_base = current_delta;
-	ec->apt_observations = 0;
+	/* When reset, accept the _next_ value input as the new base. */
+	ec->apt_base_set = 0;
 }
 
 /**
@@ -136,27 +134,36 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 {
 	/* Initialize the base reference */
 	if (!ec->apt_base_set) {
-		ec->apt_base = current_delta;
-		ec->apt_base_set = 1;
+		ec->apt_base = current_delta;	// APT Step 1
+		ec->apt_base_set = 1;		// APT Step 2
+
+		/*
+		 * Reset APT counter
+		 * Note that we've taken in the first symbol in the window.
+		 */
+		ec->apt_count = 1;		// B = 1
+		ec->apt_observations = 1;
+
 		return;
 	}
 
 	if (current_delta == ec->apt_base) {
-		ec->apt_count++;
+		ec->apt_count++;		// B = B + 1
 
 		/*
 		 * Note, ec->apt_count starts with zero. Hence we need to
 		 * subtract one from the cutoff value as calculated following
 		 * SP800-90B.
 		 */
-		if (ec->apt_count >= (JENT_APT_CUTOFF - 1))
+		if (ec->apt_count >= ec->apt_cutoff)
 			ec->health_failure = 1;
 	}
 
 	ec->apt_observations++;
 
+	/* Completed one window, the next symbol input will be new apt_base. */
 	if (ec->apt_observations >= JENT_APT_WINDOW_SIZE)
-		jent_apt_reset(ec, current_delta);
+		jent_apt_reset(ec);		// APT Step 4
 }
 
 /***************************************************************************
@@ -196,16 +203,17 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		/*
 		 * The cutoff value is based on the following consideration:
 		 * alpha = 2^-30 as recommended in FIPS 140-2 IG 9.8.
-		 * In addition, we require an entropy value H of 1/OSR as this
+		 * In addition, we require an entropy value H of 1/osr as this
 		 * is the minimum entropy required to provide full entropy.
-		 * Note, we collect 64 * OSR deltas for inserting them into
-		 * the entropy pool which should then have (close to) 64 bits
-		 * of entropy.
+		 * Note, we collect (DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR)*osr
+		 * deltas for inserting them into the entropy pool which should
+		 * then have (close to) DATA_SIZE_BITS bits of entropy in the
+		 * conditioned output.
 		 *
 		 * Note, ec->rct_count (which equals to value B in the pseudo
 		 * code of SP800-90B section 4.4.1) starts with zero. Hence
 		 * we need to subtract one from the cutoff value as calculated
-		 * following SP800-90B.
+		 * following SP800-90B. Thus C = ceil(-log_2(alpha)/H) = 30*osr.
 		 */
 		if ((unsigned int)ec->rct_count >= (30 * ec->osr)) {
 			ec->rct_count = -1;
@@ -1285,6 +1293,23 @@ err:
  * Initialization logic
  ***************************************************************************/
 
+/*
+ * See the SP 800-90B comment #10b for the corrected cutoff for the SP 800-90B
+ * APT.
+ * http://www.untruth.org/~josh/sp80090b/UL%20SP800-90B-final%20comments%20v1.9%2020191212.pdf
+ * In in the syntax of R, this is C = 2 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
+ * (The original formula wasn't correct because the first symbol must
+ * necessarily have been observed, so there is no chance of observing 0 of these
+ * symbols.)
+ *
+ * For any value above 14, this yields the maximal allowable value of 512
+ * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that
+ * renders the test unable to fail).
+ */
+static const unsigned int jent_apt_cutoff_lookup[15]=
+	{ 325, 422, 459, 477, 488, 494, 499, 502,
+	  505, 507, 508, 509, 510, 511, 512 };
+
 static struct rand_data
 *jent_entropy_collector_alloc_internal(unsigned int osr,
 				       unsigned int flags)
@@ -1334,6 +1359,18 @@ static struct rand_data
 
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
 		entropy_collector->fips_enabled = 1;
+
+	/*
+	 * Establish the apt_cutoff based on the presumed entropy rate of
+	 * 1/osr.
+	 */
+	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
+		entropy_collector->apt_cutoff =
+				jent_apt_cutoff_lookup[
+					ARRAY_SIZE(jent_apt_cutoff_lookup) -1];
+	} else {
+		entropy_collector->apt_cutoff = jent_apt_cutoff_lookup[osr-1];
+	}
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
 	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {
