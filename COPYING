@@ -32,11 +32,3 @@ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 USE OF THIS SOFTWARE, EVEN IF NOT ADVISED OF THE POSSIBILITY OF SUCH
 DAMAGE.
 
-
-The following code has a different copyright and license. The license
-is provided with the mentioned source code.
-
-* qsort.h
-
-	Copyright (c) 2013, 2017 Alexey Tourbin
-
