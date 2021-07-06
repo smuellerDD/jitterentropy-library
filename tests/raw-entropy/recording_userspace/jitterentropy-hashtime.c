@@ -61,6 +61,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	FILE *out = NULL;
 	uint64_t *duration, *duration_min;
 	int ret = 0;
+	unsigned int health_test_result;
 
 	duration = calloc(rounds, sizeof(uint64_t));
 	if (!duration)
@@ -124,6 +125,21 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	for (size = 0; size < rounds; size++)
 		fprintf(out, "%" PRIu64 " %" PRIu64 "\n", duration[size], duration_min[size]);
 
+	if((health_test_result = jent_health_failure(ec))) {
+		printf("The main context encountered the following health testing failure(s):");
+		if(health_test_result & JENT_RCT_FAILURE) printf(" RCT");
+		if(health_test_result & JENT_APT_FAILURE) printf(" APT");
+		if(health_test_result & JENT_LAG_FAILURE) printf(" Lag");
+		printf("\n");
+	}
+
+	if((health_test_result = jent_health_failure(ec_min))) {
+		printf("The minimum context encountered the following health testing failure(s):");
+		if(health_test_result & JENT_RCT_FAILURE) printf(" RCT");
+		if(health_test_result & JENT_APT_FAILURE) printf(" APT");
+		if(health_test_result & JENT_LAG_FAILURE) printf(" Lag");
+		printf("\n");
+	}
 out:
 	free(duration);
 	free(duration_min);
