@@ -1648,16 +1648,14 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	int i, time_backwards = 0, count_stuck = 0, ret = 0;
 	unsigned int health_test_result;
 
+	if((delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT))==NULL) {
+		return EMEM;
+	}
+
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	if (enable_notime)
 		jent_force_internal_timer = 1;
 #endif
-
-	delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT);
-	/*
-	 * No check whether allocation succeeds - it is legitimate to have NULL
-	 * here.
-	 */
 
 	/*
 	 * If the start-up health tests (including the APT and RCT) are not
@@ -1739,7 +1737,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 			time_backwards++;
 
 		/* Watch for common adjacent GCD values */
-		jent_gcd_add_value(delta_history, delta, i);
+		delta_history[i] = delta;
 	}
 
 	/* First, did we encounter a health test failure? */

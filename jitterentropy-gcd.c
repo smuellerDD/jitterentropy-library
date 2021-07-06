@@ -146,6 +146,15 @@ void jent_gcd_fini(uint64_t *delta_history, size_t nelem)
 			   (unsigned int)(nelem * sizeof(uint64_t)));
 }
 
+/* This function forces the gcd to be recalculated the next time
+ * jent_entropy_init is called. This is used when simulating
+ * a "restart" in a software library.
+ */
+void jent_gcd_reset(void)
+{
+	jent_common_timer_gcd = 0;
+}
+
 int jent_gcd_get(uint64_t *value)
 {
 	if (!jent_gcd_tested())

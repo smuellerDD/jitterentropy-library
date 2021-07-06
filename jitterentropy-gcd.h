@@ -29,15 +29,7 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem);
 uint64_t *jent_gcd_init(size_t nelem);
 void jent_gcd_fini(uint64_t *delta_history, size_t nelem);
 int jent_gcd_get(uint64_t *value);
-
-static inline void jent_gcd_add_value(uint64_t *delta_history, uint64_t delta,
-				      int idx)
-{
-	/* Watch for common adjacent GCD values */
-	if (delta_history)
-		delta_history[idx] = delta;
-}
-
+void jent_gcd_reset(void);
 
 #ifdef __cplusplus
 }
