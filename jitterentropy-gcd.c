@@ -24,8 +24,6 @@
 /* The common divisor for all timestamp deltas */
 static uint64_t jent_common_timer_gcd = 0;
 
-static uint64_t *delta_history = NULL;
-
 static inline int jent_gcd_tested(void)
 {
 	return (jent_common_timer_gcd != 0);
@@ -54,14 +52,7 @@ static inline uint64_t jent_gcd64(uint64_t a, uint64_t b)
 	return a;
 }
 
-void jent_gcd_add_value(uint64_t delta, uint64_t idx)
-{
-	/* Watch for common adjacent GCD values */
-	if (delta_history)
-		delta_history[idx] = delta;
-}
-
-int jent_gcd_analyze(size_t nelem)
+int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
 {
 	uint64_t running_gcd = 0, delta_sum = 0;
 	size_t i, count_mod;
@@ -76,8 +67,8 @@ int jent_gcd_analyze(size_t nelem)
 	else
 		count_mod = 0;
 
-	/* How many distinct gcd values were found? */
-	for (i = 0; i < nelem; i++) {
+	/* Now perform the analysis on the accumulated delta data. */
+	for (i = 1; i < nelem; i++) {
 		if (delta_history[i] % 100 == 0)
 			count_mod++;
 
@@ -130,28 +121,29 @@ out:
 	return ret;
 }
 
-int jent_gcd_init(size_t nelem)
+uint64_t *jent_gcd_init(size_t nelem)
 {
+	uint64_t *delta_history;
+
 	/* If the GCD was initialized once, we do not do it again */
 	if (jent_gcd_tested())
-		return 0;
+		return NULL;
 
-	if (delta_history)
-		return 1;
+	if (jent_gcd_tested())
+		return NULL;
 
 	delta_history = jent_zalloc(nelem * sizeof(uint64_t));
 	if (!delta_history)
-		return 1;
+		return NULL;
 
-	return 0;
+	return delta_history;
 }
 
-void jent_gcd_fini(size_t nelem)
+void jent_gcd_fini(uint64_t *delta_history, size_t nelem)
 {
 	if (delta_history)
 		jent_zfree(delta_history,
 			   (unsigned int)(nelem * sizeof(uint64_t)));
-	delta_history = NULL;
 }
 
 int jent_gcd_get(uint64_t *value)
