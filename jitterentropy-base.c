@@ -518,7 +518,7 @@ static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
  *
  * @ec [in] Reference to entropy collector
  *
- * @return a bitbask indicating which tests failed
+ * @return a bitmask indicating which tests failed
  * 	0 No health test failure
  * 	1 RCT failure
  * 	2 APT failure
