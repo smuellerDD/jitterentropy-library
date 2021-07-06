@@ -150,11 +150,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 	if (current_delta == ec->apt_base) {
 		ec->apt_count++;		// B = B + 1
 
-		/*
-		 * Note, ec->apt_count starts with zero. Hence we need to
-		 * subtract one from the cutoff value as calculated following
-		 * SP800-90B.
-		 */
+		/* Note, ec->apt_count starts with one. */
 		if (ec->apt_count >= ec->apt_cutoff)
 			ec->health_failure = 1;
 	}
@@ -1434,16 +1430,19 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 static int jent_time_entropy_init(unsigned int enable_notime)
 {
 	struct rand_data *ec;
-	uint64_t i;
-	int time_backwards = 0, count_stuck = 0, ret = 0;
+	uint64_t *delta_history;
+	int i, time_backwards = 0, count_stuck = 0, ret = 0;
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	if (enable_notime)
 		jent_force_internal_timer = 1;
 #endif
 
-	if (jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT))
-		return EMEM;
+	delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT);
+	/*
+	 * No check whether allocation succeeds - it is legitimate to have NULL
+	 * here.
+	 */
 
 	/*
 	 * If the start-up health tests (including the APT and RCT) are not
@@ -1479,7 +1478,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	 * timer.
 	 */
 #define CLEARCACHE 100
-	for (i = 0; (JENT_POWERUP_TESTLOOPCOUNT + CLEARCACHE) > i; i++) {
+	for (i = -CLEARCACHE; i < JENT_POWERUP_TESTLOOPCOUNT; i++) {
 		uint64_t start_time = 0, end_time = 0, delta = 0;
 		unsigned int stuck;
 
@@ -1511,7 +1510,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		 * etc. with the goal to clear it to get the worst case
 		 * measurements.
 		 */
-		if (CLEARCACHE > i)
+		if (i < 0)
 			continue;
 
 		if (stuck)
@@ -1522,7 +1521,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 			time_backwards++;
 
 		/* Watch for common adjacent GCD values */
-		jent_gcd_add_value(delta, i - CLEARCACHE);
+		jent_gcd_add_value(delta_history, delta, i);
 	}
 
 	/* First, did we encounter a health test failure? */
@@ -1538,7 +1537,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		goto out;
 	}
 
-	ret = jent_gcd_analyze(JENT_POWERUP_TESTLOOPCOUNT);
+	ret = jent_gcd_analyze(delta_history, JENT_POWERUP_TESTLOOPCOUNT);
 	if (ret)
 		goto out;
 
@@ -1550,7 +1549,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		ret = ESTUCK;
 
 out:
-	jent_gcd_fini(JENT_POWERUP_TESTLOOPCOUNT);
+	jent_gcd_fini(delta_history, JENT_POWERUP_TESTLOOPCOUNT);
 
 	if (enable_notime && ec)
 		jent_notime_unsettick(ec);

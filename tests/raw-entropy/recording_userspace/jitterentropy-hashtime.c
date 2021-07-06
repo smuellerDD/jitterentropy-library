@@ -27,15 +27,21 @@
 
 #include "jitterentropy-gcd.h"
 
-void jent_gcd_add_value(uint64_t delta, uint64_t idx)
+int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
 {
-	(void)delta;
-	(void)idx;
+	(void)delta_history;
+	(void)nelem;
+	return 0;
 }
 
-int jent_gcd_analyze(size_t nelem) { (void)nelem; return 0; }
-int jent_gcd_init(size_t nelem) { (void)nelem; return 0; }
-void jent_gcd_fini(size_t nelem) { (void)nelem; }
+uint64_t *jent_gcd_init(size_t nelem) { (void)nelem; return NULL; }
+
+void jent_gcd_fini(uint64_t *delta_history, size_t nelem)
+{
+	(void)delta_history;
+	(void)nelem;
+}
+
 int jent_gcd_get(uint64_t *value)
 {
 	*value = 1;
