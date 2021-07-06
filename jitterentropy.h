@@ -80,6 +80,11 @@
  */
 #define JENT_CONF_DISABLE_LOOP_SHUFFLE
 
+/*
+ * Shall the LAG predictor health test be enabled?
+ */
+#undef JENT_HEALTH_LAG_PREDICTOR
+
 /***************************************************************************
  * Jitter RNG State Definition Section
  ***************************************************************************/
@@ -99,7 +104,7 @@
  * The value "64" is justified in Appendix A.4 of the current 90C draft,
  * and aligns with NIST's in "epsilon" definition in this document, which is
  * that a string can be considered "full entropy" if you can bound the min
- * entropy in each bit of output to at least 1-epsilson, where epsilon is
+ * entropy in each bit of output to at least 1-epsilon, where epsilon is
  * required to be <= 2^(-32).
  */
 #define ENTROPY_SAFETY_FACTOR		64
@@ -158,8 +163,12 @@ struct rand_data
 	uint8_t data[SHA3_256_SIZE_DIGEST]; /* SENSITIVE Actual random number */
 	uint64_t prev_time;		/* SENSITIVE Previous time stamp */
 #define DATA_SIZE_BITS (SHA3_256_SIZE_DIGEST_BITS)
+
+#ifndef JENT_HEALTH_LAG_PREDICTOR
 	uint64_t last_delta;		/* SENSITIVE stuck test */
 	uint64_t last_delta2;		/* SENSITIVE stuck test */
+#endif /* JENT_HEALTH_LAG_PREDICTOR */
+
 	unsigned int osr;		/* Oversampling rate */
 #ifndef JENT_MEMORY_BLOCKS
 # define JENT_MEMORY_BLOCKS 512
@@ -204,6 +213,59 @@ struct rand_data
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	uint64_t jent_common_timer_gcd;	/* Common divisor for all time deltas */
+
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	/* Lag predictor test to look for re-occurring patterns. */
+
+	/* The lag global cutoff selected based on the selection of osr. */
+	unsigned int lag_global_cutoff;
+
+	/* The lag local cutoff selected based on the selection of osr. */
+	unsigned int lag_local_cutoff;
+
+	/*
+	 * The number of times the lag predictor was correct. Compared to the
+	 * global cutoff.
+	 */
+	unsigned int lag_prediction_success_count;
+
+	/*
+	 * The size of the current run of successes. Compared to the local
+	 * cutoff.
+	 */
+	unsigned int lag_prediction_success_run;
+
+	/*
+	 * The total number of collected observations since the health test was
+	 * last reset.
+	 */
+	unsigned int lag_best_predictor;
+
+	/*
+	 * The total number of collected observations since the health test was
+	 * last reset.
+	 */
+	unsigned int lag_observations;
+
+	/*
+	 * This is the size of the window used by the predictor. The predictor
+	 * is reset between windows.
+	 */
+#define JENT_LAG_WINDOW_SIZE (1U<<17)
+
+	/*
+	 * The amount of history to base predictions on. This must be a power
+	 * of 2. Must be 4 or greater.
+	 */
+#define JENT_LAG_HISTORY_SIZE 8
+#define JENT_LAG_MASK (JENT_LAG_HISTORY_SIZE - 1)
+
+	/* The delta history for the lag predictor. */
+	uint64_t lag_delta_history[JENT_LAG_HISTORY_SIZE];
+
+	/* The scoreboard that tracks how successful each predictor lag is. */
+	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE];
+#endif /* JENT_HEALTH_LAG_PREDICTOR */
 };
 
 /* Flags that can be used to initialize the RNG */

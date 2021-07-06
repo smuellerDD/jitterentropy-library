@@ -107,11 +107,265 @@ unsigned int jent_version(void)
 	return version;
 }
 
+static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
+{
+	return (next - prev);
+}
+
+/***************************************************************************
+ * Lag Predictor Test
+ *
+ * This test is a vendor-defined conditional test that is designed to detect
+ * a known failure mode where the result becomes mostly deterministic
+ * Note that (lag_observations & JENT_LAG_MASK) is the index where the next
+ * value provided will be stored.
+ ***************************************************************************/
+
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+
+/*
+ * These cutoffs are configured using an entropy estimate of 1/osr under an
+ * alpha=2^(-22) for a window size of 131072. The other health tests use
+ * alpha=2^-30, but operate on much smaller window sizes. This larger selection
+ * of alpha makes the behavior per-lag-window similar to the APT test.
+ *
+ * The global cutoffs are calculated using the
+ * InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
+ * The local cutoffs are somewhat more complicated. For background, see Feller's
+ * _Introduction to Probability Theory and It's Applications_ Vol. 1,
+ * Chapter 13, section 7 (in particular see equation 7.11, where x is a root
+ * of the denominator of equation 7.6).
+ *
+ * We'll proceed using the notation of SP 800-90B Section 6.3.8 (which is
+ * developed in Kelsey-McKay-Turan paper "Predictive Models for Min-entropy
+ * Estimation".)
+ *
+ * Here, we set p=2^(-1/osr), seeking a run of successful guesses (r) with
+ * probability of less than (1-alpha). That is, it is very very likely
+ * (probability 1-alpha) that there is _no_ run of length r in a block of size
+ * JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE.
+ *
+ * We have to iteratively look for an appropriate value for the cutoff r.
+ */
+static const unsigned int jent_lag_global_cutoff_lookup[20] =
+	{ 66443,  93504, 104761, 110875, 114707, 117330, 119237, 120686, 121823,
+	 122739, 123493, 124124, 124660, 125120, 125520, 125871, 126181, 126457,
+	 126704, 126926 };
+static const unsigned int jent_lag_local_cutoff_lookup[20] =
+	{  38,  75, 111, 146, 181, 215, 250, 284, 318, 351,
+	  385, 419, 452, 485, 518, 551, 584, 617, 650, 683 };
+
+static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
+{
+	/*
+	 * Establish the lag global and local cutoffs based on the presumed
+	 * entropy rate of 1/osr.
+	 */
+	if (osr > ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
+		ec->lag_global_cutoff =
+			jent_lag_global_cutoff_lookup[
+				ARRAY_SIZE(jent_lag_global_cutoff_lookup) - 1];
+	} else {
+		ec->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr - 1];
+	}
+
+	if (osr > ARRAY_SIZE(jent_lag_local_cutoff_lookup)) {
+		ec->lag_local_cutoff =
+			jent_lag_local_cutoff_lookup[
+				ARRAY_SIZE(jent_lag_local_cutoff_lookup) - 1];
+	} else {
+		ec->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr - 1];
+	}
+}
+
+/**
+ * Reset the lag counters
+ *
+ * @ec [in] Reference to entropy collector
+ */
+static void jent_lag_reset(struct rand_data *ec)
+{
+	unsigned int i;
+
+	/* Reset Lag counters */
+	ec->lag_prediction_success_count = 0;
+	ec->lag_prediction_success_run = 0;
+	ec->lag_best_predictor = 0; //The first guess is basically arbitrary.
+	ec->lag_observations = 0;
+
+	for (i = 0; i < JENT_LAG_HISTORY_SIZE; i++) {
+		ec->lag_scoreboard[i] = 0;
+		ec->lag_delta_history[i] = 0;
+	}
+}
+
+/*
+ * A macro for accessing the history. Index 0 is the last observed symbol
+ * index 1 is the symbol observed two inputs ago, etc.
+ */
+#define JENT_LAG_HISTORY(EC,LOC)					       \
+	((EC)->lag_delta_history[((EC)->lag_observations - (LOC) - 1) &	       \
+	 JENT_LAG_MASK])
+
+/**
+ * Insert a new entropy event into APT
+ *
+ * @ec [in] Reference to entropy collector
+ * @current_delta [in] Current time delta
+ */
+static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
+{
+	uint64_t prediction;
+	unsigned int i;
+
+	/* Initialize the delta_history */
+	if (ec->lag_observations < JENT_LAG_HISTORY_SIZE) {
+		ec->lag_delta_history[ec->lag_observations] = current_delta;
+		ec->lag_observations++;
+		return;
+	}
+
+	/*
+	 * The history is initialized. First make a guess and examine the
+	 * results.
+	 */
+	prediction = JENT_LAG_HISTORY(ec, ec->lag_best_predictor);
+
+	if (prediction == current_delta) {
+		/* The prediction was correct. */
+		ec->lag_prediction_success_count++;
+		ec->lag_prediction_success_run++;
+
+		if ((ec->lag_prediction_success_run >= ec->lag_local_cutoff) ||
+		    (ec->lag_prediction_success_count >= ec->lag_global_cutoff))
+			ec->health_failure = 1;
+	} else {
+		/* The prediction wasn't correct. End any run of successes.*/
+		ec->lag_prediction_success_run = 0;
+	}
+
+	/* Now update the predictors using the current data. */
+	for (i = 0; i < JENT_LAG_HISTORY_SIZE; i++) {
+		if (JENT_LAG_HISTORY(ec, i) == current_delta) {
+			/*
+			 * The ith predictor (which guesses i + 1 symbols in
+			 * the past) successfully guessed.
+			 */
+			ec->lag_scoreboard[i] ++;
+
+			/*
+			 * Keep track of the best predictor (tie goes to the
+			 * shortest lag)
+			 */
+			if (ec->lag_scoreboard[i] >
+			    ec->lag_scoreboard[ec->lag_best_predictor])
+				ec->lag_best_predictor = i;
+		}
+	}
+
+	/*
+	 * Finally, update the lag_delta_history array with the newly input
+	 * value.
+	 */
+	ec->lag_delta_history[(ec->lag_observations) & JENT_LAG_MASK] =
+								current_delta;
+	ec->lag_observations++;
+
+	/*
+	 * lag_best_predictor now is the index of the predictor with the largest
+	 * number of correct guesses.
+	 * This establishes our next guess.
+	 */
+
+	/* Do we now need a new window? */
+	if (ec->lag_observations >= JENT_LAG_WINDOW_SIZE)
+		jent_lag_reset(ec);
+}
+
+static inline uint64_t jent_delta2(struct rand_data *ec, uint64_t current_delta)
+{
+	/* Note that delta2_n = delta_n - delta_{n-1} */
+	return jent_delta(JENT_LAG_HISTORY(ec, 0), current_delta);
+}
+
+static inline uint64_t jent_delta3(struct rand_data *ec, uint64_t delta2)
+{
+	/*
+	 * Note that delta3_n = delta2_n - delta2_{n-1}
+	 *		      = delta2_n - (delta_{n-1} - delta_{n-2})
+	 */
+	return jent_delta(jent_delta(JENT_LAG_HISTORY(ec, 1),
+				     JENT_LAG_HISTORY(ec, 0)), delta2);
+}
+
+#else /* JENT_HEALTH_LAG_PREDICTOR */
+
+static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
+{
+	(void)ec;
+	(void)osr;
+}
+
+static inline void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
+{
+	(void)ec;
+	(void)current_delta;
+}
+
+static inline uint64_t jent_delta2(struct rand_data *ec, uint64_t current_delta)
+{
+	uint64_t delta2 = jent_delta(ec->last_delta, current_delta);
+
+	ec->last_delta = current_delta;
+	return delta2;
+}
+
+static inline uint64_t jent_delta3(struct rand_data *ec, uint64_t delta2)
+{
+	uint64_t delta3 = jent_delta(ec->last_delta2, delta2);
+
+	ec->last_delta2 = delta2;
+	return delta3;
+}
+
+#endif /* JENT_HEALTH_LAG_PREDICTOR */
+
 /***************************************************************************
  * Adaptive Proportion Test
  *
  * This test complies with SP800-90B section 4.4.2.
  ***************************************************************************/
+
+/*
+ * See the SP 800-90B comment #10b for the corrected cutoff for the SP 800-90B
+ * APT.
+ * http://www.untruth.org/~josh/sp80090b/UL%20SP800-90B-final%20comments%20v1.9%2020191212.pdf
+ * In in the syntax of R, this is C = 2 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
+ * (The original formula wasn't correct because the first symbol must
+ * necessarily have been observed, so there is no chance of observing 0 of these
+ * symbols.)
+ *
+ * For any value above 14, this yields the maximal allowable value of 512
+ * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that
+ * renders the test unable to fail).
+ */
+static const unsigned int jent_apt_cutoff_lookup[15]=
+	{ 325, 422, 459, 477, 488, 494, 499, 502,
+	  505, 507, 508, 509, 510, 511, 512 };
+
+static inline void jent_apt_init(struct rand_data *ec, unsigned int osr)
+{
+	/*
+	 * Establish the apt_cutoff based on the presumed entropy rate of
+	 * 1/osr.
+	 */
+	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
+		ec->apt_cutoff = jent_apt_cutoff_lookup[
+					ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
+	} else {
+		ec->apt_cutoff = jent_apt_cutoff_lookup[osr - 1];
+	}
+}
 
 /**
  * Reset the APT counter
@@ -236,11 +490,6 @@ static int jent_rct_failure(struct rand_data *ec)
 	return 0;
 }
 
-static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
-{
-	return (next - prev);
-}
-
 /**
  * Stuck test by checking the:
  * 	1st derivative of the jitter measurement (time delta)
@@ -258,17 +507,15 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
  */
 static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
-	uint64_t delta2 = jent_delta(ec->last_delta, current_delta);
-	uint64_t delta3 = jent_delta(ec->last_delta2, delta2);
-
-	ec->last_delta = current_delta;
-	ec->last_delta2 = delta2;
+	uint64_t delta2 = jent_delta2(ec, current_delta);
+	uint64_t delta3 = jent_delta3(ec, delta2);
 
 	/*
 	 * Insert the result of the comparison of two back-to-back time
 	 * deltas.
 	 */
 	jent_apt_insert(ec, current_delta);
+	jent_lag_insert(ec, current_delta);
 
 	if (!current_delta || !delta2 || !delta3) {
 		/* RCT with a stuck bit */
@@ -1289,23 +1536,6 @@ err:
  * Initialization logic
  ***************************************************************************/
 
-/*
- * See the SP 800-90B comment #10b for the corrected cutoff for the SP 800-90B
- * APT.
- * http://www.untruth.org/~josh/sp80090b/UL%20SP800-90B-final%20comments%20v1.9%2020191212.pdf
- * In in the syntax of R, this is C = 2 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
- * (The original formula wasn't correct because the first symbol must
- * necessarily have been observed, so there is no chance of observing 0 of these
- * symbols.)
- *
- * For any value above 14, this yields the maximal allowable value of 512
- * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that
- * renders the test unable to fail).
- */
-static const unsigned int jent_apt_cutoff_lookup[15]=
-	{ 325, 422, 459, 477, 488, 494, 499, 502,
-	  505, 507, 508, 509, 510, 511, 512 };
-
 static struct rand_data
 *jent_entropy_collector_alloc_internal(unsigned int osr,
 				       unsigned int flags)
@@ -1356,17 +1586,7 @@ static struct rand_data
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
 		entropy_collector->fips_enabled = 1;
 
-	/*
-	 * Establish the apt_cutoff based on the presumed entropy rate of
-	 * 1/osr.
-	 */
-	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
-		entropy_collector->apt_cutoff =
-				jent_apt_cutoff_lookup[
-					ARRAY_SIZE(jent_apt_cutoff_lookup) -1];
-	} else {
-		entropy_collector->apt_cutoff = jent_apt_cutoff_lookup[osr-1];
-	}
+	jent_apt_init(entropy_collector, osr);
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
 	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {
@@ -1466,6 +1686,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		goto out;
 	}
 
+	/* To initialize the prior time. */
+	jent_measure_jitter(ec, 0, NULL);
+
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
 	 * loop counts may show some slight skew leading to false positives.
@@ -1483,9 +1706,9 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 		unsigned int stuck;
 
 		/* Invoke core entropy collection logic */
-		jent_get_nstime_internal(ec, &start_time);
 		stuck = jent_measure_jitter(ec, 0, &delta);
-		jent_get_nstime_internal(ec, &end_time);
+		end_time = ec->prev_time;
+		start_time = ec->prev_time - delta;
 
 		/* test whether timer works */
 		if (!start_time || !end_time) {
