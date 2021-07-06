@@ -129,9 +129,6 @@ uint64_t *jent_gcd_init(size_t nelem)
 	if (jent_gcd_tested())
 		return NULL;
 
-	if (jent_gcd_tested())
-		return NULL;
-
 	delta_history = jent_zalloc(nelem * sizeof(uint64_t));
 	if (!delta_history)
 		return NULL;

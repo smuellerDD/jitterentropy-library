@@ -29,7 +29,7 @@
 #include "jitterentropy-base.c"
 
 #ifndef REPORT_COUNTER_TICKS
-#define REPORT_COUNTER_TICKS 0
+#define REPORT_COUNTER_TICKS 1
 #endif
 
 /***************************************************************************
@@ -85,7 +85,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		goto out;
 	}
 
-	if(report_counter_ticks) {
+	if(!report_counter_ticks) {
 		/* For this analysis, we want the raw values, not values that have had common factors removed. */
 		ec->jent_common_timer_gcd = 1;
 		ec_min->jent_common_timer_gcd = 1;
