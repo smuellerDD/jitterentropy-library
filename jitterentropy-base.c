@@ -208,7 +208,7 @@ static void jent_lag_reset(struct rand_data *ec)
 	 JENT_LAG_MASK])
 
 /**
- * Insert a new entropy event into APT
+ * Insert a new entropy event into the lag predictor test
  *
  * @ec [in] Reference to entropy collector
  * @current_delta [in] Current time delta
@@ -238,7 +238,7 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 
 		if ((ec->lag_prediction_success_run >= ec->lag_local_cutoff) ||
 		    (ec->lag_prediction_success_count >= ec->lag_global_cutoff))
-			ec->health_failure = 1;
+			ec->health_failure |= JENT_LAG_FAILURE;
 	} else {
 		/* The prediction wasn't correct. End any run of successes.*/
 		ec->lag_prediction_success_run = 0;
@@ -406,7 +406,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 
 		/* Note, ec->apt_count starts with one. */
 		if (ec->apt_count >= ec->apt_cutoff)
-			ec->health_failure = 1;
+			ec->health_failure |= JENT_APT_FAILURE;
 	}
 
 	ec->apt_observations++;
@@ -467,27 +467,11 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		 */
 		if ((unsigned int)ec->rct_count >= (30 * ec->osr)) {
 			ec->rct_count = -1;
-			ec->health_failure = 1;
+			ec->health_failure |= JENT_RCT_FAILURE;
 		}
 	} else {
 		ec->rct_count = 0;
 	}
-}
-
-/**
- * Is there an RCT health test failure?
- *
- * @ec [in] Reference to entropy collector
- *
- * @return
- * 	0 No health test failure
- * 	1 Permanent health test failure
- */
-static int jent_rct_failure(struct rand_data *ec)
-{
-	if (ec->rct_count < 0)
-		return 1;
-	return 0;
 }
 
 /**
@@ -534,11 +518,13 @@ static unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
  *
  * @ec [in] Reference to entropy collector
  *
- * @return
+ * @return a bitmask indicating which tests failed
  * 	0 No health test failure
- * 	1 Permanent health test failure
+ * 	1 RCT failure
+ * 	2 APT failure
+ * 	4 Lag predictor test failure
  */
-static int jent_health_failure(struct rand_data *ec)
+static unsigned int jent_health_failure(struct rand_data *ec)
 {
 	/* Test is only enabled in FIPS mode */
 	if (!ec->fips_enabled)
@@ -1470,6 +1456,7 @@ static void jent_random_data(struct rand_data *ec)
  *	-2	RCT failed
  *	-3	APT test failed
  *	-4	The timer cannot be initialized
+ *	-5	LAG failure
  */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
@@ -1486,14 +1473,17 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 
 	while (len > 0) {
 		size_t tocopy;
+		unsigned int health_test_result;
 
 		jent_random_data(ec);
 
-		if (jent_health_failure(ec)) {
-			if (jent_rct_failure(ec))
+		if ((health_test_result = jent_health_failure(ec))) {
+			if (health_test_result & JENT_RCT_FAILURE)
 				ret = -2;
-			else
+			else if (health_test_result & JENT_APT_FAILURE)
 				ret = -3;
+			else
+				ret = -5;
 
 			goto err;
 		}
@@ -1586,7 +1576,11 @@ static struct rand_data
 	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
 		entropy_collector->fips_enabled = 1;
 
+	/* Initialize the APT */
 	jent_apt_init(entropy_collector, osr);
+
+	/* Initialize the Lag Predictor Test */
+	jent_lag_init(entropy_collector, osr);
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
 	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {
@@ -1652,6 +1646,7 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	struct rand_data *ec;
 	uint64_t *delta_history;
 	int i, time_backwards = 0, count_stuck = 0, ret = 0;
+	unsigned int health_test_result;
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	if (enable_notime)
@@ -1748,15 +1743,8 @@ static int jent_time_entropy_init(unsigned int enable_notime)
 	}
 
 	/* First, did we encounter a health test failure? */
-	/* Validate RCT */
-	if (jent_rct_failure(ec)) {
-		ret = ERCT;
-		goto out;
-	}
-
-	/* Ensure that the other health tests succeeded. */
-	if (jent_health_failure(ec)) {
-		ret = EHEALTH;
+	if ((health_test_result = jent_health_failure(ec))) {
+		ret = (health_test_result & JENT_RCT_FAILURE) ? ERCT : EHEALTH;
 		goto out;
 	}
 

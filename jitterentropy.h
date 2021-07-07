@@ -83,7 +83,7 @@
 /*
  * Shall the LAG predictor health test be enabled?
  */
-#undef JENT_HEALTH_LAG_PREDICTOR
+#define JENT_HEALTH_LAG_PREDICTOR
 
 /***************************************************************************
  * Jitter RNG State Definition Section
@@ -199,10 +199,10 @@ struct rand_data
 					 * symbol been encountered in the
 					 * window. */
 	uint64_t apt_base;		/* APT base reference */
-	unsigned int apt_base_set:1;	/* APT base reference set? */
+	unsigned int health_failure;	/* Permanent health failure */
 
+	unsigned int apt_base_set:1;	/* APT base reference set? */
 	unsigned int fips_enabled:1;
-	unsigned int health_failure:1;	/* Permanent health failure */
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
@@ -370,6 +370,13 @@ static inline void jent_notime_fini(void *ctx) { (void)ctx; }
 #define ERCT		10 /* RCT failed during initialization */
 #define EHASH		11 /* Hash self test failed */
 #define EMEM		12 /* Can't allocate memory for initialization */
+/* -- END error codes for init function -- */
+
+/* -- BEGIN error masks for health tests -- */
+#define JENT_RCT_FAILURE	1 /* Failure in RCT health test. */
+#define JENT_APT_FAILURE	2 /* Failure in APT health test. */
+#define JENT_LAG_FAILURE	4 /* Failure in Lag predictor health test. */
+/* -- END error masks for health tests -- */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */
 
