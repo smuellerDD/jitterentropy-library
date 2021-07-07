@@ -29,7 +29,6 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem);
 uint64_t *jent_gcd_init(size_t nelem);
 void jent_gcd_fini(uint64_t *delta_history, size_t nelem);
 int jent_gcd_get(uint64_t *value);
-void jent_gcd_reset(void);
 
 #ifdef __cplusplus
 }

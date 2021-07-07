@@ -45,9 +45,6 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	int ret = 0;
 	unsigned int health_test_result;
 
-	/* Force the global gcd into its 'unset' state.*/
-	jent_gcd_reset();
-
 	duration = calloc(rounds, sizeof(uint64_t));
 	if (!duration)
 		return 1;
