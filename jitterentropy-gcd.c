@@ -115,7 +115,8 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
 	}
 
 	/*  Adjust all deltas by the observed (small) common factor. */
-	jent_common_timer_gcd = running_gcd;
+	if (!jent_gcd_tested())
+		jent_common_timer_gcd = running_gcd;
 
 out:
 	return ret;
@@ -124,13 +125,6 @@ out:
 uint64_t *jent_gcd_init(size_t nelem)
 {
 	uint64_t *delta_history;
-
-	/* If the GCD was initialized once, we do not do it again */
-	if (jent_gcd_tested())
-		return NULL;
-
-	if (jent_gcd_tested())
-		return NULL;
 
 	delta_history = jent_zalloc(nelem * sizeof(uint64_t));
 	if (!delta_history)

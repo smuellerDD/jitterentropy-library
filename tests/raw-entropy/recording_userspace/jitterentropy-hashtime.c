@@ -25,36 +25,18 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "jitterentropy-gcd.h"
-
-int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
-{
-	(void)delta_history;
-	(void)nelem;
-	return 0;
-}
-
-uint64_t *jent_gcd_init(size_t nelem) { (void)nelem; return NULL; }
-
-void jent_gcd_fini(uint64_t *delta_history, size_t nelem)
-{
-	(void)delta_history;
-	(void)nelem;
-}
-
-int jent_gcd_get(uint64_t *value)
-{
-	*value = 1;
-	return 0;
-}
-
+#include "jitterentropy-gcd.c"
 #include "jitterentropy-base.c"
+
+#ifndef REPORT_COUNTER_TICKS
+#define REPORT_COUNTER_TICKS 1
+#endif
 
 /***************************************************************************
  * Statistical test logic not compiled for regular operation
  ***************************************************************************/
 static int jent_one_test(const char *pathname, unsigned long rounds,
-			 int notime)
+			 int notime, int report_counter_ticks)
 {
 	unsigned long size = 0;
 	struct rand_data *ec = NULL, *ec_min = NULL;
@@ -98,6 +80,15 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	if (!ec_min) {
 		ret = 1;
 		goto out;
+	}
+
+	if (!report_counter_ticks) {
+		/*
+		 * For this analysis, we want the raw values, not values that
+		 * have had common factors removed.
+		 */
+		ec->jent_common_timer_gcd = 1;
+		ec_min->jent_common_timer_gcd = 1;
 	}
 
 	if (notime) {
@@ -196,7 +187,8 @@ int main(int argc, char * argv[])
 		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", argv[3],
 			 i);
 
-		ret = jent_one_test(pathname, rounds, notime);
+		ret = jent_one_test(pathname, rounds, notime,
+				    REPORT_COUNTER_TICKS);
 
 		if (ret)
 			return ret;

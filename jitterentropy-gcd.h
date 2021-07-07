@@ -32,11 +32,7 @@ int jent_gcd_get(uint64_t *value);
 
 /* Watch for common adjacent GCD values */
 #define jent_gcd_add_value(delta_history, delta, idx)			\
-	{								\
-		if (delta_history)					\
-			delta_history[idx] = delta;			\
-	}
-
+	delta_history[idx] = delta;
 
 #ifdef __cplusplus
 }
