@@ -87,6 +87,7 @@ install-shared:
 install-includes:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(INCDIR)
 	install -m 0644 jitterentropy.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
+	install -m 0644 jitterentropy-base-user.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 
 install-static:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
