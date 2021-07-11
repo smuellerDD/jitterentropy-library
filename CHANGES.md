@@ -1,4 +1,4 @@
-3.0.3
+3.1.0
  * Add link call to pthreads library as suggested by Mikhail Novosyolov
  * Add ENTROPY_SAFETY_FACTOR to apply consideration of asymptotically reaching
    full entropy following SP800-90C suggested by Joshua Hill
@@ -8,8 +8,11 @@
    measurements on systems with low entropy.
  * Add jent_ncpu() detecting the number of existing CPUs. Only when more than
    one CPU is in the system, the internal timer thread is started.
- * add GCD testing and analysis
- * add fixes to APT
+ * add GCD testing and analysis suggested by Joshua Hill
+ * add fixes to APT suggested by Joshua Hill
+ * add lag predictor health test suggested by Joshua Hill
+ * add jent_read_entropy_safe API call
+ * break up jitterentropy-base.c into various smaller code files
 
 3.0.2
  * Small fixes suggested by Joshua Hill
