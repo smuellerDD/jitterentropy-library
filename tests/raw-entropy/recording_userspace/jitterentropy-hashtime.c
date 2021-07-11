@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "jitterentropy-sha3.c"
 #include "jitterentropy-gcd.c"
 #include "jitterentropy-base.c"
 
