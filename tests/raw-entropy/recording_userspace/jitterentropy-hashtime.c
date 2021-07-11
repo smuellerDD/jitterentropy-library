@@ -27,6 +27,7 @@
 
 #include "jitterentropy-sha3.c"
 #include "jitterentropy-gcd.c"
+#include "jitterentropy-health.c"
 #include "jitterentropy-base.c"
 
 #ifndef REPORT_COUNTER_TICKS

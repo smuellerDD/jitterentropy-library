@@ -289,6 +289,8 @@ struct rand_data
 # define JENT_MIN_OSR	1
 #endif
 
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
 /* -- BEGIN Main interface functions -- */
 
 #ifndef JENT_STUCK_INIT_THRES
