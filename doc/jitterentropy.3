@@ -31,6 +31,9 @@ jitterentropy \- CPU Jitter Random Number Generator
 .BI "ssize_t jent_read_entropy(struct rand_data *" entropy_collector ",
 .BI "                          char *" data ", size_t " len );
 .sp
+.BI "ssize_t jent_read_entropy_safe(struct rand_data **" entropy_collector ",
+.BI "                               char *" data ", size_t " len );
+.sp
 .BI "unsigned int jent_version(" void ");
 .fi
 .SH DESCRIPTION
@@ -169,14 +172,45 @@ for the entropy collector. The return code of
 indicates the SP800-90B repetition count online health test failed.
 The error code of
 .IR -3
-specifies that the Chi-Squared online health test failed.
+specifies that the SP800-90B adaptive proportion online health test
+failed.
+.IR -4
+marks that the internal timer generator cannot be initialized.
+.IR -5
+specifies that the LAG predictor health test failed.
+.LP
 When either online health test fails the Jitter RNG will not
 have any data provided in
 .IR data .
-If either SP800-90B health test fails, the entropy collector instance
-will remain in error state. To recover, the entropy collector instance
+The entropy collector instance will remain in error state. To recover,
+the entropy collector instance
 .B MUST
-be deallocated and a fresh instance must be allocated.
+be deallocated and a fresh instance must be allocated. It is
+recommended that you increase the
+.IR osr
+value at least by one when newly allocating the Jitter RNG with
+.BR jent_entropy_collector_alloc ()
+which implies that the health tests are less sensitive due to the
+fact that the assumed entropy rate of the noise source is lower.
+.LP
+.BR jent_read_entropy_safe ()
+is a service function to and therefore operates identically to
+.BR jent_read_entropy ()
+with the exception that it automatically re-allocates the entropy collector
+if a health test failure is observed. Before reallocation, a
+new power-on health test is performed. The allocation of the new entropy
+collector automatically increases the OSR by one. This is done based
+on the idea that a health test failure indicates that the assumed
+entropy rate is too high.
+.LP
+Note the function returns with an health test error if the OSR is
+getting too large. If an error is returned by this function, the Jitter
+RNG is not safe to be used on the current system.
+.LP
+The function
+.BR jent_read_entropy_safe ()
+has the same error codes as
+.BR jent_read_entropy ().
 .LP
 .BR jent_version ()
 returns the version number of the library as an integer value that is

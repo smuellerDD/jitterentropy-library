@@ -169,6 +169,7 @@ struct rand_data
 	uint64_t last_delta2;		/* SENSITIVE stuck test */
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 
+	unsigned int flags;		/* Flags used to initialize */
 	unsigned int osr;		/* Oversampling rate */
 #ifndef JENT_MEMORY_BLOCKS
 # define JENT_MEMORY_BLOCKS 512
