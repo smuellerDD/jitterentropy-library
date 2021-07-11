@@ -20,14 +20,14 @@ else
 endif
 
 JENT_DIR := jitterentropy
-JENT_SRCS := $(wildcard $(JENT_DIR)/*.c)
+JENT_SRCS := $(wildcard $(JENT_DIR)/src/*.c)
 
 NAME := jitterentropy-lfsroutput
 C_SRCS := $(JENT_SRCS) jitterentropy-lfsroutput.c
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 
-INCLUDE_DIRS := $(JENT_DIR)
+INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src
 LIBRARY_DIRS :=
 LIBRARIES := rt pthread
 

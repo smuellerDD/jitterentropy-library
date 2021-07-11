@@ -26,23 +26,24 @@ LIBDIR := lib
 
 # include target directory
 INCDIR := include
+SRCDIR := src
 
 INSTALL_STRIP ?= install -s
 
 NAME := jitterentropy
-LIBMAJOR=$(shell cat jitterentropy-base.c | grep define | grep MAJVERSION | awk '{print $$3}')
-LIBMINOR=$(shell cat jitterentropy-base.c | grep define | grep MINVERSION | awk '{print $$3}')
-LIBPATCH=$(shell cat jitterentropy-base.c | grep define | grep PATCHLEVEL | awk '{print $$3}')
+LIBMAJOR=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep MAJVERSION | awk '{print $$3}')
+LIBMINOR=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep MINVERSION | awk '{print $$3}')
+LIBPATCH=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep PATCHLEVEL | awk '{print $$3}')
 LIBVERSION := $(LIBMAJOR).$(LIBMINOR).$(LIBPATCH)
 
-C_SRCS := $(wildcard *.c) 
+C_SRCS := $(wildcard $(SRCDIR)/*.c) 
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 
 analyze_srcs = $(filter %.c, $(sort $(C_SRCS)))
 analyze_plists = $(analyze_srcs:%.c=%.plist)
 
-INCLUDE_DIRS :=
+INCLUDE_DIRS := . $(SRCDIR)
 LIBRARY_DIRS :=
 LIBRARIES := rt
 
@@ -86,7 +87,6 @@ install-shared:
 install-includes:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(INCDIR)
 	install -m 0644 jitterentropy.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
-	install -m 0644 jitterentropy-base-user.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 
 install-static:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
