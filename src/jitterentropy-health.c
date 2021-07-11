@@ -1,4 +1,6 @@
-/*
+/* Jitter RNG: Health Tests
+ *
+ * Copyright (C) 2021, Joshua E. Hill <josh@keypair.us>
  * Copyright (C) 2021, Stephan Mueller <smueller@chronox.de>
  *
  * License: see LICENSE file in root directory

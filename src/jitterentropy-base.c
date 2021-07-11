@@ -111,6 +111,10 @@ unsigned int jent_version(void)
 	return version;
 }
 
+/***************************************************************************
+ * Random Number Generation
+ ***************************************************************************/
+
 /**
  * Generator of one 256 bit random number
  * Function fills rand_data->data
@@ -140,10 +144,6 @@ static void jent_random_data(struct rand_data *ec)
 			break;
 	}
 }
-
-/***************************************************************************
- * Random Number Generation
- ***************************************************************************/
 
 /**
  * Entry function: Obtain entropy for the caller.
