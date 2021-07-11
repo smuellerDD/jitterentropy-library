@@ -352,7 +352,7 @@ void jent_notime_fini(void *ctx);
 
 #else
 
-static inline int jent_notime_init(void **ctx) { (void)ctx; return 0 }
+static inline int jent_notime_init(void **ctx) { (void)ctx; return 0; }
 static inline void jent_notime_fini(void *ctx) { (void)ctx; }
 
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
