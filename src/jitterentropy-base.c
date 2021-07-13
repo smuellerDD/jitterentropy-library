@@ -96,36 +96,6 @@ unsigned int jent_version(void)
  ***************************************************************************/
 
 /**
- * Generator of one 256 bit random number
- * Function fills rand_data->data
- *
- * @ec [in] Reference to entropy collector
- */
-static void jent_random_data(struct rand_data *ec)
-{
-	unsigned int k = 0, safety_factor = ENTROPY_SAFETY_FACTOR;
-
-	if (!ec->fips_enabled)
-		safety_factor = 0;
-
-	/* priming of the ->prev_time value */
-	jent_measure_jitter(ec, 0, NULL);
-
-	while (1) {
-		/* If a stuck measurement is received, repeat measurement */
-		if (jent_measure_jitter(ec, 0, NULL))
-			continue;
-
-		/*
-		 * We multiply the loop value with ->osr to obtain the
-		 * oversampling rate requested by the caller
-		 */
-		if (++k >= ((DATA_SIZE_BITS + safety_factor) * ec->osr))
-			break;
-	}
-}
-
-/**
  * Entry function: Obtain entropy for the caller.
  *
  * This function invokes the entropy gathering logic as often to generate
