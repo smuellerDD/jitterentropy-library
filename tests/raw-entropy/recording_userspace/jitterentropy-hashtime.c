@@ -95,7 +95,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		ec_min->jent_common_timer_gcd = 1;
 	}
 
-	if (notime) {
+	if (ec->enable_notime) {
 		jent_notime_settick(ec);
 		jent_notime_settick(ec_min);
 	}
