@@ -174,7 +174,7 @@ void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 		 * of an uint64_t should be atomic anyway.
 		 */
 		while (ec->notime_timer == ec->notime_prev_timer)
-			;
+			jent_yield();
 
 		ec->notime_prev_timer = ec->notime_timer;
 		*out = ec->notime_prev_timer;

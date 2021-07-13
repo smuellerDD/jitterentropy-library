@@ -65,6 +65,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sched.h>
 
 /* Timer-less entropy source */
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
@@ -221,6 +222,11 @@ static inline long jent_ncpu(void)
 		return -EFAULT;
 
 	return ncpu;
+}
+
+static inline void jent_yield(void)
+{
+	sched_yield();
 }
 
 /* --- helpers needed in user space -- */

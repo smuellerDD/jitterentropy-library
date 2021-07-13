@@ -42,6 +42,7 @@
 #ifndef _JITTERENTROPY_BASE_POWER_H
 #define _JITTERENTROPY_BASE_POWER_H
 
+#include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,6 +94,11 @@ static inline long jent_ncpu(void)
 	 * this code disables timer thread as only one CPU is "detected".
 	 */
 	return 1;
+}
+
+static inline void jent_yield(void)
+{
+	sched_yield();
 }
 
 /* --- helpers needed in user space -- */

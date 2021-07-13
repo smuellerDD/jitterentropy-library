@@ -92,6 +92,8 @@ static inline long jent_ncpu(void)
 	return 1;
 }
 
+static inline void jent_yield(void) { }
+
 /* --- helpers needed in user space -- */
 
 /* note: these helper functions are shamelessly stolen from the kernel :-) */
