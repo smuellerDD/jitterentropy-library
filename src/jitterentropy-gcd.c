@@ -56,23 +56,14 @@ static inline uint64_t jent_gcd64(uint64_t a, uint64_t b)
 int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
 {
 	uint64_t running_gcd = 0, delta_sum = 0;
-	size_t i, count_mod;
+	size_t i;
 	int ret = 0;
 
 	if (!delta_history)
 		return 0;
 
-	/* First initialize the analysis state. */
-	if (delta_history[0] % 100 == 0)
-		count_mod = 1;
-	else
-		count_mod = 0;
-
 	/* Now perform the analysis on the accumulated delta data. */
 	for (i = 1; i < nelem; i++) {
-		if (delta_history[i] % 100 == 0)
-			count_mod++;
-
 		/*
 		 * ensure that we have a varying delta timer which is necessary
 		 * for the calculation of entropy -- perform this check
@@ -109,8 +100,7 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
 	 * least 10% of all checks -- on some platforms, the counter increments
 	 * in multiples of 100, but not always
 	 */
-	if ((JENT_STUCK_INIT_THRES(nelem) < count_mod) ||
-	    (running_gcd >= 100)) {
+	if (running_gcd >= 100) {
 		ret = ECOARSETIME;
 		goto out;
 	}
