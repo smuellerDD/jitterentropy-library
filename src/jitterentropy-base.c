@@ -229,7 +229,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		case -2:
 		case -3:
 		case -5:
-			osr = (*ec)->osr;
+			osr = (*ec)->osr + 1;
 			flags = (*ec)->flags;
 
 			/* generic arbitrary cutoff */
@@ -243,7 +243,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			if (jent_entropy_init())
 				return -1;
 
-			*ec = jent_entropy_collector_alloc(osr++, flags);
+			*ec = jent_entropy_collector_alloc(osr, flags);
 			if (!*ec)
 				return -1;
 			break;
