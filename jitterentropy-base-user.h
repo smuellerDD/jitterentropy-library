@@ -213,7 +213,7 @@ static inline void jent_memset_secure(void *s, size_t n)
 
 static inline long jent_ncpu(void)
 {
-#ifdef __GNUC__
+#ifdef _POSIX_SOURCE
 	long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 
 	if (ncpu == -1)
