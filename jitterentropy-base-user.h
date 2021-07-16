@@ -213,6 +213,7 @@ static inline void jent_memset_secure(void *s, size_t n)
 
 static inline long jent_ncpu(void)
 {
+#ifdef __GNUC__
 	long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 
 	if (ncpu == -1)
@@ -222,6 +223,9 @@ static inline long jent_ncpu(void)
 		return -EFAULT;
 
 	return ncpu;
+#else
+	return 1;
+#endif
 }
 
 static inline void jent_yield(void)
