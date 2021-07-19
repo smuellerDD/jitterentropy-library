@@ -141,7 +141,7 @@ static void *jent_notime_sample_timer(void *arg)
  */
 int jent_notime_settick(struct rand_data *ec)
 {
-	if (!ec->enable_notime || !notime_thread)
+	if (ec->timer_type != JENT_TIMER_INTERNAL || !notime_thread)
 		return 0;
 
 	ec->notime_interrupt = 0;
@@ -154,7 +154,7 @@ int jent_notime_settick(struct rand_data *ec)
 
 void jent_notime_unsettick(struct rand_data *ec)
 {
-	if (!ec->enable_notime || !notime_thread)
+	if (ec->timer_type != JENT_TIMER_INTERNAL || !notime_thread)
 		return;
 
 	ec->notime_interrupt = 1;
@@ -163,7 +163,11 @@ void jent_notime_unsettick(struct rand_data *ec)
 
 void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 {
-	if (ec->enable_notime) {
+	if (ec->timer_type == JENT_TIMER_HARDWARE) {
+		jent_get_hwtime(out);
+	} else if (ec->timer_type == JENT_TIMER_OS_CLOCK) {
+		jent_get_swtime(out);
+	} else if (ec->timer_type == JENT_TIMER_INTERNAL) {
 		/*
 		 * Allow the counting thread to be initialized and guarantee
 		 * that it ticked since last time we looked.
@@ -179,7 +183,8 @@ void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 		ec->notime_prev_timer = ec->notime_timer;
 		*out = ec->notime_prev_timer;
 	} else {
-		jent_get_nstime(out);
+		/* Signal an error */
+		*out = 0;
 	}
 }
 
@@ -201,10 +206,10 @@ int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 	/* Use internal timer */
 	if (jent_force_internal_timer || (flags & JENT_FORCE_INTERNAL_TIMER)) {
 		/* Self test not run yet */
-		if (!jent_force_internal_timer && jent_time_entropy_init(1))
+		if (!jent_force_internal_timer && jent_time_entropy_init(JENT_TIMER_INTERNAL))
 			return EHEALTH;
 
-		ec->enable_notime = 1;
+		ec->timer_type = JENT_TIMER_INTERNAL;
 		return jent_notime_enable_thread(ec);
 	}
 

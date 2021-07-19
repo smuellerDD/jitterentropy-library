@@ -204,7 +204,12 @@ struct rand_data
 
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 	unsigned int fips_enabled:1;
-	unsigned int enable_notime:1;	/* Use internal high-res timer */
+
+	/* A timer to use */
+#define JENT_TIMER_HARDWARE		0 /* RDTSC on x86_64, etc */
+#define JENT_TIMER_OS_CLOCK		1 /* clock_gettime() on Linux, etc */
+#define JENT_TIMER_INTERNAL		2 /* Internal busy-loop timer */
+	unsigned int timer_type:2;
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
@@ -270,18 +275,18 @@ struct rand_data
 };
 
 /* Flags that can be used to initialize the RNG */
-#define JENT_DISABLE_STIR (1<<0) 	/* UNUSED */
-#define JENT_DISABLE_UNBIAS (1<<1) 	/* UNUSED */
+#define JENT_DISABLE_STIR (1<<0)          /* UNUSED */
+#define JENT_DISABLE_UNBIAS (1<<1)        /* UNUSED */
 #define JENT_DISABLE_MEMORY_ACCESS (1<<2) /* Disable memory access for more
 					     entropy, saves MEMORY_SIZE RAM for
 					     entropy collector */
 #define JENT_FORCE_INTERNAL_TIMER (1<<3)  /* Force the use of the internal
 					     timer */
-#define JENT_DISABLE_INTERNAL_TIMER (1<<4)  /* Disable the potential use of
-					       the internal timer. */
-#define JENT_FORCE_FIPS (1<<5)		  /* Force FIPS compliant mode
-					     including full SP800-90B
-					     compliance. */
+#define JENT_FORCE_OS_CLOCK_TIMER (1<<4)  /* Force the use of the OS timer. */
+#define JENT_FORCE_HARDWARE_TIMER (1<<5)  /* Force the use of the hardware
+						 timer. */
+#define JENT_FORCE_FIPS (1<<6)            /* Force FIPS compliant mode
+					     including full SP800-90B compliance. */
 
 #ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
 # define JENT_MIN_OSR	3

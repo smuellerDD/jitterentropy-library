@@ -271,7 +271,8 @@ static struct rand_data
 	 * Requesting disabling and forcing of internal timer
 	 * makes no sense.
 	 */
-	if ((flags & JENT_DISABLE_INTERNAL_TIMER) &&
+	if (((flags & JENT_FORCE_OS_CLOCK_TIMER) ||
+	     (flags & JENT_FORCE_HARDWARE_TIMER)) &&
 	    (flags & JENT_FORCE_INTERNAL_TIMER))
 		return NULL;
 
@@ -280,7 +281,9 @@ static struct rand_data
 	 * and the user requests it not to be used, do not allocate
 	 * the Jitter RNG instance.
 	 */
-	if (jent_notime_forced() && (flags & JENT_DISABLE_INTERNAL_TIMER))
+	if (jent_notime_forced() &&
+		((flags & JENT_FORCE_OS_CLOCK_TIMER) ||
+		 (flags & JENT_FORCE_HARDWARE_TIMER)))
 		return NULL;
 
 	entropy_collector = jent_zalloc(sizeof(struct rand_data));
@@ -326,8 +329,17 @@ static struct rand_data
 		entropy_collector->jent_common_timer_gcd = 1;
 	}
 
+	/* Use hardware time source */
+	if (flags & JENT_FORCE_HARDWARE_TIMER) {
+		entropy_collector->timer_type = JENT_TIMER_HARDWARE;
+	}
+
+	if (flags & JENT_FORCE_OS_CLOCK_TIMER) {
+		entropy_collector->timer_type = JENT_TIMER_OS_CLOCK;
+	}
+
 	/* Use timer-less noise source */
-	if (!(flags & JENT_DISABLE_INTERNAL_TIMER)) {
+	if (flags & JENT_FORCE_INTERNAL_TIMER) {
 		if (jent_notime_enable(entropy_collector, flags))
 			goto err;
 	}
@@ -375,7 +387,7 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 	}
 }
 
-int jent_time_entropy_init(unsigned int enable_notime)
+int jent_time_entropy_init(unsigned int timer_type)
 {
 	struct rand_data *ec;
 	uint64_t *delta_history;
@@ -386,7 +398,7 @@ int jent_time_entropy_init(unsigned int enable_notime)
 	if (!delta_history)
 		return EMEM;
 
-	if (enable_notime)
+	if (timer_type == JENT_TIMER_INTERNAL)
 		jent_notime_force();
 
 	/*
@@ -399,8 +411,10 @@ int jent_time_entropy_init(unsigned int enable_notime)
 	 * are really bad.
 	 */
 	ec = jent_entropy_collector_alloc_internal(0, JENT_FORCE_FIPS |
-				(enable_notime ? JENT_FORCE_INTERNAL_TIMER :
-						 JENT_DISABLE_INTERNAL_TIMER));
+		((timer_type == JENT_TIMER_INTERNAL) ? JENT_FORCE_INTERNAL_TIMER :
+		((timer_type == JENT_TIMER_OS_CLOCK) ? JENT_FORCE_OS_CLOCK_TIMER :
+			JENT_FORCE_HARDWARE_TIMER)));
+
 	if (!ec) {
 		ret = EMEM;
 		goto out;
@@ -492,7 +506,7 @@ int jent_time_entropy_init(unsigned int enable_notime)
 out:
 	jent_gcd_fini(delta_history, JENT_POWERUP_TESTLOOPCOUNT);
 
-	if (enable_notime && ec)
+	if ((timer_type == JENT_TIMER_INTERNAL) && ec)
 		jent_notime_unsettick(ec);
 
 	jent_entropy_collector_free(ec);
@@ -503,18 +517,22 @@ out:
 JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
 {
-	int ret;
+	int ret = ENOTIME;
 
 	jent_notime_block_switch();
 
 	if (sha3_tester())
 		return EHASH;
 
-	ret = jent_time_entropy_init(0);
+	if (jent_has_hwtime())
+		ret = jent_time_entropy_init(JENT_TIMER_HARDWARE);
+
+	if (ret)
+		ret = jent_time_entropy_init(JENT_TIMER_OS_CLOCK);
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	if (ret)
-		ret = jent_time_entropy_init(1);
+		ret = jent_time_entropy_init(JENT_TIMER_INTERNAL);
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	return ret;
