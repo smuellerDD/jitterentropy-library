@@ -92,22 +92,79 @@
 #include <unistd.h>
 #endif
 
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__i686__)
 
-# define DECLARE_ARGS(val, low, high)    unsigned long low, high
-# define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
-# define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
+#define DECLARE_ARGS(val, low, high)    unsigned long low, high
+#define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
+#define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
 
-static inline void jent_get_nstime(uint64_t *out)
+/* All __x86_64__ and __i686__ CPUs (which start from Pentium Pro) has
+ * CPUID command with at least leaf 1. Still check for the leaf 1
+ * presense.
+ *
+ * This is not true for the __i386__, a presense of CPUID has to be
+ * checked, otherwise we can get #UD on older CPUs. See __get_cpuid_max()
+ * for detecting CPUID presense on __i386__:
+ * https://sites.uclouvain.be/SystInfo/usr/include/cpuid.h.html
+ */
+
+#define cpuid(leaf, a, b, c, d)		\
+	__asm__ __volatile__ ("cpuid"	\
+		: "=a" (a), "=b" (b),		\
+		  "=c" (c), "=d" (d)		\
+		: "0" (leaf))
+
+static inline int jent_has_hwtime(void)
+{
+	uint32_t eax, ebx, ecx, edx;
+
+	cpuid(0, eax, ebx, ecx, edx);
+
+	if (eax > 0) {
+		cpuid(1, eax, ebx, ecx, edx);
+
+		/* EDX Bit 4: tsc - Time Stamp Counter */
+		if (edx & 0x00000010U)
+			return 1;
+	}
+
+	/* No CPUID leaf 1 means no RDTSC */
+	return 0;
+}
+
+static inline void jent_get_hwtime(uint64_t *out)
 {
 	DECLARE_ARGS(val, low, high);
 	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
 	*out = EAX_EDX_VAL(val, low, high);
 }
 
-#else /* __x86_64__ */
+static inline void jent_get_swtime(uint64_t *out)
+{
+	/* we could use CLOCK_MONOTONIC(_RAW), but with CLOCK_REALTIME
+	 * we get some nice extra entropy once in a while from the NTP actions
+	 * that we want to use as well... though, we do not rely on that
+	 * extra little entropy */
+	uint64_t tmp = 0;
+	struct timespec time;
+	if (clock_gettime(CLOCK_REALTIME, &time) == 0)
+	{
+		tmp = ((uint64_t)time.tv_sec & 0xFFFFFFFF) * 1000000000UL;
+		tmp = tmp + (uint64_t)time.tv_nsec;
+	}
+	*out = tmp;
+}
 
-static inline void jent_get_nstime(uint64_t *out)
+#else /* __x86_64__ || __i686__ */
+
+/* Stubs for the non-x86_64 and non-i686 case */
+
+static inline int jent_has_hwtime(void)
+{
+	return 0;
+}
+
+static inline void jent_get_swtime(uint64_t *out)
 {
 	/* OSX does not have clock_gettime -- taken from
 	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html */
@@ -140,7 +197,12 @@ static inline void jent_get_nstime(uint64_t *out)
 # endif /* __MACH__ */
 }
 
-#endif /* __x86_64__ */
+static inline void jent_get_hwtime(uint64_t *out)
+{
+	jent_get_swtime(out);
+}
+
+#endif /* __x86_64__ || __i686__ */
 
 static inline void *jent_zalloc(size_t len)
 {

@@ -53,8 +53,14 @@ static inline void jent_notime_unsettick(struct rand_data *ec) { (void)ec; }
 
 static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 {
-	(void)ec;
-	jent_get_nstime(out);
+	if (ec->timer_type == JENT_TIMER_HARDWARE) {
+		jent_get_hwtime(out);
+	} else if (ec->timer_type == JENT_TIMER_OS_CLOCK) {
+		jent_get_swtime(out);
+	} else {
+		/* Signal an error */
+		*out = 0;
+	}
 }
 
 static inline int jent_notime_enable(struct rand_data *ec, unsigned int flags)
