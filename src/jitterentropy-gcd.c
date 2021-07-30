@@ -55,12 +55,14 @@ static inline uint64_t jent_gcd64(uint64_t a, uint64_t b)
 
 int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
 {
-	uint64_t running_gcd = 0, delta_sum = 0;
+	uint64_t running_gcd, delta_sum = 0;
 	size_t i;
 	int ret = 0;
 
 	if (!delta_history)
 		return 0;
+
+	running_gcd = delta_history[0];
 
 	/* Now perform the analysis on the accumulated delta data. */
 	for (i = 1; i < nelem; i++) {
