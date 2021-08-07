@@ -23,6 +23,8 @@ jitterentropy \- CPU Jitter Random Number Generator
 .sp
 .BI "int jent_entropy_init(" void ");
 .sp
+.BI "int jent_entropy_init_ex(unsigned int " osr ", unsigned int " flags );
+.sp
 .BI "struct rand_data *jent_entropy_collector_alloc(unsigned int " osr ",
 .BI "                                               unsigned int " flags );
 .sp
@@ -83,6 +85,20 @@ A return code other than
 indicates a failure where the calling application
 .B MUST NOT
 use the CPU Jitter Random Number Generator.
+.LP
+.BR jent_entropy_init_ex ()
+behaves identically to
+.BR jent_entropy_init ()
+except that it allows the caller to provide the
+.IR osr
+and
+.IR flags
+parameters which should be identical to the subsequent invocation of
+.BR jent_entropy_collector_alloc ().
+When specifying an oversampling rate
+.IR osr
+different than the default, the startup test honor this value and adjust
+the self-test cut-off thresholds to the same values as used at runtime.
 .LP
 .BR jent_entropy_collector_alloc ()
 allocates a CPU Jitter entropy collector instance and returns the handle
