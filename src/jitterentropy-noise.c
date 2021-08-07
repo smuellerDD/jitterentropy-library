@@ -23,6 +23,8 @@
 #include "jitterentropy-timer.h"
 #include "jitterentropy-sha3.h"
 
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+
 /***************************************************************************
  * Noise sources
  ***************************************************************************/
@@ -46,14 +48,14 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	(void)ec;
 	(void)bits;
 
-	return (1U<<min);
+	return (UINT64_C(1)<<min);
 
 #else /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
 
 	uint64_t time = 0;
 	uint64_t shuffle = 0;
 	unsigned int i = 0;
-	unsigned int mask = (1U<<bits) - 1;
+	unsigned int mask = (UINT64_C(1)<<bits) - 1;
 
 	/*
 	 * Mix the current state of the random number into the shuffle
@@ -77,7 +79,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	 * We add a lower boundary value to ensure we have a minimum
 	 * RNG loop count.
 	 */
-	return (shuffle + (1U<<min));
+	return (shuffle + (UINT64_C(1)<<min));
 
 #endif /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
 }
@@ -106,6 +108,9 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	uint64_t j = 0;
 #define MAX_HASH_LOOP 3
 #define MIN_HASH_LOOP 0
+
+	/* Ensure that macros cannot overflow jent_loop_shuffle() */
+	BUILD_BUG_ON((MAX_HASH_LOOP + MIN_HASH_LOOP) > 63);
 	uint64_t hash_loop_cnt =
 		jent_loop_shuffle(ec, MAX_HASH_LOOP, MIN_HASH_LOOP);
 
@@ -180,6 +185,9 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	uint64_t i = 0;
 #define MAX_ACC_LOOP_BIT 7
 #define MIN_ACC_LOOP_BIT 0
+
+	/* Ensure that macros cannot overflow jent_loop_shuffle() */
+	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);
 	uint64_t acc_loop_cnt =
 		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
 
