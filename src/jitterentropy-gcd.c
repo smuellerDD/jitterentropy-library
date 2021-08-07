@@ -141,3 +141,42 @@ int jent_gcd_get(uint64_t *value)
 	*value = jent_common_timer_gcd;
 	return 0;
 }
+
+int jent_gcd_selftest(void)
+{
+#define JENT_GCD_SELFTEST_ELEM 10
+#define JENT_GCD_SELFTEST_EXP 3ULL
+	uint64_t *gcd = jent_gcd_init(JENT_GCD_SELFTEST_ELEM);
+	uint64_t val;
+	unsigned int i;
+	int ret = EGCD;
+
+	if (!gcd)
+		return EMEM;
+
+	for (i = 0; i < JENT_GCD_SELFTEST_ELEM; i++)
+		jent_gcd_add_value(gcd, i * JENT_GCD_SELFTEST_EXP, i);
+
+	if (jent_gcd_analyze(gcd, JENT_GCD_SELFTEST_ELEM))
+		goto out;
+
+	jent_gcd_fini(gcd, JENT_GCD_SELFTEST_ELEM);
+
+	if (jent_gcd_get(&val))
+		goto out;
+
+	if (val != JENT_GCD_SELFTEST_EXP)
+		goto out;
+
+	ret = 0;
+
+out:
+	jent_gcd_fini(gcd, JENT_GCD_SELFTEST_ELEM);
+	jent_common_timer_gcd = 0;
+
+	/* Return only success if test passed and GCD value reset passed */
+	if (!ret && !jent_gcd_tested())
+		return 0;
+
+	return EGCD;
+}

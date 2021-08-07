@@ -527,14 +527,18 @@ out:
 
 static inline int jent_entropy_init_common_pre(void)
 {
+	int ret;
+
 	jent_notime_block_switch();
 
 	if (sha3_tester())
 		return EHASH;
 
+	ret = jent_gcd_selftest();
+
 	jent_selftest_run = 1;
 
-	return 0;
+	return ret;
 }
 
 static inline int jent_entropy_init_common_post(int ret)

@@ -375,6 +375,7 @@ static inline void jent_notime_fini(void *ctx) { (void)ctx; }
 #define ERCT		10 /* RCT failed during initialization */
 #define EHASH		11 /* Hash self test failed */
 #define EMEM		12 /* Can't allocate memory for initialization */
+#define EGCD		13 /* GCD self-test failed */
 /* -- END error codes for init function -- */
 
 /* -- BEGIN error masks for health tests -- */
