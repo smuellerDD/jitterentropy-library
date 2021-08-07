@@ -29,27 +29,63 @@ int main(int argc, char * argv[])
 {
 	unsigned long size, rounds;
 	int ret = 0;
+	unsigned int flags = 0, osr = 0;
 	struct rand_data *ec_nostir;
 
-	if (argc != 2 && argc != 3) {
-		printf("%s <number of measurements>\n", argv[0]);
+	if (argc < 2) {
+		printf("%s <number of measurements> [--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>]\n", argv[0]);
 		return 1;
 	}
 
 	rounds = strtoul(argv[1], NULL, 10);
 	if (rounds >= UINT_MAX)
 		return 1;
+	argc--;
+	argv++;
 
-	ret = jent_entropy_init();
+	while (argc > 1) {
+		if (!strncmp(argv[1], "--force-fips", 12))
+			flags |= JENT_FORCE_FIPS;
+		else if (!strncmp(argv[1], "--disable-memory-access", 23))
+			flags |= JENT_DISABLE_MEMORY_ACCESS;
+		else if (!strncmp(argv[1], "--disable-internal-timer", 24))
+			flags |= JENT_DISABLE_INTERNAL_TIMER;
+		else if (!strncmp(argv[1], "--force-internal-timer", 22))
+			flags |= JENT_FORCE_INTERNAL_TIMER;
+		else if (!strncmp(argv[1], "--osr", 5)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("OSR value missing\n");
+				return 1;
+			}
+
+			val = strtoul(argv[1], NULL, 10);
+			if (val >= UINT_MAX)
+				return 1;
+			osr = (unsigned int)val;
+		} else {
+			printf("Unknown option %s\n", argv[1]);
+			return 1;
+		}
+
+		argc--;
+		argv++;
+	}
+
+	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
 		printf("The initialization failed with error code %d\n", ret);
 		return ret;
 	}
 
-	ec_nostir = jent_entropy_collector_alloc(0, (argc == 3) ?
-						 JENT_FORCE_INTERNAL_TIMER : 0);
-	if (!ec_nostir)
+	ec_nostir = jent_entropy_collector_alloc(osr, flags);
+	if (!ec_nostir) {
+		printf("Jitter RNG handle cannot be allocated\n");
 		return 1;
+	}
 
 	for (size = 0; size < rounds; size++) {
 		char tmp[32];

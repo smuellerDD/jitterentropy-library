@@ -67,11 +67,11 @@ The test is now invoked with the following command:
 In addition, the collection of output data from the Jitter RNG must be
 compiled with the following command:
 
-	make -f Makefile.lfsroutput
+	make -f Makefile.rng
 
 To generate output data from the Jitter RNG for validation, invoke:
 
-	./jitterentropy-lfsroutput 2> /dev/shm/jent-lfsr.rngout
+	./jitterentropy-rng 2> /dev/shm/jent.rngout
 
 The recording program collects two sets of sample of time deltas obtained 
 from the Jitter RNG:
