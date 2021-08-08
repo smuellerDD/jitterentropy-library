@@ -160,8 +160,6 @@ int jent_gcd_selftest(void)
 	if (jent_gcd_analyze(gcd, JENT_GCD_SELFTEST_ELEM))
 		goto out;
 
-	jent_gcd_fini(gcd, JENT_GCD_SELFTEST_ELEM);
-
 	if (jent_gcd_get(&val))
 		goto out;
 
