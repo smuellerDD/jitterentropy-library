@@ -303,8 +303,10 @@ static struct rand_data
 		if (entropy_collector->mem == NULL)
 			goto err;
 
+#ifndef JENT_RANDOM_MEMACCESS
 		entropy_collector->memblocksize = JENT_MEMORY_BLOCKSIZE;
 		entropy_collector->memblocks = JENT_MEMORY_BLOCKS;
+#endif
 		entropy_collector->memaccessloops = JENT_MEMORY_ACCESSLOOPS;
 	}
 

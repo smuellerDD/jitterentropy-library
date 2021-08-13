@@ -155,6 +155,88 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	jent_memset_secure(itermediary, sizeof(itermediary));
 }
 
+#define MAX_ACC_LOOP_BIT 7
+#define MIN_ACC_LOOP_BIT 0
+#ifdef JENT_RANDOM_MEMACCESS
+
+static inline uint32_t uint32rotl(const uint32_t x, int k)
+{
+	return (x << k) | (x >> (32 - k));
+}
+
+static inline uint32_t xoshiro128starstar(uint32_t *s)
+{
+	const uint32_t result = uint32rotl(s[1] * 5, 7) * 9;
+	const uint32_t t = s[1] << 9;
+
+	s[2] ^= s[0];
+	s[3] ^= s[1];
+	s[1] ^= s[2];
+	s[0] ^= s[3];
+
+	s[2] ^= t;
+
+	s[3] = uint32rotl(s[3], 11);
+
+	return result;
+}
+
+static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
+{
+	uint64_t i = 0;
+	uint32_t prngState[4] = { 0x8e93eec0, 0xce65608a,
+				  0xa8d46b46, 0xe83cef69 };
+	static const uint32_t addressMask =
+				(uint32_t) ((UINT64_C(1)<<JENT_MEMORY_BITS)-1);
+
+	/* Ensure that macros cannot overflow jent_loop_shuffle() */
+	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);
+	uint64_t acc_loop_cnt =
+		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
+
+	if (NULL == ec || NULL == ec->mem)
+		return;
+
+	/*
+	 * Mix the current data into prngState
+	 *
+	 * Any time you see a PRNG in a noise source, you should be concerned.
+	 *
+	 * The PRNG doesn’t directly produce the raw noise, it just adjusts the
+	 * location being updated. The timing of the update is part of the raw
+	 * sample. The main thing this process gets you isn’t better
+	 * “per-update” timing, it gets you mostly independent “per-update”
+	 * timing, so we can now benefit from the Central Limit Theorem!
+	 */
+	for (i = 0; i < sizeof(prngState); i++) {
+		uint8_t *curState = (uint8_t *)prngState;
+
+		curState[i] ^= ec->data[i];
+	}
+
+	/*
+	 * testing purposes -- allow test app to set the counter, not
+	 * needed during runtime
+	 */
+	if (loop_cnt)
+		acc_loop_cnt = loop_cnt;
+	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
+		unsigned char *tmpval = ec->mem + ec->memlocation;
+
+		/*
+		 * memory access: just add 1 to one byte,
+		 * wrap at 255 -- memory access implies read
+		 * from and write to memory location
+		 */
+		*tmpval = (unsigned char)((*tmpval + 1) & 0xff);
+
+		/* Take PRNG output to find new memory location to access. */
+		ec->memlocation = xoshiro128starstar(prngState) & addressMask;
+	}
+}
+
+#else /* JENT_RANDOM_MEMACCESS */
+
 /**
  * Memory Access noise source -- this is a noise source based on variations in
  * 				 memory access times
@@ -183,8 +265,6 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
 	unsigned int wrap = 0;
 	uint64_t i = 0;
-#define MAX_ACC_LOOP_BIT 7
-#define MIN_ACC_LOOP_BIT 0
 
 	/* Ensure that macros cannot overflow jent_loop_shuffle() */
 	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);
@@ -218,6 +298,8 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		ec->memlocation = ec->memlocation % wrap;
 	}
 }
+
+#endif /* JENT_RANDOM_MEMACCESS */
 
 /***************************************************************************
  * Start of entropy processing logic
