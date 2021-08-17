@@ -54,8 +54,8 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 
 	uint64_t time = 0;
 	uint64_t shuffle = 0;
+	uint64_t mask = (UINT64_C(1)<<bits) - 1;
 	unsigned int i = 0;
-	unsigned int mask = (UINT64_C(1)<<bits) - 1;
 
 	/*
 	 * Mix the current state of the random number into the shuffle
