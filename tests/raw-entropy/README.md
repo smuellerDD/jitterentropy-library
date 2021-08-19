@@ -115,7 +115,7 @@ with the following defines:
 
 `CFLAGS="-DJENT_MEMORY_BLOCKS=<blocks> -DJENT_MEMORY_BLOCKSIZE=<blocksize>"`
 
-### Example
+### Example - JENT_RANDOM_MEMACCESS not defined
 
 For example, the test returns the following data (this list is truncated)
 
@@ -146,6 +146,45 @@ You now conclude that the following line is good for you:
 This now implies that your CFLAGS setting for compiling the Jitter RNG is
 
 `CFLAGS="-DJENT_MEMORY_BLOCKS=64 -DJENT_MEMORY_BLOCKSIZE=512"`
+
+Note, the Jitter RNG will allocate JENT_MEMORY_BLOCKS * JENT_MEMORY_BLOCKSIZE
+bytes for its memory access operation.
+
+### Example - JENT_RANDOM_MEMACCESS defined
+
+For example, the test returns the following data
+
+```
+Number of bits  min entropy
+10       0.274937
+11       0.290911
+12       0.233623
+13       0.208554
+14       0.252896
+15       0.358300
+16       0.487093
+17       0.523763
+18       0.512144
+19       0.495936
+20       0.502976
+21       1.131450
+22       1.662580
+23       1.731049
+24       1.381146
+```
+
+You now conclude that the following line is good for you:
+
+```
+17       0.523763
+```
+
+This now implies that your CFLAGS setting for compiling the Jitter RNG is
+
+`CFLAGS="-DJENT_MEMORY_BITS=17"`
+
+Note, the Jitter RNG will allocate 1 << JENT_MEMORY_BITS
+bytes for its memory access operation.
 
 # Author
 Stephan Mueller <smueller@chronox.de>

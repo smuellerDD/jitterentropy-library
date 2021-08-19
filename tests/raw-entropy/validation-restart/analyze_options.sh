@@ -18,6 +18,26 @@ trap "make clean" 0 1 2 3 15
 make clean
 make
 
+crunch_numbers() {
+	local source=$1
+	local target=$2
+
+	if [ $USED_CPUS -eq $NUM_CPU ]
+	then
+		# wait for all
+		wait
+		USED_CPUS=0
+	fi
+
+	if [ ! -d $target ]
+	then
+		USED_CPUS=$(($USED_CPUS+1))
+
+		( BUILD_EXTRACT="no" ENTROPYDATA_DIR=$source RESULTS_DIR=$target ./processdata.sh ) &
+	fi
+}
+
+linearmem_written=0
 calc() {
 	local crunch=$1
 
@@ -26,27 +46,57 @@ calc() {
 		for blocksize in 32 64 128 256 512 1024 2048 4096 8192 16384
 		do
 			local target="$RES_DIR-${blocks}blocks-${blocksize}blocksize"
+			local source="$ENT_DIR-${blocks}blocks-${blocksize}blocksize"
 
-			if [ $USED_CPUS -eq $NUM_CPU ]
+			if [ ! -d "$source" ]
 			then
-				# wait for all
-				wait
-				USED_CPUS=0
+				continue
 			fi
 
-			if [ ! -d $target ]
+			if [ $linearmem_written -eq 0 ]
 			then
-				USED_CPUS=$(($USED_CPUS+1))
-
-				( BUILD_EXTRACT="no" ENTROPYDATA_DIR=$ENT_DIR-${blocks}blocks-${blocksize}blocksize RESULTS_DIR=$target ./processdata.sh ) &
+				echo -e "Number of blocks\tBlocksize\tmin entropy" > $RESULT
+				linearmem_written=1
 			fi
 
 			if [ $crunch -eq 0 ]
 			then
 				ent=$(grep min $target/jent-raw-noise-restart-consolidated.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
 				echo -e "$blocks\t$blocksize\t$ent" >> $RESULT
+			else
+				crunch_numbers $source $target
 			fi
 		done
+	done
+}
+
+randmem_written=0
+calc_randmem() {
+	local crunch=$1
+
+	for bits in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+	do
+		local target="$RES_DIR-random_memaccess-${bits}bits"
+		local source="$ENT_DIR-random_memaccess-${bits}bits"
+
+		if [ ! -d "$source" ]
+		then
+			continue
+		fi
+
+		if [ $randmem_written -eq 0 ]
+		then
+			echo -e "Number of bits\tmin entropy" > $RESULT
+			randmem_written=1
+		fi
+
+		if [ $crunch -eq 0 ]
+		then
+			ent=$(grep min $target/jent-raw-noise-restart-consolidated.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
+			echo -e "$bits\t$ent" >> $RESULT
+		else
+			crunch_numbers $source $target
+		fi
 	done
 }
 
@@ -56,7 +106,10 @@ then
 	NUM_CPU=$(($NUM_CPU+1))
 fi
 
-# Number crunching
+calc_randmem 1
+wait
+calc_randmem 0
+
 calc 1
 wait
 calc 0
