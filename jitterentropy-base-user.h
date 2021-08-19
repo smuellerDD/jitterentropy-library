@@ -228,6 +228,43 @@ static inline long jent_ncpu(void)
 #endif
 }
 
+static inline uint32_t jent_cache_size_roundup(void)
+{
+#ifdef __linux__
+	long l1 = sysconf(_SC_LEVEL1_DCACHE_SIZE);
+	long l2 = sysconf(_SC_LEVEL2_CACHE_SIZE);
+	long l3 = sysconf(_SC_LEVEL3_CACHE_SIZE);
+	uint32_t cache_size = 0;
+	unsigned int i, bitshift = 0;
+
+	/* Cache size reported by system */
+	if (l1 > 0)
+		cache_size += (uint32_t)l1;
+	if (l2 > 0)
+		cache_size += (uint32_t)l2;
+	if (l3 > 0)
+		cache_size += (uint32_t)l3;
+
+	if (!cache_size)
+		return 0;
+
+	/* Find the first bit set in cache number */
+	for (i = 0; i < (sizeof(uint32_t) * 8); i++) {
+		bitshift = sizeof(uint32_t) * 8 - 1 - i;
+		if (cache_size & ((1U) << bitshift))
+			break;
+	}
+
+	if (bitshift == 0 || bitshift > 30)
+		return 0;
+
+	/* Round up to the next power of 2 value */
+	return (1U) << (bitshift + 1);
+#else
+	return 0;
+#endif
+}
+
 static inline void jent_yield(void)
 {
 	sched_yield();

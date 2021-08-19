@@ -186,8 +186,7 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	uint64_t i = 0;
 	uint32_t prngState[4] = { 0x8e93eec0, 0xce65608a,
 				  0xa8d46b46, 0xe83cef69 };
-	static const uint32_t addressMask =
-				(uint32_t) ((UINT64_C(1)<<JENT_MEMORY_BITS)-1);
+	uint32_t addressMask = ec->memmask;
 
 	/* Ensure that macros cannot overflow jent_loop_shuffle() */
 	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);

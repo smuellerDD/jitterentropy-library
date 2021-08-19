@@ -89,7 +89,7 @@
  * Shall the jent_memaccess use a (statistically) random selection for the
  * memory to update?
  */
-#undef JENT_RANDOM_MEMACCESS
+#define JENT_RANDOM_MEMACCESS
 
 /***************************************************************************
  * Jitter RNG State Definition Section
@@ -178,45 +178,28 @@ struct rand_data
 	unsigned int flags;		/* Flags used to initialize */
 	unsigned int osr;		/* Oversampling rate */
 
-/* The step size should be larger than the cacheline size. */
-#ifndef JENT_MEMORY_BITS
-#define JENT_MEMORY_BITS 24
-#endif
-
 #ifdef JENT_RANDOM_MEMACCESS
+  /* The step size should be larger than the cacheline size. */
+# ifndef JENT_MEMORY_BITS
+#  define JENT_MEMORY_BITS 17
+# endif
 # define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
 #else /* JENT_RANDOM_MEMACCESS */
-# if !(JENT_MEMORY_BLOCKS && JENT_MEMORY_BLOCKSIZE)
-#  if JENT_MEMORY_BITS == 9
-#   define JENT_MEMORY_BLOCKS (1U<<4)
-#   define JENT_MEMORY_BLOCKSIZE (1U<<5)
-#  elif JENT_MEMORY_BITS == 10
-#   define JENT_MEMORY_BLOCKS (1U<<5)
-#   define JENT_MEMORY_BLOCKSIZE (1U<<5)
-#  elif JENT_MEMORY_BITS == 11
-#   define JENT_MEMORY_BLOCKS (1U<<6)
-#   define JENT_MEMORY_BLOCKSIZE (1U<<5)
-#  elif JENT_MEMORY_BITS == 12
-#   define JENT_MEMORY_BLOCKS (1U<<6)
-#   define JENT_MEMORY_BLOCKSIZE (1U<<6)
-#  elif JENT_MEMORY_BITS == 13
-#   define JENT_MEMORY_BLOCKS (1U<<7)
-#   define JENT_MEMORY_BLOCKSIZE (1U<<6)
-#  elif JENT_MEMORY_BITS == 14
-#   define JENT_MEMORY_BLOCKS (1U<<8)
-#   define JENT_MEMORY_BLOCKSIZE (1U<<6)
-#  else
-#   define JENT_MEMORY_BLOCKS (1U<<9)
-#   define JENT_MEMORY_BLOCKSIZE (1U<<(JENT_MEMORY_BITS-9))
-#  endif
+# ifndef JENT_MEMORY_BLOCKS
+#  define JENT_MEMORY_BLOCKS 512
+# endif
+# ifndef JENT_MEMORY_BLOCKSIZE
+#  define JENT_MEMORY_BLOCKSIZE 128
 # endif
 # define JENT_MEMORY_SIZE (JENT_MEMORY_BLOCKS*JENT_MEMORY_BLOCKSIZE)
 #endif /* JENT_RANDOM_MEMACCESS */
 
 #define JENT_MEMORY_ACCESSLOOPS 128
 	unsigned char *mem;		/* Memory access location with size of
-					 * memblocks * memblocksize */
-#ifndef JENT_RANDOM_MEMACCESS
+					 * JENT_MEMORY_SIZE or memsize */
+#ifdef JENT_RANDOM_MEMACCESS
+	uint32_t memmask;		/* Memory mask (size of memory - 1) */
+#else
 	unsigned int memlocation; 	/* Pointer to byte in *mem */
 	unsigned int memblocks;		/* Number of memory blocks in *mem */
 	unsigned int memblocksize; 	/* Size of one memory block in bytes */

@@ -184,7 +184,7 @@ This now implies that your CFLAGS setting for compiling the Jitter RNG is
 `CFLAGS="-DJENT_MEMORY_BITS=17"`
 
 Note, the Jitter RNG will allocate 1 << JENT_MEMORY_BITS
-bytes for its memory access operation.
+bytes for its memory access operation, if jent_cache_size_roundup() returns 0.
 
 # Author
 Stephan Mueller <smueller@chronox.de>
