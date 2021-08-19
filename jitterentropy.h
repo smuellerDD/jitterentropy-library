@@ -216,8 +216,8 @@ struct rand_data
 #define JENT_MEMORY_ACCESSLOOPS 128
 	unsigned char *mem;		/* Memory access location with size of
 					 * memblocks * memblocksize */
-	unsigned int memlocation; 	/* Pointer to byte in *mem */
 #ifndef JENT_RANDOM_MEMACCESS
+	unsigned int memlocation; 	/* Pointer to byte in *mem */
 	unsigned int memblocks;		/* Number of memory blocks in *mem */
 	unsigned int memblocksize; 	/* Size of one memory block in bytes */
 #endif

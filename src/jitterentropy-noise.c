@@ -220,8 +220,12 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	 */
 	if (loop_cnt)
 		acc_loop_cnt = loop_cnt;
+
 	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
-		unsigned char *tmpval = ec->mem + ec->memlocation;
+		/* Take PRNG output to find the memory location to update. */
+		unsigned char *tmpval = ec->mem +
+					(xoshiro128starstar(prngState) &
+					 addressMask);
 
 		/*
 		 * memory access: just add 1 to one byte,
@@ -229,9 +233,6 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		 * from and write to memory location
 		 */
 		*tmpval = (unsigned char)((*tmpval + 1) & 0xff);
-
-		/* Take PRNG output to find new memory location to access. */
-		ec->memlocation = xoshiro128starstar(prngState) & addressMask;
 	}
 }
 
