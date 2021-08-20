@@ -299,27 +299,26 @@ static struct rand_data
 		 * Allocate memory for adding variations based on memory
 		 * access
 		 */
-
-#ifdef JENT_RANDOM_MEMACCESS
-
 		uint32_t memsize = jent_cache_size_roundup();
 
 		if (!memsize)
 			memsize = JENT_MEMORY_SIZE;
 		entropy_collector->mem = (unsigned char *)jent_zalloc(memsize);
 
+#ifdef JENT_RANDOM_MEMACCESS
 		/*
 		 * Transform the size into a mask - it is assumed that size is
 		 * a power of 2.
 		 */
 		entropy_collector->memmask = memsize - 1;
-
 #else /* JENT_RANDOM_MEMACCESS */
-
-		entropy_collector->mem =
-			(unsigned char *)jent_zalloc(JENT_MEMORY_SIZE);
-		entropy_collector->memblocksize = JENT_MEMORY_BLOCKSIZE;
+		entropy_collector->memblocksize = memsize / JENT_MEMORY_BLOCKS;
 		entropy_collector->memblocks = JENT_MEMORY_BLOCKS;
+
+		/* sanity check */
+		if (entropy_collector->memblocksize *
+		    entropy_collector->memblocks != memsize)
+			goto err;
 
 #endif /* JENT_RANDOM_MEMACCESS */
 
