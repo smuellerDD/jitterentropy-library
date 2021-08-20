@@ -36,7 +36,7 @@ LIBMINOR=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep MINVERS
 LIBPATCH=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep PATCHLEVEL | awk '{print $$3}')
 LIBVERSION := $(LIBMAJOR).$(LIBMINOR).$(LIBPATCH)
 
-C_SRCS := $(wildcard $(SRCDIR)/*.c) 
+C_SRCS := $(sort $(wildcard $(SRCDIR)/*.c))
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 
