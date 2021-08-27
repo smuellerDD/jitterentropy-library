@@ -184,8 +184,10 @@ static inline uint32_t xoshiro128starstar(uint32_t *s)
 static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
 	uint64_t i = 0;
-	uint32_t prngState[4] = { 0x8e93eec0, 0xce65608a,
-				  0xa8d46b46, 0xe83cef69 };
+	union {
+		uint32_t u[4];
+		uint8_t b[sizeof(uint32_t) * 4];
+	} prngState;
 	uint32_t addressMask = ec->memmask;
 
 	/* Ensure that macros cannot overflow jent_loop_shuffle() */
@@ -195,6 +197,11 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
+
+	prngState.u[0] = 0x8e93eec0;
+	prngState.u[1] = 0xce65608a;
+	prngState.u[2] = 0xa8d46b46;
+	prngState.u[3] = 0xe83cef69;
 
 	/*
 	 * Mix the current data into prngState
@@ -207,11 +214,8 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	 * “per-update” timing, it gets you mostly independent “per-update”
 	 * timing, so we can now benefit from the Central Limit Theorem!
 	 */
-	for (i = 0; i < sizeof(prngState); i++) {
-		uint8_t *curState = (uint8_t *)prngState;
-
-		curState[i] ^= ec->data[i];
-	}
+	for (i = 0; i < sizeof(prngState); i++)
+		prngState.b[i] ^= ec->data[i];
 
 	/*
 	 * testing purposes -- allow test app to set the counter, not
@@ -223,7 +227,7 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
 		/* Take PRNG output to find the memory location to update. */
 		unsigned char *tmpval = ec->mem +
-					(xoshiro128starstar(prngState) &
+					(xoshiro128starstar(prngState.u) &
 					 addressMask);
 
 		/*
