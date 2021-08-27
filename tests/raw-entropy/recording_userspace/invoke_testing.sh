@@ -30,18 +30,25 @@ initialization()
 		fi
 	fi
 
-	trap "make -s -f Makefile.lfsroutput clean; make -s -f Makefile.hashtime clean; exit" 0 1 2 3 15
+	trap "make -s -f Makefile.rng clean; make -s -f Makefile.hashtime clean; exit" 0 1 2 3 15
 }
 
 lfsroutput()
 {
 	echo "Obtaining $NUM_EVENTS blocks of output from Jitter RNG"
 
-	make -s -f Makefile.lfsroutput
+	make -s -f Makefile.rng
 
-	./jitterentropy-lfsroutput $NUM_EVENTS $FORCE_NOTIME_NOISE_SOURCE > $OUTDIR/$IID_DATA
+	local cmdopts=""
 
-	make -s -f Makefile.lfsroutput clean
+	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
+	then
+		cmdopts="$cmdopts --disable-internal-timer"
+	fi
+
+	./jitterentropy-rng $NUM_EVENTS $cmdopts > $OUTDIR/$IID_DATA
+
+	make -s -f Makefile.rng clean
 }
 
 raw_entropy_restart()
