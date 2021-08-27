@@ -94,6 +94,11 @@ static inline long jent_ncpu(void)
 
 static inline void jent_yield(void) { }
 
+static inline uint32_t jent_cache_size_roundup(void)
+{
+	return 0;
+}
+
 /* --- helpers needed in user space -- */
 
 /* note: these helper functions are shamelessly stolen from the kernel :-) */
