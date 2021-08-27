@@ -333,6 +333,7 @@ struct rand_data
 /* get raw entropy */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len);
+JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len);
 /* initialize an instance of the entropy collector */
 JENT_PRIVATE_STATIC
@@ -345,6 +346,7 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector);
 /* initialization of entropy collector */
 JENT_PRIVATE_STATIC
 int jent_entropy_init(void);
+JENT_PRIVATE_STATIC
 int jent_entropy_init_ex(unsigned int osr, unsigned int flags);
 
 /* return version number of core library */
