@@ -1,3 +1,15 @@
+3.2.0
+ * fix: add API call jent_read_entropy_safe to header file
+ * enhancement: add jent_entropy_init_ex API call
+ * enhancement: call jent_entropy_init_ex automatically when jent_entropy_collector_alloc_internal detects that no self test has yet been performed
+ * test: provide jitterentropy-rng test tool allowing all options exported by the library to be invoked
+ * fix: re-add check of time_backwards in power-on test
+ * fix: silence static code analysis tool
+ * test: add test for GCD
+ * enhancement: add GCD selftest
+ * fix: simplify memory management for SHA-3
+ * enhancement: add random memory access (JENT_RANDOM_MEMACCESS)
+
 3.1.0
  * Add link call to pthreads library as suggested by Mikhail Novosyolov
  * Add ENTROPY_SAFETY_FACTOR to apply consideration of asymptotically reaching
