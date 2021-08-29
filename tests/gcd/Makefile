@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018, Stephan Mueller <smueller@chronox.de>
+# Copyright (C) 2021, Stephan Mueller <smueller@chronox.de>
 #
 
 CC		:= gcc
