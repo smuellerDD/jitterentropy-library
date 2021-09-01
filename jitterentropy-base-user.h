@@ -336,23 +336,26 @@ static inline uint32_t jent_cache_size_roundup(void)
 			cache_size += (uint32_t)l2;
 		if (l3 > 0)
 			cache_size += (uint32_t)l3;
+
+		/*
+		 * Force the output_size to be of the form
+		 * (bounding_power_of_2 - 1).
+		 */
+		cache_size |= (cache_size >> 1);
+		cache_size |= (cache_size >> 2);
+		cache_size |= (cache_size >> 4);
+		cache_size |= (cache_size >> 8);
+		cache_size |= (cache_size >> 16);
+
+		if (cache_size == 0)
+			return 0;
+
+		/*
+		* Make the output_size the smallest power of 2 strictly
+		* greater than cache_size.
+		*/
+		cache_size++;
 	}
-
-	/* Force the output_size to be of the form (bounding_power_of_2 - 1). */
-	cache_size |= (cache_size >> 1);
-	cache_size |= (cache_size >> 2);
-	cache_size |= (cache_size >> 4);
-	cache_size |= (cache_size >> 8);
-	cache_size |= (cache_size >> 16);
-
-	if (cache_size == 0)
-		return 0;
-
-	/*
-	 * Make the output_size the smallest power of 2 strictly greater than
-	 * cache_size.
-	 */
-	cache_size++;
 
 	return cache_size;
 }
