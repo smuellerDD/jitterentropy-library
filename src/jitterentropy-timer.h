@@ -53,8 +53,14 @@ static inline void jent_notime_unsettick(struct rand_data *ec) { (void)ec; }
 
 static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 {
-	(void)ec;
-	jent_get_nstime(out);
+	if (ec->enable_hwtime) {
+		jent_get_hwtime(out);
+	} else if (!ec->enable_notime) {
+		jent_get_swtime(out);
+	} else {
+		/* No timer available */
+		*out = 0;
+	}
 }
 
 static inline int jent_notime_enable(struct rand_data *ec, unsigned int flags)

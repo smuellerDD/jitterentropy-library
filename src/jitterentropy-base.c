@@ -262,6 +262,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
  ***************************************************************************/
 
 static int jent_selftest_run = 0;
+static int jent_timer_type = 0;
 
 static struct rand_data
 *jent_entropy_collector_alloc_internal(unsigned int osr,
@@ -277,10 +278,22 @@ static struct rand_data
 	    (flags & JENT_FORCE_INTERNAL_TIMER))
 		return NULL;
 
+	/*
+	 * Requesting forcing more than one timer makes no sense too.
+	 */
+	if ((flags & JENT_FORCE_INTERNAL_TIMER) &&
+	    (flags & (JENT_FORCE_HARDWARE_TIMER|JENT_FORCE_OS_CLOCK_TIMER)))
+		return NULL;
+	if ((flags & JENT_FORCE_HARDWARE_TIMER) &&
+	    (flags & (JENT_FORCE_INTERNAL_TIMER|JENT_FORCE_OS_CLOCK_TIMER)))
+		return NULL;
+	if ((flags & JENT_FORCE_OS_CLOCK_TIMER) &&
+	    (flags & (JENT_FORCE_HARDWARE_TIMER|JENT_FORCE_INTERNAL_TIMER)))
+		return NULL;
+
 	/* Force the self test to be run */
 	if (!jent_selftest_run && jent_entropy_init_ex(osr, flags))
 		return NULL;
-
 
 	/*
 	 * If the initial test code concludes to force the internal timer
@@ -353,12 +366,25 @@ static struct rand_data
 	}
 
 	/*
-	 * Use timer-less noise source - note, OSR must be set in
-	 * entropy_collector!
+	 * Use a requested time if it has passed checks
 	 */
-	if (!(flags & JENT_DISABLE_INTERNAL_TIMER)) {
-		if (jent_notime_enable(entropy_collector, flags))
-			goto err;
+	if (jent_timer_type == JENT_FORCE_HARDWARE_TIMER) {
+		entropy_collector->enable_hwtime = 1;
+		entropy_collector->enable_notime = 0;
+
+	} else if (jent_timer_type == JENT_FORCE_OS_CLOCK_TIMER) {
+		entropy_collector->enable_hwtime = 0;
+		entropy_collector->enable_notime = 0;
+
+	} else if (jent_timer_type == JENT_FORCE_INTERNAL_TIMER) {
+		/*
+		 * Use timer-less noise source - note, OSR must be set in
+		 * entropy_collector!
+		 */
+		if (!(flags & JENT_DISABLE_INTERNAL_TIMER)) {
+			if (jent_notime_enable(entropy_collector, flags))
+				goto err;
+		}
 	}
 
 	return entropy_collector;
@@ -577,11 +603,24 @@ int jent_entropy_init(void)
 	if (ret)
 		return ret;
 
-	ret = jent_time_entropy_init(0, JENT_DISABLE_INTERNAL_TIMER);
+	ret = ENOTIME;
 
+	if (jent_has_hwtime()) {
+		ret = jent_time_entropy_init(0, JENT_DISABLE_INTERNAL_TIMER |
+						JENT_FORCE_HARDWARE_TIMER);
+		if (!ret) jent_timer_type = JENT_FORCE_HARDWARE_TIMER;
+	}
+
+	if (ret) {
+		ret = jent_time_entropy_init(0, JENT_DISABLE_INTERNAL_TIMER |
+						JENT_FORCE_OS_CLOCK_TIMER);
+		if (!ret) jent_timer_type = JENT_FORCE_OS_CLOCK_TIMER;
+	}
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
-	if (ret)
+	if (ret) {
 		ret = jent_time_entropy_init(0, JENT_FORCE_INTERNAL_TIMER);
+		if (!ret) jent_timer_type = JENT_FORCE_INTERNAL_TIMER;
+	}
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	return jent_entropy_init_common_post(ret);
@@ -595,16 +634,34 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 	if (ret)
 		return ret;
 
+	ret = ENOTIME;
+
 	/* Test without internal timer unless caller does not want it */
-	if (!(flags & JENT_FORCE_INTERNAL_TIMER))
-		ret = jent_time_entropy_init(osr,
-					flags | JENT_DISABLE_INTERNAL_TIMER);
+	if (!(flags & JENT_FORCE_INTERNAL_TIMER)) {
+
+		if (jent_has_hwtime()) {
+			ret = jent_time_entropy_init(osr,
+					flags | JENT_DISABLE_INTERNAL_TIMER |
+						JENT_FORCE_HARDWARE_TIMER);
+			if (!ret) jent_timer_type = JENT_FORCE_HARDWARE_TIMER;
+		}
+
+		if (ret) {
+			ret = jent_time_entropy_init(osr,
+					flags | JENT_DISABLE_INTERNAL_TIMER |
+						JENT_FORCE_OS_CLOCK_TIMER);
+			if (!ret) jent_timer_type = JENT_FORCE_OS_CLOCK_TIMER;
+		}
+
+	}
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	/* Test with internal timer unless caller does not want it */
-	if (ret && !(flags & JENT_DISABLE_INTERNAL_TIMER))
+	if (ret && !(flags & JENT_DISABLE_INTERNAL_TIMER)) {
 		ret = jent_time_entropy_init(osr,
 					     flags | JENT_FORCE_INTERNAL_TIMER);
+		if (!ret) jent_timer_type = JENT_FORCE_INTERNAL_TIMER;
+	}
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	return jent_entropy_init_common_post(ret);

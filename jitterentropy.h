@@ -224,7 +224,14 @@ struct rand_data
 
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 	unsigned int fips_enabled:1;
+
+	/* A timer type to use.
+	 * enable_hwtime == 1: a hardware timer is present and has passed checks
+	 * enable_hwtime == 0 && enable_notime == 0: use an OS timer
+	 * enable_hwtime == 0 && enable_notime == 1: use an internal busy-loop
+	 * timer */
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
+	unsigned int enable_hwtime:1;	/* Use hardware high-res timer */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
@@ -302,6 +309,9 @@ struct rand_data
 #define JENT_FORCE_FIPS (1<<5)		  /* Force FIPS compliant mode
 					     including full SP800-90B
 					     compliance. */
+#define JENT_FORCE_HARDWARE_TIMER (1<<6)  /* Force the use of the hardware
+					     timer */
+#define JENT_FORCE_OS_CLOCK_TIMER (1<<7)  /* Force the use of the OS timer. */
 
 #ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
 # define JENT_MIN_OSR	3

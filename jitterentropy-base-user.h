@@ -94,22 +94,10 @@
 #include <unistd.h>
 #endif
 
-#ifdef __x86_64__
-
-# define DECLARE_ARGS(val, low, high)    unsigned long low, high
-# define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
-# define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
-
-static inline void jent_get_nstime(uint64_t *out)
-{
-	DECLARE_ARGS(val, low, high);
-	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
-	*out = EAX_EDX_VAL(val, low, high);
-}
-
-#else /* __x86_64__ */
-
-static inline void jent_get_nstime(uint64_t *out)
+/* A software timer implemented in the OS is supposed to be present in some
+ * form on all architectures
+ */
+static inline void jent_get_swtime(uint64_t *out)
 {
 	/* OSX does not have clock_gettime -- taken from
 	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html */
@@ -142,7 +130,66 @@ static inline void jent_get_nstime(uint64_t *out)
 # endif /* __MACH__ */
 }
 
-#endif /* __x86_64__ */
+#if defined(__x86_64__) || defined(__i686__)
+
+# define DECLARE_ARGS(val, low, high)    unsigned long low, high
+# define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
+# define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
+
+/* All __x86_64__ and __i686__ CPUs (which start from Pentium Pro) has
+ * CPUID command with at least Leaf 1. Still check for the Leaf 1 presense.
+ */
+
+# define cpuid(leaf, subleaf, a, b, c, d)	\
+	__asm__ __volatile__ ("cpuid"		\
+		: "=a" (a), "=b" (b),		\
+		  "=c" (c), "=d" (d)		\
+		: "a" (leaf), "c" (subleaf));
+
+static inline int jent_has_hwtime(void)
+{
+	uint32_t eax, ebx, ecx, edx;
+
+	cpuid(0, 0, eax, ebx, ecx, edx);
+
+	if (eax > 0) {
+		cpuid(1, 0, eax, ebx, ecx, edx);
+
+		/* EDX Bit 4: tsc - Time Stamp Counter */
+		if (edx & 0x00000010U)
+			return 1;
+	}
+
+	/* No CPUID Leaf 1 means no RDTSC */
+	return 0;
+}
+
+static inline void jent_get_hwtime(uint64_t *out){
+	DECLARE_ARGS(val, low, high);
+	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
+	*out = EAX_EDX_VAL(val, low, high);
+}
+
+/* A default nanoseconds timer for a given architecture */
+static inline void jent_get_nstime(uint64_t *out)
+{
+	jent_get_hwtime(out);
+}
+
+#else /* __x86_64__ || __i686__ */
+
+/* Stubs for the non-x86_64 and non-i686 case */
+static inline int jent_has_hwtime(void)
+{
+	return 0;
+}
+
+static inline void jent_get_nstime(uint64_t *out)
+{
+	jent_get_swtime(out);
+}
+
+#endif /* __x86_64__ || __i686__ */
 
 static inline void *jent_zalloc(size_t len)
 {
