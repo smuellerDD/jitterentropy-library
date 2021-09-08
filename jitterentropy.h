@@ -159,6 +159,8 @@ struct jent_notime_thread {
 	void (*jent_notime_stop)(void *ctx);
 };
 
+#define JENT_FLAGS_TO_MEMSIZE 28
+
 /* The entropy pool */
 struct rand_data
 {
@@ -183,7 +185,9 @@ struct rand_data
 # ifndef JENT_MEMORY_BITS
 #  define JENT_MEMORY_BITS 17
 # endif
-# define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
+# ifndef JENT_MEMORY_SIZE
+#  define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
+# endif
 #else /* JENT_RANDOM_MEMACCESS */
 # ifndef JENT_MEMORY_BLOCKS
 #  define JENT_MEMORY_BLOCKS 512
@@ -191,7 +195,9 @@ struct rand_data
 # ifndef JENT_MEMORY_BLOCKSIZE
 #  define JENT_MEMORY_BLOCKSIZE 128
 # endif
-# define JENT_MEMORY_SIZE (JENT_MEMORY_BLOCKS*JENT_MEMORY_BLOCKSIZE)
+# ifndef JENT_MEMORY_SIZE
+#  define JENT_MEMORY_SIZE (JENT_MEMORY_BLOCKS*JENT_MEMORY_BLOCKSIZE)
+# endif
 #endif /* JENT_RANDOM_MEMACCESS */
 
 #define JENT_MEMORY_ACCESSLOOPS 128
@@ -225,6 +231,7 @@ struct rand_data
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 	unsigned int fips_enabled:1;
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
+	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
@@ -302,6 +309,24 @@ struct rand_data
 #define JENT_FORCE_FIPS (1<<5)		  /* Force FIPS compliant mode
 					     including full SP800-90B
 					     compliance. */
+
+/* Flags field limiting the amount of memory to be used for memory access */
+#define JENT_MAX_MEMSIZE_32kB		(UINT32_C( 1) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_64kB		(UINT32_C( 2) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_128kB		(UINT32_C( 3) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_256kB		(UINT32_C( 4) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_512kB		(UINT32_C( 5) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_1MB		(UINT32_C( 6) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_2MB		(UINT32_C( 7) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_4MB		(UINT32_C( 8) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_8MB		(UINT32_C( 9) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_16MB		(UINT32_C(10) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_32MB		(UINT32_C(11) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_64MB		(UINT32_C(12) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_128MB		(UINT32_C(13) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_256MB		(UINT32_C(14) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_512MB		(UINT32_C(15) << JENT_FLAGS_TO_MEMSIZE)
+#define JENT_MAX_MEMSIZE_MAX		JENT_MAX_MEMSIZE_512MB
 
 #ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
 # define JENT_MIN_OSR	3

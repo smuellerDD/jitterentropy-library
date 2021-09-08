@@ -14,6 +14,13 @@ NONIID_RESTART_DATA="jent-raw-noise-restart"
 NONIID_DATA="jent-raw-noise"
 IID_DATA="jent-conditioned.data"
 
+# Define the maximum memory size
+# 0 -> use default
+# 1 -> JENT_MAX_MEMSIZE_32kB
+# ...
+# 15 -> JENT_MAX_MEMSIZE_512MB
+MAX_MEMORY_SIZE=0
+
 # If this variable is set to any value, the timer-less entropy source
 # is forced and tested
 FORCE_NOTIME_NOISE_SOURCE=""
@@ -39,7 +46,7 @@ lfsroutput()
 
 	make -s -f Makefile.rng
 
-	local cmdopts=""
+	local cmdopts="--max-mem $MAX_MEMORY_SIZE"
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
@@ -57,7 +64,7 @@ raw_entropy_restart()
 
 	make -s -f Makefile.hashtime
 
-	./jitterentropy-hashtime $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_RESTART_DATA $FORCE_NOTIME_NOISE_SOURCE
+	./jitterentropy-hashtime $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_RESTART_DATA $MAX_MEMORY_SIZE $FORCE_NOTIME_NOISE_SOURCE
 
 	make -s -f Makefile.hashtime clean
 }
@@ -68,7 +75,7 @@ raw_entropy()
 
 	make -s -f Makefile.hashtime
 
-	./jitterentropy-hashtime $NUM_EVENTS 1 $OUTDIR/$NONIID_DATA $FORCE_NOTIME_NOISE_SOURCE
+	./jitterentropy-hashtime $NUM_EVENTS 1 $OUTDIR/$NONIID_DATA $MAX_MEMORY_SIZE $FORCE_NOTIME_NOISE_SOURCE
 
 	make -s -f Makefile.hashtime clean
 }

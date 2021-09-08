@@ -33,7 +33,7 @@ int main(int argc, char * argv[])
 	struct rand_data *ec_nostir;
 
 	if (argc < 2) {
-		printf("%s <number of measurements> [--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>]\n", argv[0]);
+		printf("%s <number of measurements> [--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--max-mem <NUM>]\n", argv[0]);
 		return 1;
 	}
 
@@ -66,6 +66,70 @@ int main(int argc, char * argv[])
 			if (val >= UINT_MAX)
 				return 1;
 			osr = (unsigned int)val;
+		} else if (!strncmp(argv[1], "--max-mem", 9)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("Maximum memory value missing\n");
+				return 1;
+			}
+
+			val = strtoul(argv[1], NULL, 10);
+			switch (val) {
+			case 0;
+				// Allow to set no option
+				break;
+			case 1:
+				flags |= JENT_MAX_MEMSIZE_32kB;
+				break;
+			case 2:
+				flags |= JENT_MAX_MEMSIZE_64kB;
+				break;
+			case 3:
+				flags |= JENT_MAX_MEMSIZE_128kB;
+				break;
+			case 4:
+				flags |= JENT_MAX_MEMSIZE_256kB;
+				break;
+			case 5:
+				flags |= JENT_MAX_MEMSIZE_512kB;
+				break;
+			case 6:
+				flags |= JENT_MAX_MEMSIZE_1MB;
+				break;
+			case 7:
+				flags |= JENT_MAX_MEMSIZE_2MB;
+				break;
+			case 8:
+				flags |= JENT_MAX_MEMSIZE_4MB;
+				break;
+			case 9:
+				flags |= JENT_MAX_MEMSIZE_8MB;
+				break;
+			case 10:
+				flags |= JENT_MAX_MEMSIZE_16MB;
+				break;
+			case 11:
+				flags |= JENT_MAX_MEMSIZE_32MB;
+				break;
+			case 12:
+				flags |= JENT_MAX_MEMSIZE_64MB;
+				break;
+			case 13:
+				flags |= JENT_MAX_MEMSIZE_128MB;
+				break;
+			case 14:
+				flags |= JENT_MAX_MEMSIZE_256MB;
+				break;
+			case 15:
+				flags |= JENT_MAX_MEMSIZE_512MB;
+				break;
+			default:
+				printf("Unknown maximum memory value\n");
+				return 1;
+			}
 		} else {
 			printf("Unknown option %s\n", argv[1]);
 			return 1;
@@ -90,7 +154,7 @@ int main(int argc, char * argv[])
 	for (size = 0; size < rounds; size++) {
 		char tmp[32];
 
-		if (0 > jent_read_entropy(ec_nostir, tmp, sizeof(tmp))) {
+		if (0 > jent_read_entropy_safe(&ec_nostir, tmp, sizeof(tmp))) {
 			fprintf(stderr, "FIPS 140-2 continuous test failed\n");
 			return 1;
 		}

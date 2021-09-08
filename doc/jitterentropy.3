@@ -157,6 +157,18 @@ is set, the allocation returns NULL.
 .B JENT_FORCE_FIPS
 Force full FIPS 140 and SP800-90B compliance irrespective of the
 FIPS setting of the underlying operating system.
+.TP
+.B JENT_MAX_MEMSIZE_*
+Define the maximum amount of memory that the Jitter RNG will use
+for its operation supporting the collection of raw noise. Without
+using one of these flags, the Jitter RNG uses a built-in limit.
+The larger the amount of memory is the more entropy is collected.
+Yet, the default value is safe on most CPUs. If you have memory
+pressure but the entropy rate of your CPU is sufficient a lower
+memory size may be used. Contrary when having sufficient memory
+but insufficient entropy, larger memory sizes may be specified.
+In any case, the Jitter RNG uses at most as much memory as the
+sum of the CPU's data caches.
 .LP
 .BR jent_entropy_collector_free()
 zeroizes and frees the given CPU Jitter entropy collector instance.

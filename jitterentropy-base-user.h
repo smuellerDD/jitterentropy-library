@@ -351,9 +351,9 @@ static inline uint32_t jent_cache_size_roundup(void)
 			return 0;
 
 		/*
-		* Make the output_size the smallest power of 2 strictly
-		* greater than cache_size.
-		*/
+		 * Make the output_size the smallest power of 2 strictly
+		 * greater than cache_size.
+		 */
 		cache_size++;
 	}
 

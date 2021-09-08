@@ -40,7 +40,7 @@
  * Statistical test logic not compiled for regular operation
  ***************************************************************************/
 static int jent_one_test(const char *pathname, unsigned long rounds,
-			 int notime, int report_counter_ticks)
+			 unsigned int flags, int report_counter_ticks)
 {
 	unsigned long size = 0;
 	struct rand_data *ec = NULL, *ec_min = NULL;
@@ -72,15 +72,13 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		printf("The initialization failed with error code %d\n", ret);
 		goto out;
 	}
-	ec = jent_entropy_collector_alloc(0, notime ?
-					     JENT_FORCE_INTERNAL_TIMER : 0);
+	ec = jent_entropy_collector_alloc(0, flags);
 	if (!ec) {
 		ret = 1;
 		goto out;
 	}
 
-	ec_min = jent_entropy_collector_alloc(0, notime ?
-						 JENT_FORCE_INTERNAL_TIMER : 0);
+	ec_min = jent_entropy_collector_alloc(0, flags);
 	if (!ec_min) {
 		ret = 1;
 		goto out;
@@ -139,7 +137,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 out:
 	free(duration);
 	free(duration_min);
-	if (notime) {
+	if (flags & JENT_FORCE_INTERNAL_TIMER) {
 		if (ec)
 			jent_notime_unsettick(ec);
 		if (ec_min)
@@ -168,11 +166,12 @@ out:
 int main(int argc, char * argv[])
 {
 	unsigned long i, rounds, repeats;
-	int ret, notime = 0;
+	unsigned int flags = 0;
+	int ret;
 	char pathname[4096];
 
-	if (argc != 4 && argc != 5) {
-		printf("%s <rounds per repeat> <number of repeats> <filename>\n", argv[0]);
+	if (argc != 4 && argc != 5 && argc != 6) {
+		printf("%s <rounds per repeat> <number of repeats> <filename> <max mem>\n", argv[0]);
 		return 1;
 	}
 
@@ -184,14 +183,72 @@ int main(int argc, char * argv[])
 	if (repeats >= UINT_MAX)
 		return 1;
 
-	if (argc == 5)
-		notime = 1;
+	if (argc >= 5) {
+		unsigned long val = strtoul(argv[4], NULL, 10);
+
+		switch (val) {
+		case 0:
+			// Allow to set no option
+			break;
+		case 1:
+			flags |= JENT_MAX_MEMSIZE_32kB;
+			break;
+		case 2:
+			flags |= JENT_MAX_MEMSIZE_64kB;
+			break;
+		case 3:
+			flags |= JENT_MAX_MEMSIZE_128kB;
+			break;
+		case 4:
+			flags |= JENT_MAX_MEMSIZE_256kB;
+			break;
+		case 5:
+			flags |= JENT_MAX_MEMSIZE_512kB;
+			break;
+		case 6:
+			flags |= JENT_MAX_MEMSIZE_1MB;
+			break;
+		case 7:
+			flags |= JENT_MAX_MEMSIZE_2MB;
+			break;
+		case 8:
+			flags |= JENT_MAX_MEMSIZE_4MB;
+			break;
+		case 9:
+			flags |= JENT_MAX_MEMSIZE_8MB;
+			break;
+		case 10:
+			flags |= JENT_MAX_MEMSIZE_16MB;
+			break;
+		case 11:
+			flags |= JENT_MAX_MEMSIZE_32MB;
+			break;
+		case 12:
+			flags |= JENT_MAX_MEMSIZE_64MB;
+			break;
+		case 13:
+			flags |= JENT_MAX_MEMSIZE_128MB;
+			break;
+		case 14:
+			flags |= JENT_MAX_MEMSIZE_256MB;
+			break;
+		case 15:
+			flags |= JENT_MAX_MEMSIZE_512MB;
+			break;
+		default:
+			printf("Unknown maximum memory value\n");
+			return 1;
+		}
+	}
+
+	if (argc == 6)
+		flags |= JENT_FORCE_INTERNAL_TIMER;
 
 	for (i = 1; i <= repeats; i++) {
 		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", argv[3],
 			 i);
 
-		ret = jent_one_test(pathname, rounds, notime,
+		ret = jent_one_test(pathname, rounds, flags,
 				    REPORT_COUNTER_TICKS);
 
 		if (ret)
