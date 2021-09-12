@@ -95,11 +95,7 @@ unsigned int jent_version(void)
  * Helper
  ***************************************************************************/
 
-static inline unsigned int jent_max_memsize(unsigned int flags)
-{
-	return flags >> JENT_FLAGS_TO_MEMSIZE;
-}
-
+/* Calculate log2 of given value assuming that the value is a power of 2 */
 static inline unsigned int jent_log2_simple(unsigned int val)
 {
 	unsigned int idx = 0;
@@ -107,6 +103,38 @@ static inline unsigned int jent_log2_simple(unsigned int val)
 	while (val >>= 1)
 		idx++;
 	return idx;
+}
+
+/* Increase the memory size by one step */
+static inline unsigned int jent_update_memsize(unsigned int flags)
+{
+	unsigned int global_max = JENT_FLAGS_TO_MAX_MEMSIZE(
+							JENT_MAX_MEMSIZE_MAX);
+	unsigned int max;
+
+	max = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
+
+	if (!max) {
+		/*
+		 * The safe starting value is the amount of memory we allocated
+		 * last round.
+		 */
+		max = jent_log2_simple(JENT_MEMORY_SIZE);
+		/* Adjust offset */
+		max = (max > JENT_MAX_MEMSIZE_OFFSET) ?
+			max - JENT_MAX_MEMSIZE_OFFSET :	0;
+	} else {
+		max++;
+	}
+
+	max = (max > global_max) ? global_max : max;
+
+	/* Clear out the max size */
+	flags &= ~JENT_MAX_MEMSIZE_MASK;
+	/* Set the freshly calculated max size */
+	flags |= JENT_MAX_MEMSIZE_TO_FLAGS(max);
+
+	return flags;
 }
 
 /***************************************************************************
@@ -239,7 +267,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		return -1;
 
 	while (len > 0) {
-		unsigned int osr, flags;
+		unsigned int osr, flags, max_mem_set;
 
 		ret = jent_read_entropy(*ec, p, len);
 
@@ -252,6 +280,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		case -5:
 			osr = (*ec)->osr + 1;
 			flags = (*ec)->flags;
+			max_mem_set = (*ec)->max_mem_set;
 
 			/* generic arbitrary cutoff */
 			if (osr > 20)
@@ -262,28 +291,13 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			 * let the Jitter RNG increase the maximum memory by
 			 * one step.
 			 */
-			if (!(*ec)->max_mem_set) {
-				unsigned int global_max =
-					jent_max_memsize(JENT_MAX_MEMSIZE_MAX);
-				unsigned int max = jent_max_memsize(flags);
+			if (!max_mem_set)
+				flags = jent_update_memsize(flags);
 
-				if (!max) {
-					max = jent_log2_simple(JENT_MEMORY_SIZE);
-					/* Adjust compliant to jent_memsize() */
-					max = (max > 14) ? max - 14 : 0;
-				} else {
-					max++;
-				}
-
-				max = (max > global_max) ? global_max : max;
-
-				/* Clear out the max size */
-				flags &= ~JENT_MAX_MEMSIZE_MAX;
-				/* Set the freshly calculated max size */
-				flags |= (max << JENT_FLAGS_TO_MEMSIZE);
-			}
-
-			/* re-allocate entropy collector with higher OSR */
+			/*
+			 * re-allocate entropy collector with higher OSR and
+			 * memory size
+			 */
 			jent_entropy_collector_free(*ec);
 
 			/* Perform new health test with updated OSR */
@@ -293,6 +307,10 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			*ec = _jent_entropy_collector_alloc(osr, flags);
 			if (!*ec)
 				return -1;
+
+			/* Remember whether caller configured memory size */
+			(*ec)->max_mem_set = !!max_mem_set;
+
 			break;
 
 		default:
@@ -333,9 +351,14 @@ static inline uint32_t jent_memsize(unsigned int flags)
 {
 	uint32_t memsize, max_memsize;
 
-	max_memsize = UINT32_C(1) << (jent_max_memsize(flags) + 14);
-	if (max_memsize == 1)
+	max_memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
+
+	if (max_memsize == 0) {
 		max_memsize = JENT_MEMORY_SIZE;
+	} else {
+		max_memsize = UINT32_C(1) << (max_memsize +
+					      JENT_MAX_MEMSIZE_OFFSET);
+	}
 
 	/* Allocate memory for adding variations based on memory access */
 	memsize = jent_cache_size_roundup();
@@ -479,7 +502,7 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 
 	/* Remember that the caller provided a maximum size flag */
 	if (ec)
-		ec->max_mem_set = !!jent_max_memsize(flags);
+		ec->max_mem_set = !!JENT_FLAGS_TO_MAX_MEMSIZE(flags);
 
 	return ec;
 }
