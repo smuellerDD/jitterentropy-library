@@ -155,36 +155,80 @@ bytes for its memory access operation.
 For example, the test returns the following data
 
 ```
-Number of bits  min entropy
-10       0.274937
-11       0.290911
-12       0.233623
-13       0.208554
-14       0.252896
-15       0.358300
-16       0.487093
-17       0.523763
-18       0.512144
-19       0.495936
-20       0.502976
-21       1.131450
-22       1.662580
-23       1.731049
-24       1.381146
+Max memory size Number of bits  min entropy
+...
+1048576 22       0.455422
+1048576 23       0.502770
+1048576 24       0.477720
+2097152 10       1.039674
+2097152 11       1.032812
+2097152 12       1.041936
+2097152 13       1.008875
+2097152 14       1.024471
+2097152 15       0.909834
+2097152 16       0.993031
+2097152 17       1.015445
+2097152 18       1.043770
+2097152 19       1.056669
+2097152 20       1.118589
+2097152 21       1.009380
+2097152 22       0.983140
+2097152 23       1.012301
+2097152 24       0.981318
+4194304 10       1.502379
+4194304 11       1.546510
+4194304 12       1.622690
+4194304 13       1.565022
+...
 ```
 
-You now conclude that the following line is good for you:
+This stack tells you in the first column the actual amount of memory requested
+to be allocated by the Jitter RNG for the memory access (Note, this amount
+is limited by the CPU's data cache size.). The second column is what you can
+ignore for this test.
+
+You now conclude that the following line is good for you because the measurement
+shows that about 1 bit of entropy per Jitter RNG time delta is received. This
+is compared with the Jitter RNG internally applied entropy rate of 1/3 bits
+of entropy per time delta which means that the Jitter RNG heuristics
+underestimates the available entropy - which is the result you want.
 
 ```
-17       0.523763
+2097152 13       1.008875
 ```
 
-This now implies that your CFLAGS setting for compiling the Jitter RNG is
+This value means that the allocated memory is 2097152.
 
-`CFLAGS="-DJENT_MEMORY_BITS=17"`
+You now have two options how to apply this value: either recompiling the
+library and use this value as the default allocation or use it as
+a flags field when allocating your Jitter RNG instance which does not
+need to change the binary.
+
+When recompiling, you need to apply the log2(2097152) = 21 with your
+CFLAGS setting for compiling the Jitter RNG like this:
+
+`CFLAGS="-DJENT_MEMORY_BITS=21"`
+
+When using the value to allocate the Jitter RNG instance when you did not
+recompile the library code you specify this value when invoking
+`jent_entropy_init_ex` and `jent_entropy_collector_alloc` by adding the
+following to your flags field:
+
+```
+unsigned int flags = 0;
+...
+flags |= JENT_MAX_MEMSIZE_2MB;
+
+ret = jent_entropy_init_ex(0, flags);
+...
+ret = jent_entropy_collector_alloc(0, flags);
+...
+
+```
 
 Note, the Jitter RNG will allocate 1 << JENT_MEMORY_BITS
-bytes for its memory access operation, if jent_cache_size_roundup() returns 0.
+bytes for its memory access operation, but at most what
+jent_cache_size_roundup() returns.
 
 # Author
 Stephan Mueller <smueller@chronox.de>
