@@ -1,3 +1,10 @@
+3.3.0
+ * add jent_get_cachesize if _SC_LEVEL1_DCACHE_SIZE is not defined
+ * limit the memory buffer size allocated and allow caller to provide
+   the means to provide a limit, too
+ * fix: update man page
+ * update README explaining how to handle entropy shortfall to make it consistent with the current code base
+
 3.2.0
  * fix: add API call jent_read_entropy_safe to header file
  * enhancement: add jent_entropy_init_ex API call
