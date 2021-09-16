@@ -202,8 +202,8 @@ int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 	if (jent_force_internal_timer || (flags & JENT_FORCE_INTERNAL_TIMER)) {
 		/* Self test not run yet */
 		if (!jent_force_internal_timer &&
-		    jent_time_entropy_init(flags | JENT_FORCE_INTERNAL_TIMER,
-					   ec->osr))
+		    jent_time_entropy_init(ec->osr,
+					   flags | JENT_FORCE_INTERNAL_TIMER))
 			return EHEALTH;
 
 		ec->enable_notime = 1;
