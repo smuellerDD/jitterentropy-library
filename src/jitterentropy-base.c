@@ -710,6 +710,8 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 	if (ret)
 		return ret;
 
+	ret = ENOTIME;
+
 	/* Test without internal timer unless caller does not want it */
 	if (!(flags & JENT_FORCE_INTERNAL_TIMER))
 		ret = jent_time_entropy_init(osr,
