@@ -45,20 +45,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <intrin.h>
 
 typedef uint64_t __u64;
 
-#define RdTSC __asm _emit 0x0f __asm _emit 0x31
-
 static void jent_get_nstime(__u64 *out)
 {
-	__u64 ret = 0;
-	_asm {
-		RdTSC
-		mov DWORD PTR ret, eax
-		mov DWORD PTR[ret + 4], edx
-	}
-	*out = ret;
+	*out = __rdtsc();
 }
 
 static inline void *jent_zalloc(size_t len)
