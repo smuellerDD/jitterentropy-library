@@ -36,6 +36,7 @@ static inline uint64_t jent_gcd64(uint64_t a, uint64_t b)
 	/* Make a greater a than or equal b. */
 	if (a < b) {
 		uint64_t c = a;
+
 		a = b;
 		b = c;
 	}
@@ -113,12 +114,8 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem)
 		goto out;
 	}
 
-	/*
-	 * Ensure that we have variations in the time stamp below 100 for at
-	 * least 10% of all checks -- on some platforms, the counter increments
-	 * in multiples of 100, but not always
-	 */
-	if (running_gcd >= 100) {
+	/* Set a sensible maximum value. */
+	if (running_gcd >= UINT32_MAX / 2) {
 		ret = ECOARSETIME;
 		goto out;
 	}
