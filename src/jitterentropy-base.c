@@ -437,7 +437,7 @@ static struct rand_data
 	entropy_collector->osr = osr;
 	entropy_collector->flags = flags;
 
-	if (jent_fips_enabled() || (flags & JENT_FORCE_FIPS))
+	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled())
 		entropy_collector->fips_enabled = 1;
 
 	/* Initialize the APT */
