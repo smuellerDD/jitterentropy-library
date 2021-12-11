@@ -369,7 +369,7 @@ void jent_random_data(struct rand_data *ec)
 	/* priming of the ->prev_time value */
 	jent_measure_jitter(ec, 0, NULL);
 
-	while (1) {
+	while (jent_health_failure(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
 		if (jent_measure_jitter(ec, 0, NULL))
 			continue;
