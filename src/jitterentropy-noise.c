@@ -104,7 +104,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 			   uint64_t loop_cnt, unsigned int stuck)
 {
 	HASH_CTX_ON_STACK(ctx);
-	uint8_t itermediary[SHA3_256_SIZE_DIGEST];
+	uint8_t intermediary[SHA3_256_SIZE_DIGEST];
 	uint64_t j = 0;
 #define MAX_HASH_LOOP 3
 #define MIN_HASH_LOOP 0
@@ -146,13 +146,13 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 		 * next loop iteration.
 		 */
 		if (stuck || (j < hash_loop_cnt - 1))
-			sha3_final(&ctx, itermediary);
+			sha3_final(&ctx, intermediary);
 		else
 			sha3_final(&ctx, ec->data);
 	}
 
 	jent_memset_secure(&ctx, SHA_MAX_CTX_SIZE);
-	jent_memset_secure(itermediary, sizeof(itermediary));
+	jent_memset_secure(intermediary, sizeof(intermediary));
 }
 
 #define MAX_ACC_LOOP_BIT 7
