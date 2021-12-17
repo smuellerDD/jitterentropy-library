@@ -361,10 +361,10 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
  */
 void jent_random_data(struct rand_data *ec)
 {
-	unsigned int k = 0, safety_factor = ENTROPY_SAFETY_FACTOR;
+	unsigned int k = 0, safety_factor = 0;
 
-	if (!ec->fips_enabled)
-		safety_factor = 0;
+	if (ec->fips_enabled)
+		safety_factor = ENTROPY_SAFETY_FACTOR;
 
 	/* priming of the ->prev_time value */
 	jent_measure_jitter(ec, 0, NULL);
