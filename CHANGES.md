@@ -1,6 +1,7 @@
 3.3.1
  * fix: bug fix in initialization logic by Vladis Dronov <vdronov@redhat.com>
  * fix: use __asm__ instead of asm to suit the C11 standard
+ * add API call jent_set_fips_failure_callback as requested by Daniel Ojalvo
 
 3.3.0
  * add jent_get_cachesize if _SC_LEVEL1_DCACHE_SIZE is not defined

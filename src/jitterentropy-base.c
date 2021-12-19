@@ -664,6 +664,7 @@ static inline int jent_entropy_init_common_pre(void)
 	int ret;
 
 	jent_notime_block_switch();
+	jent_health_cb_block_switch();
 
 	if (sha3_tester())
 		return EHASH;
@@ -731,4 +732,10 @@ JENT_PRIVATE_STATIC
 int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread)
 {
 	return jent_notime_switch(new_thread);
+}
+
+JENT_PRIVATE_STATIC
+int jent_set_fips_failure_callback(jent_fips_failure_cb cb)
+{
+	return jent_set_fips_failure_callback_internal(cb);
 }

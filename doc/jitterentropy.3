@@ -21,6 +21,8 @@ jitterentropy \- CPU Jitter Random Number Generator
 .sp
 .BI "int jent_entropy_switch_notime_impl(struct jent_notime_thread *" new_thread );
 .sp
+.BI "int jent_set_fips_failure_callback(jent_fips_failure_cb " cb ");
+.sp
 .BI "int jent_entropy_init(" void ");
 .sp
 .BI "int jent_entropy_init_ex(unsigned int " osr ", unsigned int " flags );
@@ -71,6 +73,19 @@ for a documentation of
 This function must be called before
 .BR jent_entropy_init ()
 as after this call, the change of the thread handler is denied.
+.LP
+.BR jent_set_fips_failure_callback ()
+allows the caller to set a callback that is invoked by the
+Jitter RNG when a health test failure is detected. The callback
+specified with the parameter
+.BR cb
+to the API function receives the Jitter RNG state with the parameter
+.BR ec
+and the FIPS health test failure with the parameter
+.BR health_failure .
+his function must be called before
+.BR jent_entropy_init ()
+as after this call, the change of the callback is denied.
 .LP
 .BR jent_entropy_init ()
 initializes the CPU Jitter Random Number Generator. The function

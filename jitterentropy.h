@@ -378,6 +378,15 @@ int jent_entropy_init(void);
 JENT_PRIVATE_STATIC
 int jent_entropy_init_ex(unsigned int osr, unsigned int flags);
 
+/*
+ * Set a callback to run on health failure in FIPS mode.
+ * This function will take an action determined by the caller.
+ */
+typedef void (*jent_fips_failure_cb)(struct rand_data *ec,
+				     unsigned int health_failure);
+JENT_PRIVATE_STATIC
+int jent_set_fips_failure_callback(jent_fips_failure_cb cb);
+
 /* return version number of core library */
 JENT_PRIVATE_STATIC
 unsigned int jent_version(void);
