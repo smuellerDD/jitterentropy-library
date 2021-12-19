@@ -2,6 +2,7 @@
 
 CC ?= gcc
 #Hardening
+ENABLE_STACK_PROTECTOR ?= 1
 CFLAGS ?= -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -fwrapv -Wconversion
 LDFLAGS +=-Wl,-z,relro,-z,now -lpthread
@@ -13,10 +14,12 @@ else
   GCC_GTEQ_490 := $(shell expr `$(CC) -dumpfullversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
 endif
 
-ifeq "$(GCC_GTEQ_490)" "1"
-  CFLAGS += -fstack-protector-strong
-else
-  CFLAGS += -fstack-protector-all
+ifeq "$(ENABLE_STACK_PROTECTOR)" "1"
+  ifeq "$(GCC_GTEQ_490)" "1"
+    CFLAGS += -fstack-protector-strong
+  else
+    CFLAGS += -fstack-protector-all
+  endif
 endif
 
 # Change as necessary
