@@ -401,5 +401,11 @@ void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len)
 	/* The final operation automatically re-initializes the ->hash_state */
 	sha3_final(ec->hash_state, jent_block);
 	memcpy(dst, jent_block, dst_len);
+
+	/*
+	 * Stir the new state with the data from the old state - the digest
+	 * of the old data is not considered to have entropy.
+	 */
+	sha3_update(ec->hash_state, jent_block, sizeof(jent_block));
 	jent_memset_secure(jent_block, sizeof(jent_block));
 }
