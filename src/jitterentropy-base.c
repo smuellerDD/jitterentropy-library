@@ -231,24 +231,7 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	 * expensive.
 	 */
 #ifndef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
-	{
-		uint8_t jent_block[SHA3_256_SIZE_DIGEST];
-
-		/*
-		 * With the initialization of the hash state in sha3_final,
-		 * the old data that was used as a random number which lingers
-		 * in the hash state is safely overwritten.
-		 */
-		sha3_final(ec->hash_state, jent_block);
-
-		/*
-		 * Feed the message digest of the old state into the new state
-		 * stir the new state. The digest is considered to have no
-		 * entropy.
-		 */
-		sha3_update(ec->hash_state, jent_block, sizeof(jent_block));
-		jent_memset_secure(jent_block, sizeof(jent_block));
-	}
+	jent_read_random_block(ec, NULL, 0);
 #endif
 
 err:

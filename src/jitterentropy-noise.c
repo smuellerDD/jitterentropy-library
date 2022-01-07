@@ -400,7 +400,8 @@ void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len)
 
 	/* The final operation automatically re-initializes the ->hash_state */
 	sha3_final(ec->hash_state, jent_block);
-	memcpy(dst, jent_block, dst_len);
+	if (dst_len)
+		memcpy(dst, jent_block, dst_len);
 
 	/*
 	 * Stir the new state with the data from the old state - the digest
