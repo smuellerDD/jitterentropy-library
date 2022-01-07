@@ -208,22 +208,47 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	}
 
 	/*
-	 * To be on the safe side, we generate one more round of entropy
-	 * which we do not give out to the caller. That round shall ensure
-	 * that in case the calling application crashes, memory dumps, pages
-	 * out, or due to the CPU Jitter RNG lingering in memory for long
-	 * time without being moved and an attacker cracks the application,
-	 * all he reads in the entropy pool is a value that is NEVER EVER
-	 * being used for anything. Thus, he does NOT see the previous value
-	 * that was returned to the caller for cryptographic purposes.
+	 * Enhanced backtracking support: At this point, the hash state
+	 * contains the digest of the previous Jitter RNG collection round
+	 * which is inserted there by jent_read_random_block with the SHA
+	 * update operation. At the current code location we completed
+	 * one request for a caller and we do not know how long it will
+	 * take until a new request is sent to us. To guarantee enhanced
+	 * backtracking resistance at this point (i.e. ensure that an attacker
+	 * cannot obtain information about prior random numbers we generated),
+	 * but still stirring the hash state with old data the Jitter RNG
+	 * obtains a new message digest from its state and re-inserts it.
+	 * After this operation, the Jitter RNG state is still stirred with
+	 * the old data, but an attacker who gets access to the memory after
+	 * this point cannot deduce the random numbers produced by the
+	 * Jitter RNG prior to this point.
 	 */
 	/*
-	 * If we use secured memory, do not use that precaution as the secure
-	 * memory protects the entropy pool. Moreover, note that using this
-	 * call reduces the speed of the RNG by up to half
+	 * If we use secured memory, where backtracking support may not be
+	 * needed because the state is protected in a different method,
+	 * it is permissible to drop this support. But strongly weigh the
+	 * pros and cons considering that the SHA3 operation is not that
+	 * expensive.
 	 */
 #ifndef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
-	jent_random_data(ec);
+	{
+		uint8_t jent_block[SHA3_256_SIZE_DIGEST];
+
+		/*
+		 * With the initialization of the hash state in sha3_final,
+		 * the old data that was used as a random number which lingers
+		 * in the hash state is safely overwritten.
+		 */
+		sha3_final(ec->hash_state, jent_block);
+
+		/*
+		 * Feed the message digest of the old state into the new state
+		 * stir the new state. The digest is considered to have no
+		 * entropy.
+		 */
+		sha3_update(ec->hash_state, jent_block, sizeof(jent_block));
+		jent_memset_secure(jent_block, sizeof(jent_block));
+	}
 #endif
 
 err:
