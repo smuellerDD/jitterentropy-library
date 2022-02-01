@@ -1,9 +1,12 @@
 3.4.0
- * fix: bug fix in initialization logic by Vladis Dronov <vdronov@redhat.com>
- * fix: use __asm__ instead of asm to suit the C11 standard
  * enhancement: add API call jent_set_fips_failure_callback as requested by Daniel Ojalvo
  * fix: Change the SHA-3 integration: The entropy pool is now a SHA-3 state.
 It is filled with the time delta containing entropy and auxiliary data that does not contain entropy using a SHA update operation. The auxiliary data is calculated by a SHA-3 hashing of some varying state data. The time delta that contains entropy is measured about the SHA-3 hasing of the auxiliary data. This satisfies FIPS 140-3 IG D.K resolutions 4, 6, and 8.
+ * enhancement: add CMake support by Andrew Hopkins
+
+3.3.1
+ * fix: bug fix in initialization logic by Vladis Dronov <vdronov@redhat.com>
+ * fix: use __asm__ instead of asm to suit the C11 standard
 
 3.3.0
  * add jent_get_cachesize if _SC_LEVEL1_DCACHE_SIZE is not defined

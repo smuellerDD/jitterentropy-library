@@ -7,6 +7,9 @@ CFLAGS ?= -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-ali
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -fwrapv -Wconversion
 LDFLAGS +=-Wl,-z,relro,-z,now -lpthread
 
+# Enable internal timer support
+CFLAGS += -DJENT_CONF_ENABLE_INTERNAL_TIMER
+
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
 ifeq "$(GCCVERSIONFORMAT)" "3"
   GCC_GTEQ_490 := $(shell expr `$(CC) -dumpversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
