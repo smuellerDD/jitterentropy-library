@@ -47,11 +47,32 @@
 #include <string.h>
 #include <intrin.h>
 
-typedef uint64_t __u64;
+#if defined(_M_ARM) || defined(_M_ARM64)
+#include <profileapi.h>
+#include <windows.h>
+#endif
 
-static void jent_get_nstime(__u64 *out)
+#ifdef _MSC_VER
+#include <BaseTsd.h>
+#undef JENT_CONF_ENABLE_INTERNAL_TIMER
+typedef SSIZE_T ssize_t;
+#endif
+
+static void jent_get_nstime(uint64_t *out)
 {
+#if defined(_M_ARM) || defined(_M_ARM64)
+
+	// Generic code.
+	LARGE_INTEGER ticks;
+	QueryPerformanceCounter(&ticks);
+	*out = ticks.QuadPart;
+
+#else
+
+       // x86, x86_64 intrinsic
 	*out = __rdtsc();
+
+#endif
 }
 
 static inline void *jent_zalloc(size_t len)
@@ -96,11 +117,10 @@ static inline uint32_t jent_cache_size_roundup(void)
 
 /* note: these helper functions are shamelessly stolen from the kernel :-) */
 
-static inline __u64 rol64(__u64 word, unsigned int shift)
+static inline uint64_t rol64(uint64_t word, unsigned int shift)
 {
 	return (word << shift) | (word >> (64 - shift));
 }
-
 
 #endif /* _JITTERENTROPY_BASE_X86_H */
 
