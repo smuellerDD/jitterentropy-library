@@ -102,6 +102,9 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	uint64_t hash_loop_cnt =
 		jent_loop_shuffle(MAX_HASH_LOOP, MIN_HASH_LOOP);
 
+	/* Use the memset to shut up valgrind */
+	memset(intermediary, 0, sizeof(intermediary));
+
 	sha3_256_init(&ctx);
 
 	/*
