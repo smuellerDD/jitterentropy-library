@@ -42,6 +42,10 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /***************************************************************************
  * Jitter RNG Configuration Section
  *
@@ -459,5 +463,9 @@ uint64_t jent_lfsr_var_stat(struct rand_data *ec, unsigned int min);
 #endif /* CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT */
 
 /* -- END of statistical test function -- */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _JITTERENTROPY_H */
