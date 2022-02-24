@@ -66,7 +66,7 @@ typedef uint64_t __u64;
 static inline void jent_get_nstime(uint64_t *out)
 {
 	DECLARE_ARGS(val, low, high);
-	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
+	__asm__ __volatile__("rdtsc" : EAX_EDX_RET(val, low, high));
 	*out = EAX_EDX_VAL(val, low, high);
 }
 
