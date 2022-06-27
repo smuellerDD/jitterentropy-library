@@ -198,7 +198,7 @@ int main(int argc, char *argv[])
 
 		res = strtok_r(buf, " ", &saveptr);
 		if (!res) {
-			printf("strtok_r error\n");
+			printf("strtok_r error (%s)\n", buf);
 			return 1;
 		}
 
@@ -211,7 +211,7 @@ int main(int argc, char *argv[])
 
 		res = strtok_r(NULL, " ", &saveptr);
 		if (!res) {
-			printf("strtok_r error\n");
+			printf("strtok_r error (%s)\n", buf);
 			return 1;
 		}
 

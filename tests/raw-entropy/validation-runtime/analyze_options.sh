@@ -75,32 +75,29 @@ randmem_written=0
 calc_randmem() {
 	local crunch=$1
 
-	for memsize in 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 16777216 33554432 67108864 134217728 268435456 536870912
+	for bits in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
 	do
-		for bits in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
-		do
-			local target="$RES_DIR-random_memaccess-${bits}bits-${memsize}bytes"
-			local source="$ENT_DIR-random_memaccess-${bits}bits-${memsize}bytes"
+		local target="$RES_DIR-random_memaccess-${bits}bits"
+		local source="$ENT_DIR-random_memaccess-${bits}bits"
 
-			if [ ! -d "$source" ]
-			then
-				continue
-			fi
+		if [ ! -d "$source" ]
+		then
+			continue
+		fi
 
-			if [ $randmem_written -eq 0 ]
-			then
-				echo -e "Max memory size\tNumber of bits\tmin entropy" > $RESULT
-				randmem_written=1
-			fi
+		if [ $randmem_written -eq 0 ]
+		then
+			echo -e "Number of bits\tmin entropy" > $RESULT
+			randmem_written=1
+		fi
 
-			if [ $crunch -eq 0 ]
-			then
-				ent=$(grep min $target/jent-raw-noise-0001.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
-				echo -e "$memsize\t$bits\t$ent" >> $RESULT
-			else
-				crunch_numbers $source $target
-			fi
-		done
+		if [ $crunch -eq 0 ]
+		then
+			ent=$(grep min $target/jent-raw-noise-0001.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
+			echo -e "$bits\t$ent" >> $RESULT
+		else
+			crunch_numbers $source $target
+		fi
 	done
 }
 

@@ -10,17 +10,14 @@ OUTDIR="../results-measurements"
 
 if (grep JENT_RANDOM_MEMACCESS ../../../jitterentropy.h | head -n 1 | grep -q define)
 then
-	for memsize in 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 16777216 33554432 67108864 134217728 268435456 536870912
+	for bits in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
 	do
-		for bits in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
-		do
-			export CFLAGS="-DJENT_MEMORY_BITS=$bits -DJENT_MEMORY_SIZE=$memsize"
+		export CFLAGS="-DJENT_MEMORY_BITS=$bits"
 
-			./invoke_testing.sh
+		./invoke_testing.sh
 
-			mv $OUTDIR $OUTDIR-random_memaccess-${bits}bits-${memsize}bytes
+		mv $OUTDIR $OUTDIR-random_memaccess-${bits}bits
 
-		done
 	done
 else
 

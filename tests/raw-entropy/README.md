@@ -72,7 +72,8 @@ entropy is more than what the Jitter RNG heuristic applies.
 
 # Approach to Solve Insufficient Entropy
 
-In case your entropy assessment shows that insufficient entropy is
+The Jitter RNG does not need any specific configurations or settings. However,
+in case your entropy assessment shows that insufficient entropy is
 present (e.g. by showing that the measured entropy rate is less than 1/3), you
 can perform a search whether different memory access values gives better
 entropy.
@@ -155,37 +156,30 @@ bytes for its memory access operation.
 For example, the test returns the following data
 
 ```
-Max memory size Number of bits  min entropy
-...
-1048576 22       0.455422
-1048576 23       0.502770
-1048576 24       0.477720
-2097152 10       1.039674
-2097152 11       1.032812
-2097152 12       1.041936
-2097152 13       1.008875
-2097152 14       1.024471
-2097152 15       0.909834
-2097152 16       0.993031
-2097152 17       1.015445
-2097152 18       1.043770
-2097152 19       1.056669
-2097152 20       1.118589
-2097152 21       1.009380
-2097152 22       0.983140
-2097152 23       1.012301
-2097152 24       0.981318
-4194304 10       1.502379
-4194304 11       1.546510
-4194304 12       1.622690
-4194304 13       1.565022
-...
+Number of bits  min entropy
+10       0.406505
+11       0.445082
+12       0.402972
+13       0.459021
+14       0.436911
+15       0.578995
+16       0.643272
+17       0.573532
+18       0.627915
+19       0.503923
+20       0.720609
+21       1.871527
+22       2.491569
+23       2.481533
+24       2.493987
+25       2.491303
+26       2.495017
 ```
 
 This stack tells you in the first column the actual amount of memory requested
-to be allocated by the Jitter RNG for the memory access (Note, this amount
-is limited by the CPU's data cache size.). The second column is what you can
-ignore for this test.
+to be allocated by the Jitter RNG for the memory access in powers of 2 (Note,
+this amount is limited by the CPU's data cache size.). The second column is what
+you can ignore for this test.
 
 You now conclude that the following line is good for you because the measurement
 shows that about 1 bit of entropy per Jitter RNG time delta is received. This
@@ -194,17 +188,17 @@ of entropy per time delta which means that the Jitter RNG heuristics
 underestimates the available entropy - which is the result you want.
 
 ```
-2097152 13       1.008875
+21       1.871527
 ```
 
-This value means that the allocated memory is 2097152.
+This value means that the allocated memory is 2^21 = 2MBytes.
 
 You now have two options how to apply this value: either recompiling the
 library and use this value as the default allocation or use it as
 a flags field when allocating your Jitter RNG instance which does not
 need to change the binary.
 
-When recompiling, you need to apply the log2(2097152) = 21 with your
+When recompiling, you need to apply the value `21` with your
 CFLAGS setting for compiling the Jitter RNG like this:
 
 `CFLAGS="-DJENT_MEMORY_BITS=21"`
