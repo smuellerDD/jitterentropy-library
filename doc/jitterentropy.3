@@ -259,6 +259,40 @@ has the same error codes as
 returns the version number of the library as an integer value that is
 monotonically increasing.
 .PP
+.SH FIPS 140-3 Considerations
+In order for the Jitter RNG to execute compliant to FIPS 140-3 and by
+extension also SP800-90B and SP800-90C compliant, the following
+considerations must be applied:
+.TP
+.B Enable FIPS mode
+The FIPS mode is enabled by using the
+.IR JENT_FORCE_FIPS
+flag during initialization of the Jitter RNG library. On Linux, the
+the FIPS mode is transparently enabled if the entire operating system
+was booted in FIPS mode, usually by using the "fips=1" Linux kernel
+command line parameter.
+.TP
+.B Perform heursitic entropy analysis
+The test tool set provided as part of the Jitter RNG library source
+distribution contains the helper to obtain raw noise data at runtime
+as well as at initialization time to calculate the SP800-90B entropy rate.
+This rate must be above 0.333, the implied heuristic minimum by the Jitter
+RNG library.
+.TP
+.B Resolve insufficient entropy
+If insufficient entropy is found during the aforementioned SP800-90B
+analysis, the test tool set provides a helper to analyze optimal
+settings - see the test tool set for raw entropy for details. The resulting
+configuration values are expected to be used with the
+.IR flags
+parameter of the calls
+.BR jent_entropy_collector_alloc ()
+and
+.BR jent_entropy_init_ex () .
+It is recommended that the function
+.BR jent_read_entropy_safe ()
+API call is used for generating random numbers.
+.PP
 .SH NOTES
 In addition to use the generated random bit stream directly
 for cryptographic operations, the output of
