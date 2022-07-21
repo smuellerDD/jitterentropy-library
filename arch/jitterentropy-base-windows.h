@@ -65,14 +65,14 @@ static void jent_get_nstime(uint64_t *out)
 {
 #if defined(_M_ARM) || defined(_M_ARM64)
 
-	// Generic code.
+	/* Generic code. */
 	LARGE_INTEGER ticks;
 	QueryPerformanceCounter(&ticks);
 	*out = ticks.QuadPart;
 
 #else
 
-       // x86, x86_64 intrinsic
+       /* x86, x86_64 intrinsic */
 	*out = __rdtsc();
 
 #endif
