@@ -78,7 +78,7 @@ int main(int argc, char * argv[])
 			val = strtoul(argv[1], NULL, 10);
 			switch (val) {
 			case 0:
-				// Allow to set no option
+				/* Allow to set no option */
 				break;
 			case 1:
 				flags |= JENT_MAX_MEMSIZE_32kB;
