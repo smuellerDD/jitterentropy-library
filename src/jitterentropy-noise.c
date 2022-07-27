@@ -33,16 +33,19 @@
  * Update of the loop count used for the next round of
  * an entropy collection.
  *
+ * @ec [in] entropy collector struct
  * @bits [in] is the number of low bits of the timer to consider
  * @min [in] is the number of bits we shift the timer value to the right at
  *	     the end to make sure we have a guaranteed minimum value
  *
  * @return Newly calculated loop counter
  */
-static uint64_t jent_loop_shuffle(unsigned int bits, unsigned int min)
+static uint64_t jent_loop_shuffle(struct rand_data *ec,
+				  unsigned int bits, unsigned int min)
 {
 #ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
 
+	(void)ec;
 	(void)bits;
 
 	return (UINT64_C(1)<<min);
@@ -55,10 +58,16 @@ static uint64_t jent_loop_shuffle(unsigned int bits, unsigned int min)
 	unsigned int i = 0;
 
 	/*
+	 * Mix the current state of the random number into the shuffle
+	 * calculation to balance that shuffle a bit more.
+	 */
+	jent_get_nstime_internal(ec, &time);
+
+	/*
 	 * We fold the time value as much as possible to ensure that as many
 	 * bits of the time stamp are included as possible.
 	 */
-	for (i = 0; ((DATA_SIZE_BITS + bits - 1) / bits) > i; i++) {
+	for (i = 0; (((sizeof(time) << 3) + bits - 1) / bits) > i; i++) {
 		shuffle ^= time & mask;
 		time = time >> bits;
 	}
@@ -79,7 +88,7 @@ static uint64_t jent_loop_shuffle(unsigned int bits, unsigned int min)
  * This function injects the individual bits of the time value into the
  * entropy pool using a hash.
  *
- * @ec [in] entropy collector struct -- may be NULL
+ * @ec [in] entropy collector struct
  * @time [in] time delta to be injected
  * @loop_cnt [in] if a value not equal to 0 is set, use the given value as
  *		  number of loops to perform the hash operation
@@ -100,7 +109,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	/* Ensure that macros cannot overflow jent_loop_shuffle() */
 	BUILD_BUG_ON((MAX_HASH_LOOP + MIN_HASH_LOOP) > 63);
 	uint64_t hash_loop_cnt =
-		jent_loop_shuffle(MAX_HASH_LOOP, MIN_HASH_LOOP);
+		jent_loop_shuffle(ec, MAX_HASH_LOOP, MIN_HASH_LOOP);
 
 	/* Use the memset to shut up valgrind */
 	memset(intermediary, 0, sizeof(intermediary));
@@ -203,7 +212,7 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	/* Ensure that macros cannot overflow jent_loop_shuffle() */
 	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);
 	uint64_t acc_loop_cnt =
-		jent_loop_shuffle(MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
+		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
@@ -281,7 +290,7 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	/* Ensure that macros cannot overflow jent_loop_shuffle() */
 	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);
 	uint64_t acc_loop_cnt =
-		jent_loop_shuffle(MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
+		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
