@@ -128,8 +128,12 @@ The
 .IR osr
 value defines the amount of oversampling performed by the entropy
 collector. Usually, a caller wants to provide the value 0 here to
-apply the default oversampling. The call ensures that any value lower
-than 3 is converted into a 1 automatically by the entropy collector.
+apply the default oversampling. The call ensures that any value
+lower than
+.B JENT_MIN_OSR
+is converted to
+.B JENT_MIN_OSR
+automatically.
 .LP
 The
 .IR flags
