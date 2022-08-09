@@ -96,7 +96,8 @@
 /* Support rdtsc read on 64-bit and 32-bit x86 architectures */
 
 #ifdef __x86_64__
-# define DECLARE_ARGS(val, low, high)    unsigned long low, high
+/* specify 64 bit type since long is 32 bits in LLP64 x86_64 systems */
+# define DECLARE_ARGS(val, low, high)    uint64_t low, high
 # define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
 # define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
 #elif __i386__
@@ -131,6 +132,13 @@ static inline void jent_get_nstime(uint64_t *out)
 	tmp = tmp << 32;
 	tmp = tmp | aixtime.tb_low;
 	*out = tmp;
+#  elif defined(__aarch64__)
+        uint64_t ctr_val;
+        /*
+         * Use the system counter for aarch64 (64 bit ARM).
+         */
+        asm volatile("mrs %0, cntvct_el0" : "=r" (ctr_val));
+        *out = ctr_val;
 # else /* __MACH__ */
 	/* we could use CLOCK_MONOTONIC(_RAW), but with CLOCK_REALTIME
 	 * we get some nice extra entropy once in a while from the NTP actions
