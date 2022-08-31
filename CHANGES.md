@@ -1,3 +1,9 @@
+3.4.1
+ * add FIPS 140 hints to man page
+ * simplify the test tool to search for optimal configurations
+ * fix: jent_loop_shuffle: re-add setting the time that was lost with 3.4.0
+ * enhancement: add ARM64 assembler code to read high-res timer
+
 3.4.0
  * enhancement: add API call jent_set_fips_failure_callback as requested by Daniel Ojalvo
  * fix: Change the SHA-3 integration: The entropy pool is now a SHA-3 state.
