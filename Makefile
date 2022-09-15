@@ -4,7 +4,7 @@ CC ?= gcc
 #Hardening
 ENABLE_STACK_PROTECTOR ?= 1
 CFLAGS ?= -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
-CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -fwrapv -Wconversion
+CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -fwrapv -Wconversion -Wno-type-limits
 LDFLAGS +=-Wl,-z,relro,-z,now -lpthread
 
 # Enable internal timer support

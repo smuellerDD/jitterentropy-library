@@ -1,0 +1,36 @@
+#!/bin/bash
+
+set -eu
+
+rm -f pvalues.math
+for index in {0..16}; do 
+	if [[ -d results-measurements-random_memaccess-depth-${index} && -s results-measurements-random_memaccess-depth-${index}/jent-raw-noise-sd.bin ]]; then
+		echo -n "$index: " 
+
+		#If the data needs to be translated, do that.
+		#if [[ ! -s results-measurements-random_memaccess-depth-${index}/jent-raw-noise-0001-sd.bin ]]; then 
+		#	dec-to-u32 < results-measurements-random_memaccess-depth-${index}/jent-raw-noise-0001.data > results-measurements-random_memaccess-depth-${index}/jent-raw-noise-0001-u32.bin
+		#	u32-keep-most-common -vv results-measurements-random_memaccess-depth-${index}/jent-raw-noise-0001-u32.bin > results-measurements-random_memaccess-depth-${index}/jent-raw-noise-0001-sd.bin
+		#fi
+
+		#prepare for extracting the results
+		rm -f results-${index}.txt
+
+		#Do the calculations for each non-overlapping block of 1000000 symbols
+		#how many blocks are there?
+		FSIZE=$(stat -L --printf="%s" "results-measurements-random_memaccess-depth-${index}/jent-raw-noise-sd.bin")
+		ROUNDS=$((FSIZE / 1000000 - 1))
+
+		#Do the rounds
+		for subset in $(seq 0 $ROUNDS); do 
+			echo -n "." 
+			chisquare -vv -l "${subset},1000000" results-measurements-random_memaccess-depth-${index}/jent-raw-noise-sd.bin &>> results-${index}.txt
+		done
+		echo "!" 
+		echo "Median pvalues:"
+		./stat-pvalues.pl results-${index}.txt
+
+		echo -n "results${index}=" >> pvalues.math
+		./extract-pvalues.pl < results-${index}.txt | sed -e 's/e-/*10^-/g' >> pvalues.math
+	fi
+done

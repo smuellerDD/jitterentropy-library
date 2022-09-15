@@ -4,7 +4,8 @@
 OUTDIR="../results-measurements"
 
 # Maximum number of entries to be extracted from the original file
-NUM_EVENTS=1000000
+NUM_EVENTS=${sampleSize:-1000000}
+NUM_ROUNDS=${sampleRounds:-1}
 
 # Number of restart tests
 NUM_EVENTS_RESTART=1000
@@ -12,7 +13,6 @@ NUM_RESTART=1000
 
 NONIID_RESTART_DATA="jent-raw-noise-restart"
 NONIID_DATA="jent-raw-noise"
-IID_DATA="jent-conditioned.data"
 
 # Define the maximum memory size
 # 0 -> use default
@@ -40,24 +40,6 @@ initialization()
 	trap "make -s -f Makefile.rng clean; make -s -f Makefile.hashtime clean; exit" 0 1 2 3 15
 }
 
-lfsroutput()
-{
-	echo "Obtaining $NUM_EVENTS blocks of output from Jitter RNG"
-
-	make -s -f Makefile.rng
-
-	local cmdopts="--max-mem $MAX_MEMORY_SIZE"
-
-	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
-	then
-		cmdopts="$cmdopts --disable-internal-timer"
-	fi
-
-	./jitterentropy-rng $NUM_EVENTS $cmdopts > $OUTDIR/$IID_DATA
-
-	make -s -f Makefile.rng clean
-}
-
 raw_entropy_restart()
 {
 	echo "Obtaining $NUM_RESTART raw entropy measurement with $NUM_EVENTS_RESTART restarts from Jitter RNG"
@@ -75,12 +57,11 @@ raw_entropy()
 
 	make -s -f Makefile.hashtime
 
-	./jitterentropy-hashtime $NUM_EVENTS 1 $OUTDIR/$NONIID_DATA $MAX_MEMORY_SIZE $FORCE_NOTIME_NOISE_SOURCE
+	./jitterentropy-hashtime $NUM_EVENTS $NUM_ROUNDS $OUTDIR/$NONIID_DATA $MAX_MEMORY_SIZE $FORCE_NOTIME_NOISE_SOURCE
 
 	make -s -f Makefile.hashtime clean
 }
 
 initialization
-#lfsroutput
 raw_entropy
-raw_entropy_restart
+#raw_entropy_restart

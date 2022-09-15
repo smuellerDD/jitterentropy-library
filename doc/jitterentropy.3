@@ -139,17 +139,6 @@ The
 .IR flags
 value is either zero or one or more of the following flags.
 .TP
-.B JENT_DISABLE_MEMORY_ACCESS
-If the system is constrained with memory, this flag
-disables the allocation of that memory and therefore memory accesses. But
-that also implies that the entropy collection process only relies on the
-complexity of the CPU. Note, if somebody knows all details of that CPU
-complexity, that person may potentially reduce the entropy delivered by the CPU
-complexity. If that person can push the generated entropy below a threshold,
-the CPU Jitter random number generator starts overestimating entropy from the
-noise source. Thus, disabling memory accesses and relying only on the CPU
-complexity should only be done if you really know what you are doing.
-.TP
 .B JENT_FORCE_INTERNAL_TIMER
 This flag can be used to force the Jitter RNG to use the internal
 high-resolution timer instead of using the hardware time stamp. Commonly,
