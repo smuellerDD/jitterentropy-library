@@ -364,14 +364,14 @@ struct rand_data
 /*
  * By default, at least 10% of all measurements
  * are expected to be in the expected distribution.
- * This is structured to round down (until there are at least 1000
+ * This is structured to round down (until there are at least 10000
  * observations, the cutoff is rounded down to 0).
- * Under a binomial assumption, InverseCDF[Binomial[1000, 0.10], 2^-40] = 40,
+ * Under a binomial assumption, InverseCDF[Binomial[10000, 0.10], 2^-40] = 795,
  * so we use that as our cutoff.
  *
  * It is allowed to change this value as required for the intended environment.
  */
-#define JENT_DIST_RUNNING_THRES(x) (((x) / 1000)*40)
+#define JENT_DIST_RUNNING_THRES(x) (((x) / 10000)*795)
 #endif
 
 #ifdef JENT_PRIVATE_COMPILE
