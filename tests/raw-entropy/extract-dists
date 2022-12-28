@@ -1,0 +1,8 @@
+#!/bin/bash
+
+mkdir dists
+
+for index in $(seq 10 30); do
+	u64-to-u32 < results-measurements-random_memaccess-${index}bits/jent-raw-noise-u64.bin > results-measurements-random_memaccess-${index}bits/jent-raw-noise-u32.bin
+	u32-to-categorical -v -z -m -s 200 results-measurements-random_memaccess-${index}bits/jent-raw-noise-u32.bin | sed -e 's/^.*=//' -e 's/;$/,/' >> dists.math
+done

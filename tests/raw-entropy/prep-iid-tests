@@ -1,0 +1,18 @@
+#!/bin/bash
+
+mkdir iid-bits
+
+for bits in {16..0}; do
+	order=$((16 - bits))
+	orderString=$(printf "%02d" $order)
+	if [[ -e results-measurements-random_memaccess-depth-${bits}/jent-raw-noise-sd.bin ]] ; then
+		echo -n "$bits : $order : $orderString: "
+		if [[ -e iid-bits/${orderString}-jent-${bits}-sd.bin ]]; then
+			echo appending to existing data.
+			cat results-measurements-random_memaccess-depth-${bits}/jent-raw-noise-sd.bin >> iid-bits/${orderString}-jent-${bits}-sd.bin
+		else
+			echo new file
+			cp -a results-measurements-random_memaccess-depth-${bits}/jent-raw-noise-sd.bin iid-bits/${orderString}-jent-${bits}-sd.bin
+		fi
+	fi
+done

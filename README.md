@@ -39,12 +39,6 @@ Direct CPU instructions
 If the function in jent_get_nstime is not available, you can replace the
 jitterentropy-base-user.h with examples from the arch/ directory.
 
-Testing
-=======
-
-There are numerous tests around the Jitter RNG. Yet, they are too big to be
-loaded into the official repository. Email me, if you want them.
-
 Version Numbers
 ===============
 The version numbers for this library have the following schema:

@@ -37,6 +37,65 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
 	return 0;
 }
 
+void jent_dist_init(struct rand_data *ec)
+{
+	ec->current_data_count = 0;
+	ec->current_in_dist_count = 0;
+	ec->data_count_history = 0;
+	ec->in_dist_count_history = 0;
+}
+
+/**
+ * Reset the dist counters
+ *
+ * @ec [in] Reference to entropy collector
+ */
+static void jent_dist_reset(struct rand_data *ec)
+{
+	ec->in_dist_count_history += ec->current_in_dist_count;
+	ec->current_in_dist_count = 0;
+
+	ec->data_count_history += ec->current_data_count;
+	ec->current_data_count = 0;
+}
+
+/**
+ * The current result of the dist test
+ *
+ * @ec [in] Reference to entropy collector
+ */
+void jent_dist_test(struct rand_data *ec)
+{
+	/*
+	 * If the proportion of observed values is outside the sought distribution
+	 * too often, trigger a health test failure.
+	 */
+	if(ec->current_data_count >= JENT_DIST_WINDOW) {
+		if(JENT_DIST_RUNNING_THRES(ec->current_data_count) > ec->current_in_dist_count)
+			ec->health_failure |= JENT_DIST_FAILURE;
+
+		jent_dist_reset(ec);
+	}
+}
+
+/**
+ * Insert a new entropy event into the dist test
+ *
+ * @ec [in] Reference to entropy collector
+ * @current_delta [in] Current time delta
+ */
+unsigned int jent_dist_insert(struct rand_data *ec, uint64_t current_delta)
+{
+	ec->current_data_count++;
+	/* Is this in the reference distribution? */
+	if((current_delta >= ec->distribution_min) && (current_delta <= ec->distribution_max)) {
+		ec->current_in_dist_count++;
+		return 1U;
+	} else {
+		return 0U;
+	}
+}
+
 /***************************************************************************
  * Lag Predictor Test
  *
@@ -375,7 +434,7 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		 * In addition, we require an entropy value H of 1/osr as this
 		 * is the minimum entropy required to provide full entropy.
 		 * Note, we collect (DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR)*osr
-		 * deltas for inserting them into the entropy pool which should
+		 * deltas for inserting them into the conditioning function which should
 		 * then have (close to) DATA_SIZE_BITS bits of entropy in the
 		 * conditioned output.
 		 *
@@ -419,6 +478,7 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	 */
 	jent_apt_insert(ec, current_delta);
 	jent_lag_insert(ec, current_delta);
+	jent_dist_test(ec);
 
 	if (!current_delta || !delta2 || !delta3) {
 		/* RCT with a stuck bit */
@@ -452,6 +512,7 @@ unsigned int jent_health_failure(struct rand_data *ec)
 	if (fips_cb && ec->health_failure) {
 		fips_cb(ec, ec->health_failure);
 	}
+
 
 	return ec->health_failure;
 }

@@ -158,7 +158,7 @@ int jent_gcd_get(uint64_t *value)
 int jent_gcd_selftest(void)
 {
 #define JENT_GCD_SELFTEST_ELEM 10
-#define JENT_GCD_SELFTEST_EXP 3ULL
+#define JENT_GCD_SELFTEST_EXP UINT64_C(3)
 	uint64_t *gcd = jent_gcd_init(JENT_GCD_SELFTEST_ELEM);
 	uint64_t running_gcd, delta_sum;
 	unsigned int i;

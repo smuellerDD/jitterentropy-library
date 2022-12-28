@@ -160,7 +160,7 @@ void jent_notime_unsettick(struct rand_data *ec)
 	notime_thread->jent_notime_stop(ec->notime_thread_ctx);
 }
 
-void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
+void jent_get_nstime_internal(struct rand_data *ec, volatile uint64_t *out)
 {
 	if (ec->enable_notime) {
 		/*

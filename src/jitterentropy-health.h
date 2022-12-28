@@ -35,6 +35,10 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 	return (next - prev);
 }
 
+void jent_dist_init(struct rand_data *ec);
+void jent_dist_test(struct rand_data *ec);
+unsigned int jent_dist_insert(struct rand_data *ec, uint64_t current_delta);
+
 #ifdef JENT_HEALTH_LAG_PREDICTOR
 void jent_lag_init(struct rand_data *ec, unsigned int osr);
 #else /* JENT_HEALTH_LAG_PREDICTOR */

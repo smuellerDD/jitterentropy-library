@@ -32,7 +32,7 @@ extern "C"
 void jent_notime_block_switch(void);
 int jent_notime_settick(struct rand_data *ec);
 void jent_notime_unsettick(struct rand_data *ec);
-void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out);
+void jent_get_nstime_internal(struct rand_data *ec, volatile uint64_t *out);
 int jent_notime_enable(struct rand_data *ec, unsigned int flags);
 void jent_notime_disable(struct rand_data *ec);
 int jent_notime_switch(struct jent_notime_thread *new_thread);
@@ -51,7 +51,7 @@ static inline int jent_notime_settick(struct rand_data *ec)
 
 static inline void jent_notime_unsettick(struct rand_data *ec) { (void)ec; }
 
-static inline void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
+static inline void jent_get_nstime_internal(struct rand_data *ec, volatile uint64_t * out)
 {
 	(void)ec;
 	jent_get_nstime(out);

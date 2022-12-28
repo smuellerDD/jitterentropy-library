@@ -93,29 +93,20 @@
 #endif
 
 #if (__x86_64__) || (__i386__)
+
 /* Support rdtsc read on 64-bit and 32-bit x86 architectures */
+#include <x86intrin.h>
 
-#ifdef __x86_64__
-/* specify 64 bit type since long is 32 bits in LLP64 x86_64 systems */
-# define DECLARE_ARGS(val, low, high)    uint64_t low, high
-# define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
-# define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
-#elif __i386__
-# define DECLARE_ARGS(val, low, high)    unsigned long val
-# define EAX_EDX_VAL(val, low, high)     val
-# define EAX_EDX_RET(val, low, high)     "=A" (val)
-#endif
-
-static inline void jent_get_nstime(uint64_t *out)
+static inline void jent_get_nstime(volatile uint64_t *out)
 {
-	DECLARE_ARGS(val, low, high);
-	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
-	*out = EAX_EDX_VAL(val, low, high);
+	unsigned int dummy;
+	*out =  __rdtscp(&dummy);
+	_mm_lfence();
 }
 
 #elif defined(__aarch64__)
 
-static inline void jent_get_nstime(uint64_t *out)
+static inline void jent_get_nstime(volatile uint64_t *out)
 {
         uint64_t ctr_val;
         /*
@@ -127,7 +118,7 @@ static inline void jent_get_nstime(uint64_t *out)
 
 #elif defined(__s390x__)
 
-static inline void jent_get_nstime(uint64_t *out)
+static inline void jent_get_nstime(volatile uint64_t *out)
 {
 	/*
 	 * This is MVS+STCK code! Enable it with -S in the compiler.
@@ -175,7 +166,7 @@ static inline void jent_get_nstime(uint64_t *out)
 
 /* taken from http://www.ecrypt.eu.org/ebats/cpucycles.html */
 
-static inline void jent_get_nstime(uint64_t *out)
+static inline void jent_get_nstime(volatile uint64_t *out)
 {
 	unsigned long high;
 	unsigned long low;
@@ -193,7 +184,7 @@ static inline void jent_get_nstime(uint64_t *out)
 
 #else /* (__x86_64__) || (__i386__) || (__aarch64__) || (__s390x__) || (__powerpc) */
 
-static inline void jent_get_nstime(uint64_t *out)
+static inline void jent_get_nstime(volatile uint64_t *out)
 {
 	/* OSX does not have clock_gettime -- taken from
 	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html */
@@ -412,7 +403,7 @@ static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
 
 # endif
 
-static inline uint32_t jent_cache_size_roundup(void)
+static inline uint32_t jent_cache_size(void)
 {
 	static int checked = 0;
 	static uint32_t cache_size = 0;
@@ -431,24 +422,8 @@ static inline uint32_t jent_cache_size_roundup(void)
 		if (l3 > 0)
 			cache_size += (uint32_t)l3;
 
-		/*
-		 * Force the output_size to be of the form
-		 * (bounding_power_of_2 - 1).
-		 */
-		cache_size |= (cache_size >> 1);
-		cache_size |= (cache_size >> 2);
-		cache_size |= (cache_size >> 4);
-		cache_size |= (cache_size >> 8);
-		cache_size |= (cache_size >> 16);
-
 		if (cache_size == 0)
 			return 0;
-
-		/*
-		 * Make the output_size the smallest power of 2 strictly
-		 * greater than cache_size.
-		 */
-		cache_size++;
 	}
 
 	return cache_size;
@@ -456,7 +431,7 @@ static inline uint32_t jent_cache_size_roundup(void)
 
 #else /* __linux__ */
 
-static inline uint32_t jent_cache_size_roundup(void)
+static inline uint32_t jent_cache_size(void)
 {
 	return 0;
 }

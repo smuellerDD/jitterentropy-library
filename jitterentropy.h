@@ -65,34 +65,9 @@ extern "C" {
  */
 
 /*
- * Disable the loop shuffle operation
- *
- * The shuffle operation enlarges the timing of the conditioning function
- * by a variable length defined by the LSB of a time stamp. Some mathematicians
- * are concerned that this pseudo-random selection of the loop iteration count
- * may create some form of dependency between the different loop counts
- * and the associated time duration of the conditioning function. It
- * also complicates entropy assessment because it effectively combines a bunch
- * of shifted/scaled copies the same distribution and masks failures from the
- * health testing.
- *
- * By enabling this flag, the loop shuffle operation is disabled and
- * the entropy collection operates in a way that honor the concerns.
- *
- * By enabling this flag, the time of collecting entropy may be enlarged.
- */
-#define JENT_CONF_DISABLE_LOOP_SHUFFLE
-
-/*
  * Shall the LAG predictor health test be enabled?
  */
 #define JENT_HEALTH_LAG_PREDICTOR
-
-/*
- * Shall the jent_memaccess use a (statistically) random selection for the
- * memory to update?
- */
-#define JENT_RANDOM_MEMACCESS
 
 /***************************************************************************
  * Jitter RNG State Definition Section
@@ -166,6 +141,14 @@ struct jent_notime_thread {
 	void (*jent_notime_stop)(void *ctx);
 };
 
+#ifndef JENT_DISTRIBUTION_MIN
+#define JENT_DISTRIBUTION_MIN 0U
+#endif
+
+#ifndef JENT_DISTRIBUTION_MAX
+#define JENT_DISTRIBUTION_MAX UINT64_C(0xFFFFFFFFFFFFFFFF)
+#endif
+
 /* The entropy pool */
 struct rand_data
 {
@@ -182,41 +165,38 @@ struct rand_data
 	uint64_t last_delta2;		/* SENSITIVE stuck test */
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 
-	unsigned int flags;		/* Flags used to initialize */
+	uint32_t flags;			/* Flags used to initialize */
 	unsigned int osr;		/* Oversampling rate */
 
-#ifdef JENT_RANDOM_MEMACCESS
-  /* The step size should be larger than the cacheline size. */
-# ifndef JENT_MEMORY_BITS
-#  define JENT_MEMORY_BITS 17
-# endif
-# ifndef JENT_MEMORY_SIZE
-#  define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
-# endif
-#else /* JENT_RANDOM_MEMACCESS */
-# ifndef JENT_MEMORY_BLOCKS
-#  define JENT_MEMORY_BLOCKS 512
-# endif
-# ifndef JENT_MEMORY_BLOCKSIZE
-#  define JENT_MEMORY_BLOCKSIZE 128
-# endif
-# ifndef JENT_MEMORY_SIZE
-#  define JENT_MEMORY_SIZE (JENT_MEMORY_BLOCKS*JENT_MEMORY_BLOCKSIZE)
-# endif
-#endif /* JENT_RANDOM_MEMACCESS */
-
-#define JENT_MEMORY_ACCESSLOOPS 128
-	unsigned char *mem;		/* Memory access location with size of
-					 * JENT_MEMORY_SIZE or memsize */
-#ifdef JENT_RANDOM_MEMACCESS
-	uint32_t memmask;		/* Memory mask (size of memory - 1) */
-#else
-	unsigned int memlocation; 	/* Pointer to byte in *mem */
-	unsigned int memblocks;		/* Number of memory blocks in *mem */
-	unsigned int memblocksize; 	/* Size of one memory block in bytes */
+#ifndef JENT_MEMORY_SIZE_EXP
+# define JENT_MEMORY_SIZE_EXP 0
 #endif
-	unsigned int memaccessloops;	/* Number of memory accesses per random
+
+#ifndef JENT_MEMORY_DEPTH_EXP
+#define JENT_MEMORY_DEPTH_EXP 0
+#endif
+
+#define JENT_HASHLOOP_EXP 0
+#define JENT_MEMACCESSLOOP_EXP 0
+	volatile unsigned char *mem;	/* Memory access location */
+	uint32_t memsize_exp;		/* mem is size 2^memsize_exp */
+        union {
+                uint64_t u[4];
+                uint8_t b[sizeof(uint64_t) * 4];
+        } prngState;
+	unsigned int hash_loop_exp;	/* Number of hash invocations per random
 					 * bit generation */
+	unsigned int memaccess_loop_exp;/* Number of hash invocations per random
+					 * bit generation */
+
+	uint64_t distribution_min;	/* The smallest value considered to be in the targeted sub-distribution. */
+	uint64_t distribution_max;	/* The largest value considered to be in the targeted sub-distribution. */
+
+	#define JENT_DIST_WINDOW 10000U
+	uint64_t current_data_count;	/* The total number of timing values that have been observed. */
+	uint64_t current_in_dist_count;	/*The total number of timing values within the expected distribution.*/
+	uint64_t data_count_history;	/* The total number of timing values that have been observed. */
+	uint64_t in_dist_count_history;	/*The total number of timing values within the expected distribution.*/
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */
@@ -236,7 +216,6 @@ struct rand_data
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 	unsigned int fips_enabled:1;
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
-	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
@@ -304,9 +283,7 @@ struct rand_data
 /* Flags that can be used to initialize the RNG */
 #define JENT_DISABLE_STIR (1<<0) 	/* UNUSED */
 #define JENT_DISABLE_UNBIAS (1<<1) 	/* UNUSED */
-#define JENT_DISABLE_MEMORY_ACCESS (1<<2) /* Disable memory access for more
-					     entropy, saves MEMORY_SIZE RAM for
-					     entropy collector */
+#define JENT_DISABLE_MEMORY_ACCESS (1<<2) /* UNUSED */
 #define JENT_FORCE_INTERNAL_TIMER (1<<3)  /* Force the use of the internal
 					     timer */
 #define JENT_DISABLE_INTERNAL_TIMER (1<<4)  /* Disable the potential use of
@@ -316,34 +293,58 @@ struct rand_data
 					     compliance. */
 
 /* Flags field limiting the amount of memory to be used for memory access */
-#define JENT_FLAGS_TO_MEMSIZE_SHIFT	28
-#define JENT_FLAGS_TO_MAX_MEMSIZE(val)	(val >> JENT_FLAGS_TO_MEMSIZE_SHIFT)
-#define JENT_MAX_MEMSIZE_TO_FLAGS(val)	(val << JENT_FLAGS_TO_MEMSIZE_SHIFT)
-#define JENT_MAX_MEMSIZE_32kB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 1))
-#define JENT_MAX_MEMSIZE_64kB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 2))
-#define JENT_MAX_MEMSIZE_128kB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 3))
-#define JENT_MAX_MEMSIZE_256kB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 4))
-#define JENT_MAX_MEMSIZE_512kB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 5))
-#define JENT_MAX_MEMSIZE_1MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 6))
-#define JENT_MAX_MEMSIZE_2MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 7))
-#define JENT_MAX_MEMSIZE_4MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 8))
-#define JENT_MAX_MEMSIZE_8MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C( 9))
-#define JENT_MAX_MEMSIZE_16MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(10))
-#define JENT_MAX_MEMSIZE_32MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(11))
-#define JENT_MAX_MEMSIZE_64MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(12))
-#define JENT_MAX_MEMSIZE_128MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(13))
-#define JENT_MAX_MEMSIZE_256MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(14))
-#define JENT_MAX_MEMSIZE_512MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(15))
-#define JENT_MAX_MEMSIZE_MAX		JENT_MAX_MEMSIZE_512MB
-#define JENT_MAX_MEMSIZE_MASK		JENT_MAX_MEMSIZE_MAX
-/* We start at 32kB -> offset is log2(32768) */
-#define JENT_MAX_MEMSIZE_OFFSET		14
+/*These are stored in the high order nibble of the flags.*/
+/* We start at 64kB, and 1>>(1+15) offset is 2^16 */
+/* We end at 1GB, and 1>>(15+15) offset is 2^30 */
+#define JENT_MEMSIZE_OFFSET		15
 
-#ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
-# define JENT_MIN_OSR	3
-#else
+#define JENT_MEMSIZE_EXP_TO_SIZE(val)	(UINT32_C(1)<<val)
+#define JENT_MEMSIZE_EXP_TO_MASK(val)	((UINT32_C(1)<<val)-1)
+
+#define JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT	28
+#define JENT_MAX_MEMSIZE_64kB		(UINT32_C( 1) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_128kB		(UINT32_C( 2) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_256kB		(UINT32_C( 3) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_512kB		(UINT32_C( 4) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_1MB		(UINT32_C( 5) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_2MB		(UINT32_C( 6) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_4MB		(UINT32_C( 7) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_8MB		(UINT32_C( 8) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_16MB		(UINT32_C( 9) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_32MB		(UINT32_C(10) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_64MB		(UINT32_C(11) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_128MB		(UINT32_C(12) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_256MB		(UINT32_C(13) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_512MB		(UINT32_C(14) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+#define JENT_MAX_MEMSIZE_1024MB		(UINT32_C(15) << JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT)
+
+#define JENT_MAX_MEMSIZE_DEFAULT	JENT_MAX_MEMSIZE_1024MB
+#define JENT_MAX_MEMSIZE_MASK		JENT_MAX_MEMSIZE_1024MB
+#define JENT_FLAGS_TO_MAX_MEMSIZE_EXP(val)	(((val&JENT_MAX_MEMSIZE_MASK)>>JENT_FLAGS_TO_MAX_MEMSIZE_SHIFT) + JENT_MEMSIZE_OFFSET)
+
+#define JENT_FLAGS_TO_MEMSIZE_SHIFT	24
+#define JENT_MEMSIZE_64kB		(UINT32_C( 1) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_128kB		(UINT32_C( 2) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_256kB		(UINT32_C( 3) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_512kB		(UINT32_C( 4) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_1MB		(UINT32_C( 5) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_2MB		(UINT32_C( 6) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_4MB		(UINT32_C( 7) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_8MB		(UINT32_C( 8) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_16MB		(UINT32_C( 9) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_32MB		(UINT32_C(10) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_64MB		(UINT32_C(11) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_128MB		(UINT32_C(12) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_256MB		(UINT32_C(13) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_512MB		(UINT32_C(14) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+#define JENT_MEMSIZE_1024MB		(UINT32_C(15) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+
+#define JENT_MEMSIZE_DEFAULT		JENT_MEMSIZE_1MB
+#define JENT_MEMSIZE_MASK		JENT_MEMSIZE_1024MB
+#define JENT_FLAGS_TO_MEMSIZE_EXP(val)	(((val&JENT_MEMSIZE_MASK)>>JENT_FLAGS_TO_MEMSIZE_SHIFT) + JENT_MEMSIZE_OFFSET)
+#define JENT_MEMSIZE_EXP_TO_FLAGS(val)	((val - JENT_MEMSIZE_OFFSET) << JENT_FLAGS_TO_MEMSIZE_SHIFT)
+
 # define JENT_MIN_OSR	1
-#endif
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
@@ -357,6 +358,20 @@ struct rand_data
  * It is allowed to change this value as required for the intended environment.
  */
 #define JENT_STUCK_INIT_THRES(x) ((x*9) / 10)
+#endif
+
+#ifndef JENT_DIST_RUNNING_THRES
+/*
+ * By default, at least 10% of all measurements
+ * are expected to be in the expected distribution.
+ * This is structured to round down (until there are at least 10000
+ * observations, the cutoff is rounded down to 0).
+ * Under a binomial assumption, InverseCDF[Binomial[10000, 0.10], 2^-40] = 795,
+ * so we use that as our cutoff.
+ *
+ * It is allowed to change this value as required for the intended environment.
+ */
+#define JENT_DIST_RUNNING_THRES(x) (((x) / 10000)*795)
 #endif
 
 #ifdef JENT_PRIVATE_COMPILE
@@ -447,12 +462,17 @@ static inline void jent_notime_fini(void *ctx) { (void)ctx; }
 #define EHASH		11 /* Hash self test failed */
 #define EMEM		12 /* Can't allocate memory for initialization */
 #define EGCD		13 /* GCD self-test failed */
+#define ETHREAD		14 /* Can't create thread for timer. */
+#define EAPT		14 /* APT error */
+#define ELAG		15 /* LAG error */
+#define EDIST		16 /* DIST error */
 /* -- END error codes for init function -- */
 
 /* -- BEGIN error masks for health tests -- */
 #define JENT_RCT_FAILURE	1 /* Failure in RCT health test. */
 #define JENT_APT_FAILURE	2 /* Failure in APT health test. */
 #define JENT_LAG_FAILURE	4 /* Failure in Lag predictor health test. */
+#define JENT_DIST_FAILURE	8 /* Failure in distribution proportion health test. */
 /* -- END error masks for health tests -- */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */

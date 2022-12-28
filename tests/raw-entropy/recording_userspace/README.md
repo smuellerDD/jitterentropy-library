@@ -30,7 +30,7 @@ processed with the `validation-runtime` and `validation-restart` logic.
 If the `invoke_testing.sh` is not helpful for performing the test, the following
 explanation outlines the specific test steps to be invoked manually.
 
-For recoding the raw entropic data, the user has to compile the code.
+For recording the raw entropic data, the user has to compile the code.
 To do that, he has to copy the following files into the recording directory
 prior compilation. These files are taken from his Jitter RNG implementation
 that he uses:

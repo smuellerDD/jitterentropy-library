@@ -28,7 +28,6 @@ extern "C"
 #endif
 
 unsigned int jent_measure_jitter(struct rand_data *ec,
-				 uint64_t loop_cnt,
 				 uint64_t *ret_current_delta);
 void jent_random_data(struct rand_data *ec);
 void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len);
