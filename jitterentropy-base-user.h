@@ -172,6 +172,14 @@ static inline void jent_get_nstime(uint64_t *out)
 }
 
 #elif defined(__powerpc)
+/*
+ * Uncomment this for newer PPC CPUs
+ * Newer PPC CPUs do not support mftbu/mftb
+ * these instructions were obsoleted and replaced by
+ * mfspr.  special processor registers 268 and 269 are the
+ * ones we want.
+ */
+ /* #define POWER_PC_USE_NEW_INSTRUCTIONS */
 
 /* taken from http://www.ecrypt.eu.org/ebats/cpucycles.html */
 
@@ -181,10 +189,17 @@ static inline void jent_get_nstime(uint64_t *out)
 	unsigned long low;
 	unsigned long newhigh;
 	uint64_t result;
-        asm volatile(
+#ifdef POWER_PC_USE_NEW_INSTRUCTIONS /* Newer PPC CPUs do not support mftbu/mftb */
+    asm volatile(
+        "Lcpucycles:mfspr %0, 269;mfspr %1, 268;mfspr %2, 269;cmpw %0,%2;bne Lcpucycles"
+		: "=r" (high), "=r" (low), "=r" (newhigh)
+		);
+#else
+    asm volatile(
 		"Lcpucycles:mftbu %0;mftb %1;mftbu %2;cmpw %0,%2;bne Lcpucycles"
 		: "=r" (high), "=r" (low), "=r" (newhigh)
 		);
+#endif
 	result = high;
 	result <<= 32;
 	result |= low;
