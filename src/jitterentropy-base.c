@@ -485,6 +485,8 @@ static struct rand_data
 err:
 	if (entropy_collector->mem != NULL)
 		jent_zfree(entropy_collector->mem, memsize);
+	if (entropy_collector->hash_state != NULL)
+		sha3_dealloc(entropy_collector->hash_state);
 	jent_zfree(entropy_collector, sizeof(struct rand_data));
 	return NULL;
 }
