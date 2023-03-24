@@ -308,6 +308,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			 * memory size
 			 */
 			jent_entropy_collector_free(*ec);
+			*ec = NULL;
 
 			/* Perform new health test with updated OSR */
 			if (jent_entropy_init_ex(osr, flags))
