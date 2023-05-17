@@ -1,6 +1,6 @@
 # Compile Noise Source as user space application
 
-CC=gcc
+CC ?= gcc
 override CFLAGS +=-pedantic -Wall -Wextra -DROUNDS=100000000 -O0 -Wno-long-long
 
 program_NAME := jitterentropy-kernel-foldtime
