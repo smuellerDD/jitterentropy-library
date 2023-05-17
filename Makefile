@@ -74,7 +74,7 @@ $(analyze_plists): %.plist: %.c
 scan: $(analyze_plists)
 
 cppcheck:
-	cppcheck --force -q --enable=performance --enable=warning --enable=portability *.h *.c */*.h */*.c */*/*/*.c
+	cppcheck --force -q --enable=performance --enable=warning --enable=portability $(shell find * -name \*.h -o -name \*.c)
 
 install: install-man install-shared install-includes
 
