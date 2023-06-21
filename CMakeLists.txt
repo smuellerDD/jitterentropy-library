@@ -28,7 +28,9 @@ if(MSVC)
 else()
     list(APPEND JITTER_C_FLAGS  -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align
     -Wmissing-field-initializers -Wshadow -Wswitch-enum -Wextra -Wall -pedantic -fPIC -O0 -fwrapv -Wconversion)
-    list(APPEND JITTER_LINKER_FLAGS -Wl,-z,relro,-z,now)
+    if(NOT APPLE)
+        list(APPEND JITTER_LINKER_FLAGS -Wl,-z,relro,-z,now)
+    endif()
 endif()
 
 if(STACK_PROTECTOR)
