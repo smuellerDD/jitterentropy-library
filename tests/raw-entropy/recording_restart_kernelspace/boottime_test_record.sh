@@ -60,7 +60,7 @@ then
 	echo "Test tool $KCAPIRNG not found"
 	testruns=$TESTS
 else
-	( (  /usr/local/sbin/getrawentropy -f /sys/kernel/debug/jitterentropy_rng/jent_raw_hires > $OUTFILE.$testruns.data ) & )
+	( (  /usr/local/sbin/getrawentropy -f /sys/kernel/debug/jitterentropy_testing/jent_raw_hires > $OUTFILE.$testruns.data ) & )
 	$KCAPIRNG -n "jitterentropy_rng" -b 2000
 fi
 
