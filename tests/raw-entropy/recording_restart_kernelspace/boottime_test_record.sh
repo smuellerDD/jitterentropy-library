@@ -64,7 +64,7 @@ else
 	$KCAPIRNG -n "jitterentropy_rng" -b 2000
 fi
 
-if [ $testruns -ge $TESTS ]; then
+if [ $testruns -gt $TESTS ]; then
 	systemctl stop boottime_test_record
 	systemctl disable boottime_test_record
 
