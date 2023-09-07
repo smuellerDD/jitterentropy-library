@@ -54,7 +54,7 @@ echo $((testruns+1)) > $STATE
 # for i in jent_raw_noise_restart.????.data; do mv $i $(echo $i | cut -d. -f1).0$(echo $i | cut -d. -f2).$(echo $i | cut -d. -f3) ; done
 printf -v testruns "%05d" $testruns
 
-if [ !-x "$KCAPIRNG" ]
+if [ ! -x "$KCAPIRNG" ]
 then
 	echo "Test tool $KCAPIRNG not found" > $OUTFILE.$testruns.data
 	echo "Test tool $KCAPIRNG not found"
