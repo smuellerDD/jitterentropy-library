@@ -52,7 +52,7 @@ static unsigned char extract(uint64_t sample, uint64_t mask)
 		mask >>= 1;
 		sample >>= 1;
 	}
-	return (byte);
+	return byte;
 }
 
 /*
@@ -82,10 +82,10 @@ static int hextolong(char *p_strmask, uint64_t *p_mask)
 	}
 
 	if (count > 16)
-		return(-1);
+		return -1;
 
 	*p_mask = mask;
-	return(0);
+	return 0;
 }
 
 /*
@@ -102,7 +102,7 @@ static int bitcount(uint64_t mask)
 		}
 		mask >>= 1;
 	}
-	return (j);
+	return j;
 }
 
 /*
@@ -135,20 +135,18 @@ int main(int argc, char *argv[])
 {
 	FILE *f = NULL;
 	char buf[64];
-	int varfd = -1;
-	int singlefd = -1;
+	int outfd = -1;
 	uint32_t count;
 	uint32_t i = 0;
-	int prev_sample_set = 0;
-	uint64_t prev_sample = 0;
+	int prev_timestamp_set = 0;
+	uint64_t prev_timestamp = 0;
 
 	uint64_t mask;
-	uint64_t var_unchanged0s, var_unchanged1s;
-	uint64_t single_unchanged0s, single_unchanged1s;
+	uint64_t unchanged0s, unchanged1s;
 	int rc;
 
-	if (argc != 6) {
-		printf("Usage: %s inputfile varoutfile singleoutfile maxevents mask\n", argv[0]);
+	if (argc != 5) {
+		printf("Usage: %s inputfile outfile samples mask\n", argv[0]);
 		return 1;
 	}
 
@@ -158,95 +156,76 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	varfd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL, 0777);
-	if (varfd < 0) {
+	outfd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL, 0777);
+	if (outfd < 0) {
 		printf("File %s cannot be opened for write\n", argv[2]);
 		fclose(f);
 		return 1;
 	}
 
-	singlefd = open(argv[3], O_CREAT|O_WRONLY|O_EXCL, 0777);
-	if (singlefd < 0) {
-		printf("File %s cannot be opened for write\n", argv[3]);
-		fclose(f);
-		close(varfd);
-		return 1;
-	}
-
-	count = strtoul(argv[4], NULL, 10);
-	rc = hextolong(argv[5], &mask);
+	count = strtoul(argv[3], NULL, 10);
+	rc = hextolong(argv[4], &mask);
 
 	if (rc) {
-		printf("Mask value is incorrect [%s], use up to 16 hexadecimal characters", argv[5]);
+		printf("Mask value is incorrect [%s], use up to 16 hexadecimal characters\n", argv[5]);
+		fclose(f);
+		close(outfd);
 		return 1;
 	}
 
 	if (bitcount(mask) > 8) {
-		printf("SP800-90B tool only supports up to 8 bits. Check the mask value");
+		printf("SP800-90B tool only supports up to 8 bits. Check the mask value\n");
+		fclose(f);
+		close(outfd);
 		return 1;
 	}
 
-	var_unchanged0s = 0;
-	var_unchanged1s = ~0;
-	single_unchanged0s = 0;
-	single_unchanged1s = ~0;
+	unchanged0s = 0;
+	unchanged1s = ~0;
 
 	while (fgets(buf, sizeof(buf), f)) {
-		uint64_t sample;
-		unsigned char var, single;
-		char *saveptr = NULL;
-	 	char *res = NULL;
+		uint64_t timestamp, delta;
+		unsigned char extracted;
 
-		i++;
-
-		res = strtok_r(buf, " ", &saveptr);
-		if (!res) {
-			printf("strtok_r error\n");
-			return 1;
-		}
-
-		sample = strtoul(res, NULL, 10);
-		if (!prev_sample_set) {
-			prev_sample = sample;
-			prev_sample_set = 1;
+		// Ignore empty lines.
+		if (buf[0] == '\0' || buf[0] == '\n' || buf[0] == '\r') {
 			continue;
-		} else {
-			uint64_t delta = (sample > prev_sample) ?
-					  sample - prev_sample :
-					  prev_sample - sample;
-
-			prev_sample = sample;
-			sample = delta;
-		}
-		var_unchanged0s |= sample;
-		var_unchanged1s &= sample;
-
-		var = extract(sample, mask);
-		write(varfd, &var, sizeof(var));
-
-		res = strtok_r(NULL, " ", &saveptr);
-		if (res) {
-			sample = strtoul(res, NULL, 10);
-			single_unchanged0s |= sample;
-			single_unchanged1s &= sample;
-
-			single = extract(sample, mask);
-			write(singlefd, &single, sizeof(single));
 		}
 
-		if (i >= count)
+		timestamp = strtoul(buf, NULL, 10);
+		if (!prev_timestamp_set) {
+			prev_timestamp = timestamp;
+			prev_timestamp_set = 1;
+			continue;
+		}
+		delta = (timestamp > prev_timestamp) ?
+			timestamp - prev_timestamp :
+			timestamp - prev_timestamp;
+		prev_timestamp = timestamp;
+
+		unchanged0s |= delta;
+		unchanged1s &= delta;
+		extracted = extract(delta, mask);
+		write(outfd, &extracted, sizeof(extracted));
+
+		i += 1;
+		if (i == count)
 			break;
 	}
 
-	printf("Processed %d items from %s samples with mask [0x%016llx] significant bits [%d]\n", i, argv[0], (unsigned long long)mask, bitcount(mask));
+	if (i < count) {
+		printf("Attempted to extract %d samples from %s but only got %d samples\n", count, argv[0], i);
+		fclose(f);
+		close(outfd);
+		return 1;
+	}
 
-	printf("Constant 0s in var sample: \n%s\n", printbits(var_unchanged0s, 0));
-	printf("Constant 1s in var sample: \n%s\n", printbits(var_unchanged1s, 1));
-	printf("Constant 0s in single sample: \n%s\n", printbits(single_unchanged0s, 0));
-	printf("Constant 1s in single sample: \n%s\n", printbits(single_unchanged1s, 1));
+	printf("Processed %d samples from %s with mask [0x%016llx] significant bits [%d]\n", i, argv[0], (unsigned long long)mask, bitcount(mask));
+
+	printf("Constant 0s in sample: \n%s\n", printbits(unchanged0s, 0));
+	printf("Constant 1s in sample: \n%s\n", printbits(unchanged1s, 1));
 
 	fclose(f);
-	close(varfd);
-	close(singlefd);
+	close(outfd);
 	return 0;
 }
