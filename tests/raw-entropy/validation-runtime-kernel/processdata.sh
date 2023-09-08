@@ -16,7 +16,7 @@ RESULTS_DIR=${RESULTS_DIR:-"../results-analysis-runtime"}
 LOGFILE="$RESULTS_DIR/processdata.log"
 
 # point to the min entropy tool
-EATOOL="/home/joachim/Downloads/SP800-90B_EntropyAssessment/cpp/ea_non_iid"
+EATOOL="../SP800-90B_EntropyAssessment/cpp/ea_non_iid"
 
 # specify if you want to compile the extractlsb program in this script
 BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
