@@ -14,8 +14,7 @@ may vary depending on the processor.
 
 The first step is performed by the extractlsb program, which reads the input
 data, extracts the significant bits from each sample item (using a mask that
-you provide) and split it in two bit stream files, one containing the var
-sample, and the other the single sample.
+you provide) and outputs it to a bit stream file.
 
 In the second step, the binary data streams are processed with the SP800-90B
 entropy assessment tool, which calculates the min entropy.
@@ -41,28 +40,22 @@ To execute the testing, you need:
 
 ENTROPYDATA_DIR: Location of the sample data files (with .data extension)
 
-RESULTS_DIR: Location for the interim data bit streams (var and single),
-and results.
+RESULTS_DIR: Location for the interim data bit streams and results.
 
 LOGFILE: Name of the log file. The default is $RESULTS_DIR/processdata.log.
 
 EATOOL: Path of the python program used from the Entropy Assessment tool
-(usually, noniid_main.py).
+(usually, ea_noniid).
 
 BUILD_EXTRACT: Indicates whether the script will build the extractlsb program.
 The default is "yes".
 
 MASK_LIST: Indicates the extraction method from each sample item. You can
 indicate one or more methods; the script will generate one bit stream data
-file set (var and single) for each extraction method. See below for a more
-detailed explanation.
+file set for each extraction method. See below for a more detailed explanation.
 
-MAX_EVENTS: the size of the sample that will be extracted from the sample data.
-The default is 100000 (a 1% of the size of the sample file specified in the
-ROUNDS define macro). Notice that the minimum value suggested by SP800-90B is
-1000000, so you'll have to increase the default value (notice that this
-severily impacts in the performance and memory requirements of the python tool).
-
+SAMPLES: the number of samples (time deltas) that will be extracted from the
+data. The default is 1000000, as specified in SP800-90B.
 
 ### Extraction method
 
@@ -130,23 +123,17 @@ the extraction program.
 Processed 1000000 items from ./extractlsb samples with
 mask [0x00000000000000ff] significant bits [8]
 
-Constant 0s in var sample:
+Constant 0s in sample:
 00000000 00000000 00000000 00000000 --000-00 0---0--- -------- -----000
 
-Constant 1s in var sample:
+Constant 1s in sample:
 -------- -------- -------- -------- -------- -------- -------- --------
 
-Constant 0s in single sample:
-00000000 00000000 00000000 00000000 --000-00 0--00--- -------- -----000
-
-Constant 1s in single sample:
--------- -------- -------- -------- -------- -------- -------- --------
-
-You can see here that the 3 LSB of both samples (var and single) always
-show zeroes (the minus means that this position is variable). There you can
-easily determine which positions you should consider. In this particular
-case, you should use a mask of "78:4" and "7F8:8" to analyze the samples
-with 4-bit and 8-bit alphabets, discarding the 3 LSB.
+You can see here that the 3 LSB of the samples always show zeroes (the minus
+means that this position is variable). There you can easily determine which
+positions you should consider. In this particular case, you should use a mask of
+"78:4" and "7F8:8" to analyze the samples with 4-bit and 8-bit alphabets,
+discarding the 3 LSB.
 
 
 ## Conclusion

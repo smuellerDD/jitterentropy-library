@@ -156,7 +156,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	outfd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL, 0777);
+	outfd = open(argv[2], O_CREAT|O_WRONLY|O_APPEND, 0777);
 	if (outfd < 0) {
 		printf("File %s cannot be opened for write\n", argv[2]);
 		fclose(f);
