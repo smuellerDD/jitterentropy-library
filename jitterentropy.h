@@ -345,20 +345,6 @@ struct rand_data
 # define JENT_MIN_OSR	1
 #endif
 
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-
-/* -- BEGIN Main interface functions -- */
-
-#ifndef JENT_STUCK_INIT_THRES
-/*
- * Per default, not more than 90% of all measurements during initialization
- * are allowed to be stuck.
- *
- * It is allowed to change this value as required for the intended environment.
- */
-#define JENT_STUCK_INIT_THRES(x) ((x*9) / 10)
-#endif
-
 #ifdef JENT_PRIVATE_COMPILE
 # define JENT_PRIVATE_STATIC static
 #else /* JENT_PRIVATE_COMPILE */

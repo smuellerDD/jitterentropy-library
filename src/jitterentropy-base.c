@@ -29,11 +29,10 @@
  * DAMAGE.
  */
 
-#include "jitterentropy.h"
-
 #include "jitterentropy-base.h"
 #include "jitterentropy-gcd.h"
 #include "jitterentropy-health.h"
+#include "jitterentropy-internal.h"
 #include "jitterentropy-noise.h"
 #include "jitterentropy-timer.h"
 #include "jitterentropy-sha3.h"

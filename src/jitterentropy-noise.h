@@ -20,7 +20,7 @@
 #ifndef JITTERENTROPY_NOISE_H
 #define JITTERENTROPY_NOISE_H
 
-#include "jitterentropy.h"
+#include "jitterentropy-internal.h"
 
 #ifdef __cplusplus
 extern "C"

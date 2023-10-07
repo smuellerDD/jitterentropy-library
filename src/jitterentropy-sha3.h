@@ -20,7 +20,7 @@
 #ifndef JITTERENTROPY_SHA3_H
 #define JITTERENTROPY_SHA3_H
 
-#include "jitterentropy.h"
+#include "jitterentropy-internal.h"
 
 #ifdef __cplusplus
 extern "C"

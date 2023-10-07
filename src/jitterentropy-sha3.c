@@ -19,7 +19,7 @@
  */
 
 #include "jitterentropy-sha3.h"
-#include "jitterentropy.h"
+#include "jitterentropy-internal.h"
 
 /***************************************************************************
  * Message Digest Implementation

@@ -20,6 +20,8 @@
 #ifndef JITTERENTROPY_GCD_H
 #define JITTERENTROPY_GCD_H
 
+#include "jitterentropy-internal.h"
+
 #ifdef __cplusplus
 extern "C"
 {

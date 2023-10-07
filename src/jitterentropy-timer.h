@@ -20,7 +20,7 @@
 #ifndef JITTERENTROPY_TIMER_H
 #define JITTERENTROPY_TIMER_H
 
-#include "jitterentropy.h"
+#include "jitterentropy-internal.h"
 
 #ifdef __cplusplus
 extern "C"

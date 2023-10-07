@@ -20,7 +20,7 @@
 #ifndef JITTERENTROPY_HEALTH_H
 #define JITTERENTROPY_HEALTH_H
 
-#include "jitterentropy.h"
+#include "jitterentropy-internal.h"
 
 #ifdef __cplusplus
 extern "C"

@@ -19,8 +19,8 @@
  * DAMAGE.
  */
 
-#include "jitterentropy.h"
 #include "jitterentropy-gcd.h"
+#include "jitterentropy-internal.h"
 
 /* The common divisor for all timestamp deltas */
 static uint64_t jent_common_timer_gcd = 0;
