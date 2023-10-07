@@ -42,10 +42,10 @@
 		      * require consumer to be updated (as long as this number
 		      * is zero, the API is not considered stable and can
 		      * change without a bump of the major version) */
-#define MINVERSION 4 /* API compatible, ABI may change, functional
+#define MINVERSION 5 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 1 /* API / ABI compatible, no functional changes, no
+#define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
 		      * enhancements, bug fixes only */
 
 /***************************************************************************
@@ -162,9 +162,12 @@ static inline unsigned int jent_update_memsize(unsigned int flags)
  * The following error codes can occur:
  *	-1	entropy_collector is NULL
  *	-2	RCT failed
- *	-3	APT test failed
+ *	-3	APT failed
  *	-4	The timer cannot be initialized
  *	-5	LAG failure
+ *	-6	RCT permanent failure
+ *	-7	APT permanent failure
+ *	-8	LAG permanent failure
  */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
@@ -186,7 +189,15 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		jent_random_data(ec);
 
 		if ((health_test_result = jent_health_failure(ec))) {
-			if (health_test_result & JENT_RCT_FAILURE)
+			if (health_test_result & JENT_RCT_FAILURE_PERMANENT)
+				ret = -6;
+			else if (health_test_result &
+				 JENT_APT_FAILURE_PERMANENT)
+				ret = -7;
+			else if (health_test_result &
+				 JENT_LAG_FAILURE_PERMANENT)
+				ret = -8;
+			else if (health_test_result & JENT_RCT_FAILURE)
 				ret = -2;
 			else if (health_test_result & JENT_APT_FAILURE)
 				ret = -3;
@@ -276,7 +287,12 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		return -1;
 
 	while (len > 0) {
-		unsigned int osr, flags, max_mem_set;
+		unsigned int osr, flags, max_mem_set, apt_count,
+			     apt_observations = 0,
+			     lag_prediction_success_run,
+			     lag_prediction_success_count;
+		int rct_count;
+		uint64_t current_delta;
 
 		ret = jent_read_entropy(*ec, p, len);
 
@@ -287,6 +303,19 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		case -2:
 		case -3:
 		case -5:
+			apt_count = (*ec)->apt_count;
+			apt_observations = (*ec)->apt_observations;
+			current_delta = (*ec)->apt_base;
+			rct_count = (*ec)->rct_count;
+			lag_prediction_success_run =
+				(*ec)->lag_prediction_success_run;
+			lag_prediction_success_count =
+				(*ec)->lag_prediction_success_count;
+
+			/* FALLTHROUGH */
+		case -6:
+		case -7:
+		case -8:
 			osr = (*ec)->osr + 1;
 			flags = (*ec)->flags;
 			max_mem_set = (*ec)->max_mem_set;
@@ -320,6 +349,32 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 
 			/* Remember whether caller configured memory size */
 			(*ec)->max_mem_set = !!max_mem_set;
+
+			/*
+			 * Set the health test state in case of intermittent
+			 * failures.
+			 */
+			if (apt_observations) {
+				/* APT re-initialization */
+				jent_apt_reinit(*ec, current_delta, apt_count,
+						apt_observations);
+
+				/* RCT re-initialization */
+				(*ec)->rct_count = rct_count;
+
+				/* LAG re-initialization */
+				(*ec)->lag_prediction_success_run =
+					lag_prediction_success_run;
+				(*ec)->lag_prediction_success_count =
+					lag_prediction_success_count;
+			}
+
+			/*
+			 * We are not returning the intermittent or permanent
+			 * errors here. If a caller wants them, he should
+			 * register a callback with
+			 * jent_set_fips_failure_callback.
+			 */
 
 			break;
 

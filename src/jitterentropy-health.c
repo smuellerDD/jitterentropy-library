@@ -86,6 +86,7 @@ void jent_lag_init(struct rand_data *ec, unsigned int osr)
 	 * Establish the lag global and local cutoffs based on the presumed
 	 * entropy rate of 1/osr.
 	 */
+	/* TODO: add permanent health failure */
 	if (osr > ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
 		ec->lag_global_cutoff =
 			jent_lag_global_cutoff_lookup[
@@ -161,6 +162,7 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 		ec->lag_prediction_success_count++;
 		ec->lag_prediction_success_run++;
 
+		/* TODO: add permanent health failure */
 		if ((ec->lag_prediction_success_run >= ec->lag_local_cutoff) ||
 		    (ec->lag_prediction_success_count >= ec->lag_global_cutoff))
 			ec->health_failure |= JENT_LAG_FAILURE;
@@ -264,6 +266,10 @@ static inline uint64_t jent_delta3(struct rand_data *ec, uint64_t delta2)
  * necessarily have been observed, so there is no chance of observing 0 of these
  * symbols.)
  *
+ * For the alpha < 2^-53, R cannot be used as it uses a float data type without
+ * arbitrary precision. A SageMath script is used to calculate those cutoff
+ * values.
+ *
  * For any value above 14, this yields the maximal allowable value of 512
  * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that
  * renders the test unable to fail).
@@ -271,6 +277,9 @@ static inline uint64_t jent_delta3(struct rand_data *ec, uint64_t delta2)
 static const unsigned int jent_apt_cutoff_lookup[15]=
 	{ 325, 422, 459, 477, 488, 494, 499, 502,
 	  505, 507, 508, 509, 510, 511, 512 };
+static const unsigned int jent_apt_cutoff_permanent_lookup[15]=
+	{ 355, 447, 479, 494, 502, 507, 510, 512,
+	  512, 512, 512, 512, 512, 512, 512 };
 
 void jent_apt_init(struct rand_data *ec, unsigned int osr)
 {
@@ -280,10 +289,30 @@ void jent_apt_init(struct rand_data *ec, unsigned int osr)
 	 */
 	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
 		ec->apt_cutoff = jent_apt_cutoff_lookup[
-					ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
+			ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
+		ec->apt_cutoff_permanent = jent_apt_cutoff_permanent_lookup[
+			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) - 1];
 	} else {
 		ec->apt_cutoff = jent_apt_cutoff_lookup[osr - 1];
+		ec->apt_cutoff_permanent =
+				jent_apt_cutoff_permanent_lookup[osr - 1];
 	}
+}
+
+void jent_apt_reinit(struct rand_data *ec,
+		     uint64_t current_delta,
+		     unsigned int apt_count,
+		     unsigned int apt_observations)
+{
+	ec->apt_base = current_delta;	/* APT Step 1 */
+	ec->apt_base_set = 1;		/* APT Step 2 */
+
+	/*
+	 * Reset APT counter
+	 * Note that we've taken in the first symbol in the window.
+	 */
+	ec->apt_count = apt_count;
+	ec->apt_observations = apt_observations;
 }
 
 /**
@@ -307,16 +336,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 {
 	/* Initialize the base reference */
 	if (!ec->apt_base_set) {
-		ec->apt_base = current_delta;	/* APT Step 1 */
-		ec->apt_base_set = 1;		/* APT Step 2 */
-
-		/*
-		 * Reset APT counter
-		 * Note that we've taken in the first symbol in the window.
-		 */
-		ec->apt_count = 1;		/* B = 1 */
-		ec->apt_observations = 1;
-
+		jent_apt_reinit(ec, current_delta, 1, 1);
 		return;
 	}
 
@@ -324,7 +344,9 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		ec->apt_count++;		/* B = B + 1 */
 
 		/* Note, ec->apt_count starts with one. */
-		if (ec->apt_count >= ec->apt_cutoff)
+		if (ec->apt_count >= ec->apt_cutoff_permanent)
+			ec->health_failure |= JENT_APT_FAILURE_PERMANENT;
+		else if (ec->apt_count >= ec->apt_cutoff)
 			ec->health_failure |= JENT_APT_FAILURE;
 	}
 
@@ -343,7 +365,8 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  * back-to-back values, the input to the RCT is the counting of the stuck
  * values during the generation of one Jitter RNG output block.
  *
- * The RCT is applied with an alpha of 2^{-30} compliant to FIPS 140-2 IG 9.8.
+ * The RCT is applied with an alpha of 2^{-30} compliant to SP800-90B section
+ * 4.2 for the intermittent failure and 2^{-60} for permanent failures.
  *
  * During the counting operation, the Jitter RNG always calculates the RCT
  * cut-off value of C. If that value exceeds the allowed cut-off value,
@@ -371,7 +394,7 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 
 		/*
 		 * The cutoff value is based on the following consideration:
-		 * alpha = 2^-30 as recommended in FIPS 140-2 IG 9.8.
+		 * alpha = 2^-30 or 2^-60 as recommended in SP800-90B.
 		 * In addition, we require an entropy value H of 1/osr as this
 		 * is the minimum entropy required to provide full entropy.
 		 * Note, we collect (DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR)*osr
@@ -382,9 +405,13 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		 * Note, ec->rct_count (which equals to value B in the pseudo
 		 * code of SP800-90B section 4.4.1) starts with zero. Hence
 		 * we need to subtract one from the cutoff value as calculated
-		 * following SP800-90B. Thus C = ceil(-log_2(alpha)/H) = 30*osr.
+		 * following SP800-90B. Thus C = ceil(-log_2(alpha)/H) = 30*osr
+		 * or 60*osr.
 		 */
-		if ((unsigned int)ec->rct_count >= (30 * ec->osr)) {
+		if ((unsigned int)ec->rct_count >= (60 * ec->osr)) {
+			ec->rct_count = -1;
+			ec->health_failure |= JENT_RCT_FAILURE_PERMANENT;
+		} else if ((unsigned int)ec->rct_count >= (30 * ec->osr)) {
 			ec->rct_count = -1;
 			ec->health_failure |= JENT_RCT_FAILURE;
 		}
@@ -442,6 +469,9 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
  * 	1 RCT failure
  * 	2 APT failure
  * 	4 Lag predictor test failure
+ *	1<<JENT_PERMANENT_FAILURE_SHIFT RCT permanent failure
+ * 	2<<JENT_PERMANENT_FAILURE_SHIFT APT permanent failure
+ * 	4<<JENT_PERMANENT_FAILURE_SHIFT Lag predictor test permanent failure
  */
 unsigned int jent_health_failure(struct rand_data *ec)
 {

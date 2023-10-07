@@ -222,8 +222,8 @@ struct rand_data
 	int rct_count;			/* Number of stuck values */
 
 	/* Adaptive Proportion Test for a significance level of 2^-30 */
-	unsigned int apt_cutoff;	/* Calculated using a corrected version
-					 * of the SP800-90B sec 4.4.2 formula */
+	unsigned int apt_cutoff;	/* Intermittent health test failure */
+	unsigned int apt_cutoff_permanent; /* Permanent health test failure */
 #define JENT_APT_WINDOW_SIZE	512	/* Data window size */
 	unsigned int apt_observations;	/* Number of collected observations in
 					 * current window. */
@@ -453,6 +453,11 @@ static inline void jent_notime_fini(void *ctx) { (void)ctx; }
 #define JENT_RCT_FAILURE	1 /* Failure in RCT health test. */
 #define JENT_APT_FAILURE	2 /* Failure in APT health test. */
 #define JENT_LAG_FAILURE	4 /* Failure in Lag predictor health test. */
+#define JENT_PERMANENT_FAILURE_SHIFT	16
+#define JENT_PERMANENT_FAILURE(x)	(x << JENT_PERMANENT_FAILURE_SHIFT)
+#define JENT_RCT_FAILURE_PERMANENT	JENT_PERMANENT_FAILURE(JENT_RCT_FAILURE)
+#define JENT_APT_FAILURE_PERMANENT	JENT_PERMANENT_FAILURE(JENT_APT_FAILURE)
+#define JENT_LAG_FAILURE_PERMANENT	JENT_PERMANENT_FAILURE(JENT_LAG_FAILURE)
 /* -- END error masks for health tests -- */
 
 /* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */

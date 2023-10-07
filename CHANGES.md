@@ -1,3 +1,6 @@
+3.5.0
+ * add distinction between intermittent and permanent health failure
+
 3.4.1
  * add FIPS 140 hints to man page
  * simplify the test tool to search for optimal configurations
