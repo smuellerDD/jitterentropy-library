@@ -42,7 +42,8 @@ LIBMINOR=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep MINVERS
 LIBPATCH=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep PATCHLEVEL | awk '{print $$3}')
 LIBVERSION := $(LIBMAJOR).$(LIBMINOR).$(LIBPATCH)
 
-C_SRCS := $(sort $(wildcard $(SRCDIR)/*.c))
+VPATH := $(SRCDIR)
+C_SRCS := $(notdir $(sort $(wildcard $(SRCDIR)/*.c)))
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 
@@ -57,15 +58,18 @@ CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
 LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
-.PHONY: all scan install clean distclean check
+.PHONY: all scan install clean distclean check $(NAME) $(NAME)-static
 
 all: $(NAME) $(NAME)-static
 
-$(NAME)-static: $(OBJS)
+lib$(NAME).a: $(OBJS)
 	$(AR) rcs lib$(NAME).a $(OBJS)
 
-$(NAME): $(OBJS)
+lib$(NAME).so.$(LIBVERSION): $(OBJS)
 	$(CC) -shared -Wl,-soname,lib$(NAME).so.$(LIBMAJOR) -o lib$(NAME).so.$(LIBVERSION) $(OBJS) $(LDFLAGS)
+
+$(NAME)-static: lib$(NAME).a
+$(NAME): lib$(NAME).so.$(LIBVERSION)
 
 $(analyze_plists): %.plist: %.c
 	@echo "  CCSA  " $@
