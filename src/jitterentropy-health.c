@@ -334,6 +334,8 @@ static void jent_apt_reset(struct rand_data *ec)
  */
 static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 {
+	current_delta &= JENT_APT_MASK;
+
 	/* Initialize the base reference */
 	if (!ec->apt_base_set) {
 		jent_apt_reinit(ec, current_delta, 1, 1);
