@@ -495,11 +495,11 @@ static struct rand_data
 		entropy_collector->memaccessloops = JENT_MEMORY_ACCESSLOOPS;
 	}
 
-	if (sha3_alloc(&entropy_collector->hash_state))
+	if (jent_sha3_alloc(&entropy_collector->hash_state))
 		goto err;
 
 	/* Initialize the hash state */
-	sha3_256_init(entropy_collector->hash_state);
+	jent_sha3_256_init(entropy_collector->hash_state);
 
 	/* verify and set the oversampling rate */
 	if (osr < JENT_MIN_OSR)
@@ -541,7 +541,7 @@ err:
 	if (entropy_collector->mem != NULL)
 		jent_zfree(entropy_collector->mem, memsize);
 	if (entropy_collector->hash_state != NULL)
-		sha3_dealloc(entropy_collector->hash_state);
+		jent_sha3_dealloc(entropy_collector->hash_state);
 	jent_zfree(entropy_collector, sizeof(struct rand_data));
 	return NULL;
 }
@@ -583,7 +583,7 @@ JENT_PRIVATE_STATIC
 void jent_entropy_collector_free(struct rand_data *entropy_collector)
 {
 	if (entropy_collector != NULL) {
-		sha3_dealloc(entropy_collector->hash_state);
+		jent_sha3_dealloc(entropy_collector->hash_state);
 		jent_notime_disable(entropy_collector);
 		if (entropy_collector->mem != NULL) {
 			jent_zfree(entropy_collector->mem,
@@ -739,7 +739,7 @@ static inline int jent_entropy_init_common_pre(void)
 	jent_notime_block_switch();
 	jent_health_cb_block_switch();
 
-	if (sha3_tester())
+	if (jent_sha3_tester())
 		return EHASH;
 
 	ret = jent_gcd_selftest();

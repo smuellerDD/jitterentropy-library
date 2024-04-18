@@ -104,8 +104,8 @@ extern "C" {
 #include "jitterentropy-base-user.h"
 #endif
 
-#define SHA3_256_SIZE_DIGEST_BITS	256
-#define SHA3_256_SIZE_DIGEST		(SHA3_256_SIZE_DIGEST_BITS >> 3)
+#define JENT_SHA3_256_SIZE_DIGEST_BITS	256
+#define JENT_SHA3_256_SIZE_DIGEST	(JENT_SHA3_256_SIZE_DIGEST_BITS >> 3)
 
 /*
  * The output 256 bits can receive more than 256 bits of min entropy,
@@ -175,7 +175,7 @@ struct rand_data
 	 * calculate the next random value. */
 	void *hash_state;		/* SENSITIVE hash state entropy pool */
 	uint64_t prev_time;		/* SENSITIVE Previous time stamp */
-#define DATA_SIZE_BITS (SHA3_256_SIZE_DIGEST_BITS)
+#define DATA_SIZE_BITS (JENT_SHA3_256_SIZE_DIGEST_BITS)
 
 #ifndef JENT_HEALTH_LAG_PREDICTOR
 	uint64_t last_delta;		/* SENSITIVE stuck test */

@@ -27,29 +27,31 @@ extern "C"
 {
 #endif
 
-#define SHA3_SIZE_BLOCK(bits)	((1600 - 2 * bits) >> 3)
-#define SHA3_256_SIZE_BLOCK	SHA3_SIZE_BLOCK(SHA3_256_SIZE_DIGEST_BITS)
-#define SHA3_MAX_SIZE_BLOCK	SHA3_256_SIZE_BLOCK
+#define JENT_SHA3_SIZE_BLOCK(bits)	((1600 - 2 * bits) >> 3)
+#define JENT_SHA3_256_SIZE_BLOCK                                               \
+	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_256_SIZE_DIGEST_BITS)
+#define JENT_SHA3_MAX_SIZE_BLOCK	JENT_SHA3_256_SIZE_BLOCK
 
-struct sha_ctx {
+struct jent_sha_ctx {
 	uint64_t state[25];
 	size_t msg_len;
 	unsigned int r;
 	unsigned int rword;
 	unsigned int digestsize;
-	uint8_t partial[SHA3_MAX_SIZE_BLOCK];
+	uint8_t partial[JENT_SHA3_MAX_SIZE_BLOCK];
 };
 
-#define SHA_MAX_CTX_SIZE	(sizeof(struct sha_ctx))
+#define JENT_SHA_MAX_CTX_SIZE	(sizeof(struct jent_sha_ctx))
 #define HASH_CTX_ON_STACK(name)						       \
-	struct sha_ctx name
+	struct jent_sha_ctx name
 
-void sha3_256_init(struct sha_ctx *ctx);
-void sha3_update(struct sha_ctx *ctx, const uint8_t *in, size_t inlen);
-void sha3_final(struct sha_ctx *ctx, uint8_t *digest);
-int sha3_alloc(void **hash_state);
-void sha3_dealloc(void *hash_state);
-int sha3_tester(void);
+void jent_sha3_256_init(struct jent_sha_ctx *ctx);
+void jent_sha3_update(struct jent_sha_ctx *ctx, const uint8_t *in,
+		      size_t inlen);
+void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest);
+int jent_sha3_alloc(void **hash_state);
+void jent_sha3_dealloc(void *hash_state);
+int jent_sha3_tester(void);
 
 #ifdef __cplusplus
 }

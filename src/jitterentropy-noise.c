@@ -101,7 +101,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 			   uint64_t loop_cnt, unsigned int stuck)
 {
 	HASH_CTX_ON_STACK(ctx);
-	uint8_t intermediary[SHA3_256_SIZE_DIGEST];
+	uint8_t intermediary[JENT_SHA3_256_SIZE_DIGEST];
 	uint64_t j = 0;
 #define MAX_HASH_LOOP 3
 #define MIN_HASH_LOOP 0
@@ -114,7 +114,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	/* Use the memset to shut up valgrind */
 	memset(intermediary, 0, sizeof(intermediary));
 
-	sha3_256_init(&ctx);
+	jent_sha3_256_init(&ctx);
 
 	/*
 	 * testing purposes -- allow test app to set the counter, not
@@ -137,26 +137,26 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	 * the sha3_final.
 	 */
 	for (j = 0; j < hash_loop_cnt; j++) {
-		sha3_update(&ctx, intermediary, sizeof(intermediary));
-		sha3_update(&ctx, (uint8_t *)&ec->rct_count,
-			    sizeof(ec->rct_count));
-		sha3_update(&ctx, (uint8_t *)&ec->apt_cutoff,
-			    sizeof(ec->apt_cutoff));
-		sha3_update(&ctx, (uint8_t *)&ec->apt_observations,
-			    sizeof(ec->apt_observations));
-		sha3_update(&ctx, (uint8_t *)&ec->apt_count,
-			    sizeof(ec->apt_count));
-		sha3_update(&ctx,(uint8_t *) &ec->apt_base,
-			    sizeof(ec->apt_base));
-		sha3_update(&ctx, (uint8_t *)&j, sizeof(uint64_t));
-		sha3_final(&ctx, intermediary);
+		jent_sha3_update(&ctx, intermediary, sizeof(intermediary));
+		jent_sha3_update(&ctx, (uint8_t *)&ec->rct_count,
+				 sizeof(ec->rct_count));
+		jent_sha3_update(&ctx, (uint8_t *)&ec->apt_cutoff,
+				 sizeof(ec->apt_cutoff));
+		jent_sha3_update(&ctx, (uint8_t *)&ec->apt_observations,
+				 sizeof(ec->apt_observations));
+		jent_sha3_update(&ctx, (uint8_t *)&ec->apt_count,
+				 sizeof(ec->apt_count));
+		jent_sha3_update(&ctx,(uint8_t *) &ec->apt_base,
+				 sizeof(ec->apt_base));
+		jent_sha3_update(&ctx, (uint8_t *)&j, sizeof(uint64_t));
+		jent_sha3_final(&ctx, intermediary);
 	}
 
 	/*
 	 * Inject the data from the previous loop into the pool. This data is
 	 * not considered to contain any entropy, but it stirs the pool a bit.
 	 */
-	sha3_update(ec->hash_state, intermediary, sizeof(intermediary));
+	jent_sha3_update(ec->hash_state, intermediary, sizeof(intermediary));
 
 	/*
 	 * Insert the time stamp into the hash context representing the pool.
@@ -167,10 +167,12 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	 * conditioning operation to have an identical amount of input data
 	 * according to section 3.1.5.
 	 */
-	if (!stuck)
-		sha3_update(ec->hash_state, (uint8_t *)&time, sizeof(uint64_t));
+	if (!stuck) {
+		jent_sha3_update(ec->hash_state, (uint8_t *)&time,
+				 sizeof(uint64_t));
+	}
 
-	jent_memset_secure(&ctx, SHA_MAX_CTX_SIZE);
+	jent_memset_secure(&ctx, JENT_SHA_MAX_CTX_SIZE);
 	jent_memset_secure(intermediary, sizeof(intermediary));
 }
 
@@ -406,12 +408,12 @@ void jent_random_data(struct rand_data *ec)
 
 void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len)
 {
-	uint8_t jent_block[SHA3_256_SIZE_DIGEST];
+	uint8_t jent_block[JENT_SHA3_256_SIZE_DIGEST];
 
-	BUILD_BUG_ON(SHA3_256_SIZE_DIGEST != (DATA_SIZE_BITS / 8));
+	BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != (DATA_SIZE_BITS / 8));
 
 	/* The final operation automatically re-initializes the ->hash_state */
-	sha3_final(ec->hash_state, jent_block);
+	jent_sha3_final(ec->hash_state, jent_block);
 	if (dst_len)
 		memcpy(dst, jent_block, dst_len);
 
@@ -419,6 +421,6 @@ void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len)
 	 * Stir the new state with the data from the old state - the digest
 	 * of the old data is not considered to have entropy.
 	 */
-	sha3_update(ec->hash_state, jent_block, sizeof(jent_block));
+	jent_sha3_update(ec->hash_state, jent_block, sizeof(jent_block));
 	jent_memset_secure(jent_block, sizeof(jent_block));
 }
