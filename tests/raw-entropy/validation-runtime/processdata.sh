@@ -157,6 +157,11 @@ for file in $ENTROPYDATA_DIR/$IID_DATA
 do
 	bits=8
 	infile=$file
+
+	if [ ! -f $infile ]
+		continue
+	fi
+
 	filepath=`basename ${file%%.data}`
 	outfile=$RESULTS_DIR/${filepath}.minentropy_${bits}.var.txt
 	inprocess_file=$outfile
