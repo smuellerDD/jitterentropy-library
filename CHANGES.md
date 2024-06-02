@@ -1,6 +1,9 @@
 3.5.0
  * add distinction between intermittent and permanent health failure
 
+ * add compile time option to allow configuring a mask to reduce the size of
+   the time stamp used for the APT
+
 3.4.1
  * add FIPS 140 hints to man page
  * simplify the test tool to search for optimal configurations
