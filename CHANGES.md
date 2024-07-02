@@ -1,3 +1,6 @@
+3.5.1
+ * Remove bi-modal behavior of conditioning function
+
 3.5.0
  * add distinction between intermittent and permanent health failure
 
