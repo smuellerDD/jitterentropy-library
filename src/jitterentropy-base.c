@@ -41,11 +41,13 @@
 		      * require consumer to be updated (as long as this number
 		      * is zero, the API is not considered stable and can
 		      * change without a bump of the major version) */
-#define MINVERSION 5 /* API compatible, ABI may change, functional
+#define MINVERSION 6 /* API compatible, ABI may change, functional
 		      * enhancements only, consumer can be left unchanged if
 		      * enhancements are not considered */
-#define PATCHLEVEL 1 /* API / ABI compatible, no functional changes, no
-		      * enhancements, bug fixes only */
+#define PATCHLEVEL 0 /* API / ABI compatible, no functional changes, no
+		      * enhancements, bug fixes only. Also, the entropy
+		      * collection is not changed in any way that would
+		      * necessitate a re-assessment. */
 
 /***************************************************************************
  * Jitter RNG Static Definitions
