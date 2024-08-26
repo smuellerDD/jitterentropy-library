@@ -38,6 +38,14 @@ jitterentropy \- CPU Jitter Random Number Generator
 .BI "ssize_t jent_read_entropy_safe(struct rand_data **" entropy_collector ",
 .BI "                               char *" data ", size_t " len );
 .sp
+.BI "#define JENT_MAJVERSION x"
+.sp
+.BI "#define JENT_MINVERSION y"
+.sp
+.BI "#define JENT_PATCHLEVEL z"
+.sp
+.BI "#define JENT_VERSION (...)"
+.sp
 .BI "unsigned int jent_version(" void ");
 .fi
 .SH DESCRIPTION
@@ -265,9 +273,28 @@ The function
 has the same error codes as
 .BR jent_read_entropy ().
 .LP
+.BR JENT_MAJVERSION
+indicates API / ABI incompatible changes, functional changes that require
+consumer to be updated.
+.LP
+.BR JENT_MINVERSION
+indicates API compatible, ABI may change, functional enhancements only,
+consumer can be left unchanged if enhancements are not considered.
+.LP
+.BR JENT_PATCHLEVEL
+indicates API / ABI compatible, no functional changes, no enhancements, bug
+fixes only. Also, the entropy collection is not changed in any way that
+would necessitate a re-assessment.
+.LP
+.BR JENT_VERSION
+the version number of the library as an integer value that is monotonically
+increasing. The version numbers are multiples of 100. For example, version
+1.2.3 is converted to 1020300 -- the last two digits are reserved for
+future use.
+.LP
 .BR jent_version ()
-returns the version number of the library as an integer value that is
-monotonically increasing.
+returns
+.BR JENT_VERSION.
 .PP
 .SH FIPS 140-3 Considerations
 In order for the Jitter RNG to execute compliant to FIPS 140-3 and by

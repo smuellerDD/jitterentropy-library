@@ -46,6 +46,30 @@
 extern "C" {
 #endif
 
+/*
+ * API / ABI incompatible changes, functional changes that require consumer to
+ * be updated (as long as this number is zero, the API is not considered stable
+ * and can change without a bump of the major version).
+ */
+#define JENT_MAJVERSION 3
+
+/*
+ * API compatible, ABI may change, functional enhancements only, consumer can be
+ * left unchanged if enhancements are not considered.
+ */
+#define JENT_MINVERSION 6
+
+/*
+ * API / ABI compatible, no functional changes, no enhancements, bug fixes only.
+ * Also, the entropy collection is not changed in any way that would necessitate
+ * a re-assessment.
+ */
+#define JENT_PATCHLEVEL 0
+
+#define JENT_VERSION (JENT_MAJVERSION * 1000000 + \
+		      JENT_MINVERSION * 10000 + \
+		      JENT_PATCHLEVEL * 100)
+
 /***************************************************************************
  * Jitter RNG Configuration Section
  *
