@@ -159,6 +159,7 @@ do
 	infile=$file
 
 	if [ ! -f $infile ]
+	then
 		continue
 	fi
 
