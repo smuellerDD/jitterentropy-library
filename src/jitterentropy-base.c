@@ -323,8 +323,11 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			*ec = NULL;
 
 			/* Perform new health test with updated OSR */
-			if (jent_entropy_init_ex(osr, flags))
-				return -1;
+			while (jent_entropy_init_ex(osr, flags)) {
+				osr++;
+				if (osr > 20)
+					return -1;
+			}
 
 			*ec = _jent_entropy_collector_alloc(osr, flags);
 			if (!*ec)

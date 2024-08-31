@@ -1,5 +1,7 @@
-3.5.1
+3.6.0
  * Remove bi-modal behavior of conditioning function
+ * Make jent_read_entropy_safe safer by retrying the health test
+ * Move the version information to make them available at compile time
 
 3.5.0
  * add distinction between intermittent and permanent health failure
