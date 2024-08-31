@@ -37,9 +37,9 @@ SRCDIR := src
 INSTALL_STRIP ?= install -s
 
 NAME := jitterentropy
-LIBMAJOR=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep MAJVERSION | awk '{print $$3}')
-LIBMINOR=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep MINVERSION | awk '{print $$3}')
-LIBPATCH=$(shell cat $(SRCDIR)/jitterentropy-base.c | grep define | grep PATCHLEVEL | awk '{print $$3}')
+LIBMAJOR=$(shell cat jitterentropy.h | egrep "define\s+JENT_MAJVERSION" | awk '{print $$3}')
+LIBMINOR=$(shell cat jitterentropy.h | egrep "define\s+JENT_MINVERSION" | awk '{print $$3}')
+LIBPATCH=$(shell cat jitterentropy.h | egrep "define\s+JENT_PATCHLEVEL" | awk '{print $$3}')
 LIBVERSION := $(LIBMAJOR).$(LIBMINOR).$(LIBPATCH)
 
 VPATH := $(SRCDIR)
