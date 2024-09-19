@@ -6,8 +6,7 @@
 # many times and record the first time stamps.
 #
 # Test execution:
-#	1. Apply patch
-#	   `0001-crypto-jitter-add-interface-for-gathering-of-raw-ent.patch`,
+#	1. Enable kernel option `CONFIG_CRYPTO_JITTERENTROPY_TESTINTERFACE`,
 #	   enable configuration option `CONFIG_CRYPTO_USER_API_RNG`,
 #	   compile, install and reboot the kernel, and ensure that the
 #	   Linux kernel command line contains
