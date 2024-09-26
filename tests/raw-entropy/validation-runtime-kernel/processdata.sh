@@ -112,7 +112,7 @@ do
 	fi
 
 	echo "Converting recorded entropy data $in_file into different bit output with mask $mask" >> $LOGFILE
-	./$EXTRACT $in_file $out_file $SAMPLES $mask &>> $LOGFILE
+	./$EXTRACT $in_file $out_file $SAMPLES $mask >> $LOGFILE 2>&1
 done
 
 echo "" | tee -a $LOGFILE
