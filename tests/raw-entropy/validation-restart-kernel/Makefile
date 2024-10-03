@@ -11,7 +11,7 @@ program_OBJS := $(program_C_OBJS)
 
 program_INCLUDE_DIRS :=
 program_LIBRARY_DIRS :=
-program_LIBRARIES := rt
+program_LIBRARIES :=
 
 CPPFLAGS += $(foreach includedir,$(program_INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(program_LIBRARY_DIRS),-L$(librarydir))
