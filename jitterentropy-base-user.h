@@ -325,7 +325,7 @@ static inline void jent_memset_secure(void *s, size_t n)
 
 static inline long jent_ncpu(void)
 {
-#ifdef _POSIX_SOURCE
+#if defined(_POSIX_SOURCE) || defined(__APPLE__)
 	long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
 
 	if (ncpu == -1)
