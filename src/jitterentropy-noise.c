@@ -52,7 +52,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 
 #else /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
 
-	uint64_t time = 0;
+	uint64_t time_now = 0;
 	uint64_t shuffle = 0;
 	uint64_t mask = (UINT64_C(1)<<bits) - 1;
 	unsigned int i = 0;
@@ -67,9 +67,9 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	 * We fold the time value as much as possible to ensure that as many
 	 * bits of the time stamp are included as possible.
 	 */
-	for (i = 0; (((sizeof(time) << 3) + bits - 1) / bits) > i; i++) {
-		shuffle ^= time & mask;
-		time = time >> bits;
+	for (i = 0; (((sizeof(time_now) << 3) + bits - 1) / bits) > i; i++) {
+		shuffle ^= time_now & mask;
+		time_now = time_now >> bits;
 	}
 
 	/*
@@ -89,7 +89,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
  * entropy pool using a hash.
  *
  * @ec [in] entropy collector struct
- * @time [in] time delta to be injected
+ * @time_delta [in] time delta to be injected
  * @loop_cnt [in] if a value not equal to 0 is set, use the given value as
  *		  number of loops to perform the hash operation
  * @stuck [in] Is the time delta identified as stuck?
@@ -97,7 +97,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
  * Output:
  * updated hash context
  */
-static void jent_hash_time(struct rand_data *ec, uint64_t time,
+static void jent_hash_time(struct rand_data *ec, uint64_t time_delta,
 			   uint64_t loop_cnt, unsigned int stuck)
 {
 	HASH_CTX_ON_STACK(ctx);
@@ -166,7 +166,7 @@ static void jent_hash_time(struct rand_data *ec, uint64_t time,
 	 */
 	if (!stuck) {
 		/* Insert the time. */
-		output_value = time;
+		output_value = time_delta;
 	} else {
 		/* The time is considered stuck. Insert the fixed value 0. */
 		output_value = 0;
@@ -216,7 +216,7 @@ static inline uint32_t xoshiro128starstar(uint32_t *s)
 
 static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
-	uint64_t i = 0, time = 0;
+	uint64_t i = 0, time_now = 0;
 	union {
 		uint32_t u[4];
 		uint8_t b[sizeof(uint32_t) * 4];
@@ -244,8 +244,8 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	 * timing, so we can now benefit from the Central Limit Theorem!
 	 */
 	for (i = 0; i < sizeof(prngState); i++) {
-		jent_get_nstime_internal(ec, &time);
-		prngState.b[i] ^= (uint8_t)(time & 0xff);
+		jent_get_nstime_internal(ec, &time_now);
+		prngState.b[i] ^= (uint8_t)(time_now & 0xff);
 	}
 
 	/*
@@ -359,7 +359,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 				 uint64_t loop_cnt,
 				 uint64_t *ret_current_delta)
 {
-	uint64_t time = 0;
+	uint64_t time_now = 0;
 	uint64_t current_delta = 0;
 	unsigned int stuck;
 
@@ -370,10 +370,10 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	 * Get time stamp and calculate time delta to previous
 	 * invocation to measure the timing variations
 	 */
-	jent_get_nstime_internal(ec, &time);
-	current_delta = jent_delta(ec->prev_time, time) /
+	jent_get_nstime_internal(ec, &time_now);
+	current_delta = jent_delta(ec->prev_time, time_now) /
 						ec->jent_common_timer_gcd;
-	ec->prev_time = time;
+	ec->prev_time = time_now;
 
 	/* Check whether we have a stuck measurement. */
 	stuck = jent_stuck(ec, current_delta);
