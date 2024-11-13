@@ -122,19 +122,23 @@ extern "C" {
  * Mask specifying the number of bits of the raw entropy data of the time delta
  * value used for the APT.
  *
- * This value implies that for the APT, only the low bits specified by
- * JENT_APT_MASK are taken as suggested by IG D.K resolution 22. The mask is
- * applied to a time stamp where the GCD is already applied and thus no
- * "non-moving" low-order bits are present. The smaller the mask, the more
- * sensitive the APT becomes, i.e. it becomes more likely that the APT flags
- * an health error as masked out higher bits that may provide entropy are
- * ignored. Yet, it is disputed that masking the time stamp is helpful.
- *
- * IG D.K may suggest a mask value of 0xff as the analysis of the raw entropy
- * data with the SP800-90B tool truncates the time delta to 8 bits.
- *
- * Due to the disputed nature of the mask, the default value is set such
- * that no data is maked out.
+ * This value implies that for the APT, only the bits specified by
+ * JENT_APT_MASK are taken. This was suggested in a draft IG D.K resolution 22
+ * provided by NIST, but further analysis
+ * (https://www.untruth.org/~josh/sp80090b/CMUF%20EWG%20Draft%20IG%20D.K%20Comments%20D10.pdf)
+ * suggests that this truncation / translation generally results in a health
+ * test with both a higher false positive rate (because multiple raw symbols
+ * map to the same symbol within the health test) and a lower statistical power
+ * when the APT cutoff is selected based on the apparent truncated entropy
+ * (i.e., truncation generally makes the test worse). NIST has since withdrawn
+ * this draft and stated that they will not propose truncation prior to
+ * health testing.
+ * Because the general tendency of such truncation to make the health test
+ * worse the default value is set such that no data is masked out and this
+ * should only be changed if a hardware-specific analysis suggests that some
+ * other mask setting is beneficial.
+ * The mask is applied to a time stamp where the GCD is already divided out, and thus no
+ * "non-moving" low-order bits are present.
  */
 #define JENT_APT_MASK		(UINT64_C(0xffffffffffffffff))
 
@@ -173,7 +177,7 @@ extern "C" {
  * The external caller provides these function pointers to handle the
  * management of the timer thread that is spawned by the Jitter RNG.
  *
- * @var jent_notime_init This function is intended to initialze the threading
+ * @var jent_notime_init This function is intended to initialize the threading
  *	support. All data that is required by the threading code must be
  *	held in the data structure @param ctx. The Jitter RNG maintains the
  *	data structure and uses it for every invocation of the following calls.
