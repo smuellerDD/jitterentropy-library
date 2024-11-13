@@ -138,6 +138,22 @@ extern "C" {
  */
 #define JENT_APT_MASK		(UINT64_C(0xffffffffffffffff))
 
+/* This parameter establishes the multiplicative factor that the desired
+ * memory region size should be larger than the observed cache size; the
+ * multiplicative factor is 2^JENT_CACHE_SHIFT_BITS.
+ * Set this to 0 if the desired memory region should be at least as large as
+ * the cache. If one wants most of the memory updates to result in a memory
+ * update, then this value should be at least 1.
+ * If the memory updates should dominantly result in a memory update, then
+ * the value should be set to at least 3.
+ * The actual size of the memory region is never larger than requested by
+ * the passed in JENT_MAX_MEMSIZE_* flag (if provided) or JENT_MEMORY_SIZE
+ * (if no JENT_MAX_MEMSIZE_* flag is provided).
+ */
+#ifndef JENT_CACHE_SHIFT_BITS
+#define JENT_CACHE_SHIFT_BITS 0
+#endif
+
 /***************************************************************************
  * Jitter RNG State Definition Section
  ***************************************************************************/
