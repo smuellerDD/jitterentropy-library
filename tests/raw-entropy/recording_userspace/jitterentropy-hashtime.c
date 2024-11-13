@@ -43,9 +43,18 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 			 unsigned int flags, int report_counter_ticks)
 {
 	unsigned long size = 0;
-	struct rand_data *ec = NULL, *ec_min = NULL;
+	struct rand_data *ec = NULL;
+	uint64_t *duration;
+#ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
+	#ifdef JENT_TEST_BINARY_OUTPUT
+	size_t recordsWritten;
+	#endif
+#else
+	struct rand_data *ec_min = NULL;
+	uint64_t *duration_min;
+#endif
+
 	FILE *out = NULL;
-	uint64_t *duration, *duration_min;
 	int ret = 0;
 	unsigned int health_test_result;
 
@@ -53,11 +62,13 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	if (!duration)
 		return 1;
 
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 	duration_min = calloc(rounds, sizeof(uint64_t));
 	if (!duration_min) {
 		free(duration);
 		return 1;
 	}
+#endif
 
 	printf("Processing %s\n", pathname);
 
@@ -78,11 +89,13 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		goto out;
 	}
 
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 	ec_min = jent_entropy_collector_alloc(0, flags);
 	if (!ec_min) {
 		ret = 1;
 		goto out;
 	}
+#endif
 
 	if (!report_counter_ticks) {
 		/*
@@ -90,17 +103,30 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		 * have had common factors removed.
 		 */
 		ec->jent_common_timer_gcd = 1;
+
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 		ec_min->jent_common_timer_gcd = 1;
+#endif
 	}
 
 	if (ec->enable_notime) {
 		jent_notime_settick(ec);
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 		jent_notime_settick(ec_min);
+#endif
 	}
 
 	/* Enable full SP800-90B health test handling */
 	ec->fips_enabled = 1;
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 	ec_min->fips_enabled = 1;
+#endif
+
+#ifdef JENT_RANDOM_MEMACCESS
+	/* Print the size of the memory region. */
+        printf("Memory size: %" PRIu32 "\n", ec->memmask+1);
+#endif
+
 
 	/* Prime the test */
 	jent_measure_jitter(ec, 0, NULL);
@@ -109,14 +135,27 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		jent_measure_jitter(ec, 0, &duration[size]);
 	}
 
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 	jent_measure_jitter(ec_min, 0, NULL);
 	for (size = 0; size < rounds; size++) {
 		/* Disregard stuck indicator */
 		jent_measure_jitter(ec_min, 1, &duration_min[size]);
 	}
+#endif
 
-	for (size = 0; size < rounds; size++)
-		fprintf(out, "%" PRIu64 " %" PRIu64 "\n", duration[size], duration_min[size]);
+
+#ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
+	#ifdef JENT_TEST_BINARY_OUTPUT
+	recordsWritten = fwrite(duration, sizeof(uint64_t), rounds, out);
+	if(recordsWritten != rounds) fprintf(stderr, "Can't output data.\n");
+	#else
+        for (size = 0; size < rounds; size++)
+                fprintf(out, "%" PRIu64 "\n", duration[size]);
+	#endif
+#else
+        for (size = 0; size < rounds; size++)
+                fprintf(out, "%" PRIu64 " %" PRIu64 "\n", duration[size], duration_min[size]);
+#endif
 
 	if ((health_test_result = jent_health_failure(ec))) {
 		printf("The main context encountered the following health testing failure(s):");
@@ -126,6 +165,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		printf("\n");
 	}
 
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 	if ((health_test_result = jent_health_failure(ec_min))) {
 		printf("The minimum context encountered the following health testing failure(s):");
 		if (health_test_result & JENT_RCT_FAILURE) printf(" RCT");
@@ -133,23 +173,30 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		if (health_test_result & JENT_LAG_FAILURE) printf(" Lag");
 		printf("\n");
 	}
+#endif
 
 out:
 	free(duration);
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 	free(duration_min);
+#endif
 	if (flags & JENT_FORCE_INTERNAL_TIMER) {
 		if (ec)
 			jent_notime_unsettick(ec);
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 		if (ec_min)
 			jent_notime_unsettick(ec_min);
+#endif
 	}
 	if (out)
 		fclose(out);
 
 	if (ec)
 		jent_entropy_collector_free(ec);
+#ifndef JENT_CONF_DISABLE_LOOP_SHUFFLE
 	if (ec_min)
 		jent_entropy_collector_free(ec_min);
+#endif
 
 	return ret;
 }
@@ -245,8 +292,11 @@ int main(int argc, char * argv[])
 		flags |= JENT_FORCE_INTERNAL_TIMER;
 
 	for (i = 1; i <= repeats; i++) {
-		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", argv[3],
-			 i);
+#if defined(JENT_TEST_BINARY_OUTPUT) && defined(JENT_CONF_DISABLE_LOOP_SHUFFLE)
+		snprintf(pathname, sizeof(pathname), "%s-%.4lu-u64.bin", argv[3], i);
+#else
+		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", argv[3], i);
+#endif
 
 		ret = jent_one_test(pathname, rounds, flags,
 				    REPORT_COUNTER_TICKS);
