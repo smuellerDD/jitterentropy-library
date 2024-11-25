@@ -91,7 +91,7 @@ int main(int argc, char * argv[])
 	if ((timeBoundIn <= 0.0) || (*endtimeparam != '\0'))
 		return 1;
 
-	//The time bound, expressed as an integer number of nanoseconds.
+	//The time upper bound, expressed as an integer number of nanoseconds.
 	timeBound = (uint64_t)floor(timeBoundIn * 1000000000.0);
 	argc--;
 	argv++;
@@ -111,7 +111,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				fprintf(stderr, "Maximum memory value missing\n");
+				fprintf(stderr, "Maximum memory value missing.\n");
 				return 1;
 			}
 
@@ -179,21 +179,23 @@ int main(int argc, char * argv[])
 	}
 
 	/* Verify the first invariant: generation using minBound occurs in less than or equal time than the targeted time. */
-	minBound = 1;
+	minBound = JENT_MIN_OSR;
 	if(jent_output_time(rounds, minBound, flags) > timeBound) {
-		fprintf(stderr, "Minimum osr %u exceeds the bound.\n", minBound);
+		fprintf(stderr, "Minimum osr %u exceeds the target time. Invariant not met.\n", minBound);
 		return 1;
 	} else
-		printf("Minimum osr=%u invariant verified.\n", minBound);
+		fprintf(stderr, "Minimum invariant found: osr upper bound is >= %u.\n", minBound);
 
 	/* Locate the maxBound */
-	maxBound = 2;
+	maxBound = JENT_MIN_OSR + 1;
+	fprintf(stderr, "Trying to find the maximum invariant: %u", maxBound);
 	while(jent_output_time(rounds, maxBound, flags) <= timeBound) {
 		minBound = maxBound;
 		maxBound = maxBound * 2;
+		fprintf(stderr, " %u", maxBound);
 		assert(maxBound > minBound);
 	}
-	printf("Maximum osr bound %u found.\n", maxBound);
+	fprintf(stderr, ".\nMaximum invariant found: osr upper bound is < %u.\n", maxBound);
 
 	/* The second invariant is now verified: generation using maxBound occurs in greater time than the targeted time. */
 
@@ -205,16 +207,19 @@ int main(int argc, char * argv[])
 		assert(curosr > minBound);
 		assert(curosr < maxBound);
 
+		fprintf(stderr, "Trying osr=%u. ", curosr);
 		if(jent_output_time(rounds, curosr, flags) <= timeBound) {
+			fprintf(stderr, "Timing is less than the target time. ");
 			minBound = curosr;
 		} else {
+			fprintf(stderr, "Timing is greater than the target time. ");
 			maxBound = curosr;
 		}
 
-		printf("Desired osr bound is in [%u, %u]\n", minBound, maxBound);
+		fprintf(stderr, "Desired osr upper bound is in [%u, %u)\n", minBound, maxBound);
 	}
 
-	printf("osr bound is %u\n", minBound);
+	printf("%u\n", minBound);
 			
 	return 0;
 }
