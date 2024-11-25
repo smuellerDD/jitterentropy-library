@@ -184,20 +184,22 @@ int main(int argc, char * argv[])
 		fprintf(stderr, "Minimum osr %u exceeds the target time. Invariant not met.\n", minBound);
 		return 1;
 	} else
-		fprintf(stderr, "Minimum invariant found: osr upper bound is >= %u.\n", minBound);
+		fprintf(stderr, "A minimum was found: osr upper bound is >= %u.\n", minBound);
 
 	/* Locate the maxBound */
 	maxBound = JENT_MIN_OSR + 1;
-	fprintf(stderr, "Trying to find the maximum invariant: %u", maxBound);
+	fprintf(stderr, "Trying to find a maximum: %u", maxBound);
 	while(jent_output_time(rounds, maxBound, flags) <= timeBound) {
 		minBound = maxBound;
 		maxBound = maxBound * 2;
 		fprintf(stderr, " %u", maxBound);
 		assert(maxBound > minBound);
 	}
-	fprintf(stderr, ".\nMaximum invariant found: osr upper bound is < %u.\n", maxBound);
+	fprintf(stderr, ".\nMaximum found: osr upper bound is < %u.\n", maxBound);
 
 	/* The second invariant is now verified: generation using maxBound occurs in greater time than the targeted time. */
+
+	fprintf(stderr, "Desired osr upper bound is in [%u, %u)\n", minBound, maxBound);
 
 	while(maxBound - minBound > 1) {
 		unsigned int curosr;
