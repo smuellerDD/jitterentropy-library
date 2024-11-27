@@ -200,6 +200,7 @@ int main(int argc, char * argv[])
 
 	/* We don't start with a maxBound. */
 	maxBound = 0;
+	maxTime = 0;
 
 	/* Verify the first invariant: generation using minBound occurs in less than or equal time than the targeted time. */
 	minBound = JENT_MIN_OSR;
@@ -281,6 +282,7 @@ int main(int argc, char * argv[])
 		/* Locate the maxBound */
 		while((maxTime = jent_output_time(rounds, maxBound, flags)) <= timeBound) {
 			minBound = maxBound;
+			minTime = maxTime;
 			maxBound = maxBound * 2;
 			fprintf(stderr, " %u", maxBound);
 			assert(maxBound > minBound);
