@@ -23,12 +23,31 @@
 #include <string.h>
 #include <inttypes.h>
 #include <math.h>
+#include <float.h>
 #include <assert.h>
 
 #include "jitterentropy.h"
 
+/* We use a linear interpolation to estimate where the value is going to be.
+ * The way these variable are named, this is technically the inverse function
+ * for the resulting line, as we are trying to get the expected osr for a
+ * provided time.
+ *
+ * Recall that point-point form for a line is
+ * y - y1 = ((y2 - y1)/(x2 - x1))*(x - x1)
+ * which is valid for non-vertical lines (i.e., so long as x1 != x2)
+ * We actually want the functional inverse of this, so solving for x, we get
+ * (y - y1) * ((x2 - x1) / (y2 - y1)) + x1 = x
+ * This is valid so long as y2 != y1.
+ * This functional inverse is the form that we use here.
+ */
+double linearInverse(double y, double x1, double y1, double x2, double y2) {
+	assert(fabs(y1-y2)>=DBL_EPSILON);
+	return (y-y1)*((x2-x1)/(y2-y1)) + x1;
+}
+
 /* Returns the number of nanoseconds per output for the selected flags and osr. */
-uint64_t jent_output_time(unsigned int rounds, unsigned int osr, unsigned int flags) 
+uint64_t jent_output_time(unsigned int rounds, unsigned int osr, unsigned int flags)
 {
 	struct rand_data *ec_nostir;
 	struct timespec start, finish;
@@ -74,7 +93,8 @@ int main(int argc, char * argv[])
 	char *endtimeparam;
 	double timeBoundIn;
 	uint64_t timeBound;
-	unsigned int maxBound, minBound;
+	unsigned int maxBound, minBound, firstLinearGuess, secondLinearGuess;
+	uint64_t minTime, maxTime, firstLinearTime, secondLinearTime;
 
 	if (argc < 2) {
 		fprintf(stderr, "%s <number of measurements> <target time> [--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--max-mem <NUM>]\n", argv[0]);
@@ -91,7 +111,7 @@ int main(int argc, char * argv[])
 	if ((timeBoundIn <= 0.0) || (*endtimeparam != '\0'))
 		return 1;
 
-	//The time upper bound, expressed as an integer number of nanoseconds.
+	/* The time upper bound, expressed as an integer number of nanoseconds. */
 	timeBound = (uint64_t)floor(timeBoundIn * 1000000000.0);
 	argc--;
 	argv++;
@@ -178,47 +198,136 @@ int main(int argc, char * argv[])
 		argv++;
 	}
 
+	/* We don't start with a maxBound. */
+	maxBound = 0;
+
 	/* Verify the first invariant: generation using minBound occurs in less than or equal time than the targeted time. */
 	minBound = JENT_MIN_OSR;
-	if(jent_output_time(rounds, minBound, flags) > timeBound) {
+	if((minTime = jent_output_time(rounds, minBound, flags)) > timeBound) {
 		fprintf(stderr, "Minimum osr %u exceeds the target time. Invariant not met.\n", minBound);
 		return 1;
 	} else
 		fprintf(stderr, "A minimum was found: osr upper bound is >= %u.\n", minBound);
 
-	/* Locate the maxBound */
-	maxBound = JENT_MIN_OSR + 1;
-	fprintf(stderr, "Trying to find a maximum: %u", maxBound);
-	while(jent_output_time(rounds, maxBound, flags) <= timeBound) {
-		minBound = maxBound;
-		maxBound = maxBound * 2;
-		fprintf(stderr, " %u", maxBound);
-		assert(maxBound > minBound);
-	}
-	fprintf(stderr, ".\nMaximum found: osr upper bound is < %u.\n", maxBound);
+	/* If there were no constant value in the linear expression, then we could estimate a cutoff
+	 * using only this timing. We imagine that there is a fixed cost, so simple division overestimates
+	 * the time cost per osr, and so this produces a likely underestimate.
+	 */
+	firstLinearGuess = (unsigned int)(timeBound / (1U + minTime / minBound));
+	fprintf(stderr, "The initial linear estimate is osr=%u\n", firstLinearGuess);
+	firstLinearTime = jent_output_time(rounds, firstLinearGuess, flags);
 
-	/* The second invariant is now verified: generation using maxBound occurs in greater time than the targeted time. */
+	/* We now have two points (minBound, minTime) and (firstLinearGuess, firstLinearTime), so we can
+	 * perform a full linear interpolation.
+	 * We are presently looking for an overestimate, so let's round up here.
+	 */
+	secondLinearGuess = (unsigned int)ceil(linearInverse((double)timeBound, (double)minBound, (double)minTime, (double)firstLinearGuess, (double)firstLinearTime));
+	fprintf(stderr, "Linear interpolation suggests a cutoff of %u\n", secondLinearGuess);
+
+	/* These estimates were done in two related ways, but they could have produced the same value.
+	 * Looking at the timing of two identical guesses isn't helpful, so adjust the result in this case.*/
+	if(secondLinearGuess == firstLinearGuess) {
+		secondLinearGuess++;
+	}
+	secondLinearTime = jent_output_time(rounds, secondLinearGuess, flags);
+
+	/* We now expect that secondLinearGuess > firstLinearGuess but weird things could have occurred.
+	 * They can't be equal, by the above adjustment.
+	 * Exchange them if they don't have the expected relationship.
+	 */
+	if(secondLinearGuess < firstLinearGuess) {
+		uint64_t tmpTime;
+		unsigned int tmpGuess;
+
+		tmpGuess = firstLinearGuess;
+		tmpTime = firstLinearTime;
+
+		firstLinearGuess = secondLinearGuess;
+		firstLinearTime = secondLinearTime;
+
+		secondLinearGuess = tmpGuess;
+		secondLinearTime = tmpTime;
+	}
+
+	/* Now secondLinearGuess > firstLinearGuess, and the time values should have a similar relationship. */
+	assert(secondLinearTime > firstLinearTime);
+
+	/* Use the linear interpolation guesses as bounds where possible. */
+	if(firstLinearTime > timeBound) {
+		/* Here, we have timeBound < firstLinearTime < secondLinearTime.
+		 * In this case, the linear interpolations didn't yield a minBound
+		 * so we'll proceed with the initial minBound.
+		 */
+		maxBound = firstLinearGuess;
+		maxTime = firstLinearTime;
+	} else if(secondLinearTime > timeBound) {
+		/* Here, we have firstLinearTime <= timeBound < secondLinearTime.
+		 * so the linear interpolations provide both a minBound and maxBound. */
+		minBound = firstLinearGuess;
+		minTime = firstLinearTime;
+		maxBound = secondLinearGuess;
+		maxTime = secondLinearTime;
+	} else {
+		/* here, we have know that firstLinearTime < secondLinearTime <= timeBound */
+		/* so linear interpolation didn't supply a maxBound, and will have to look for it. */
+		minBound = secondLinearGuess;
+		minTime = secondLinearTime;
+	}
+
+	/* If we don't yet have a maxBound, find one. This will also adjust minBound up as the search goes.*/
+	if(maxBound == 0) {
+		maxBound = minBound*2;
+		fprintf(stderr, "Trying to find a maximum: %u", maxBound);
+		/* Locate the maxBound */
+		while((maxTime = jent_output_time(rounds, maxBound, flags)) <= timeBound) {
+			minBound = maxBound;
+			maxBound = maxBound * 2;
+			fprintf(stderr, " %u", maxBound);
+			assert(maxBound > minBound);
+		}
+		fprintf(stderr, ".\nMaximum found: osr upper bound is < %u.\n", maxBound);
+	}
 
 	fprintf(stderr, "Desired osr upper bound is in [%u, %u)\n", minBound, maxBound);
+	assert(maxBound > minBound);
+	assert(maxTime > minTime);
+	assert(maxTime > timeBound);
+	assert(minTime <= timeBound);
 
+	/* All invariants are now verified:
+	 * maxBound > minBound
+	 * maxTime > timeBound >= minTime
+	 *
+	 * We now perform a binary search (if necessary).
+	 */
 	while(maxBound - minBound > 1) {
 		unsigned int curosr;
-		assert(maxBound > minBound);
+		uint64_t curTime;
 		/* Calculate (minBound + maxBound)/2 without risk of overflow. */
 		curosr = minBound + (maxBound - minBound) / 2;
 		assert(curosr > minBound);
 		assert(curosr < maxBound);
 
 		fprintf(stderr, "Trying osr=%u. ", curosr);
-		if(jent_output_time(rounds, curosr, flags) <= timeBound) {
-			fprintf(stderr, "Timing is less than the target time. ");
+		curTime = jent_output_time(rounds, curosr, flags);
+		assert(curTime > minTime);
+		assert(curTime < maxTime);
+
+		if(curTime <= timeBound) {
+			fprintf(stderr, "Timing is less than or equal to the target time. ");
 			minBound = curosr;
+			minTime = curTime;
 		} else {
 			fprintf(stderr, "Timing is greater than the target time. ");
 			maxBound = curosr;
+			maxTime = curTime;
 		}
 
 		fprintf(stderr, "Desired osr upper bound is in [%u, %u)\n", minBound, maxBound);
+		assert(maxBound > minBound);
+		assert(maxTime > minTime);
+		assert(maxTime > timeBound);
+		assert(minTime <= timeBound);
 	}
 
 	printf("%u\n", minBound);
