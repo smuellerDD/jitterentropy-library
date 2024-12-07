@@ -4,7 +4,9 @@ CC ?= gcc
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
 #Hardening
 CFLAGS +=-fstack-protector-all -fwrapv --param ssp-buffer-size=4
+ifneq (Darwin,$(shell uname))
 LDFLAGS +=-Wl,-z,relro,-z,now
+endif
 
 program_NAME := jitterentropy-lfsrtime
 #program_C_SRCS := $(wildcard *.c) 
@@ -14,7 +16,11 @@ program_OBJS := $(program_C_OBJS)
 
 program_INCLUDE_DIRS :=
 program_LIBRARY_DIRS :=
-program_LIBRARIES := rt
+ifeq (Darwin,$(shell uname))
+program_LIBRARIES := pthread
+else
+program_LIBRARIES := rt pthread
+endif
 
 CPPFLAGS += $(foreach includedir,$(program_INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(program_LIBRARY_DIRS),-L$(librarydir))

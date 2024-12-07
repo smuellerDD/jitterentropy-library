@@ -1,4 +1,6 @@
 SP800-90B_EntropyAssessment
 .kdev4
 *.kdev4
-
+build
+inst
+tests/raw-entropy/results-measurements/*.data

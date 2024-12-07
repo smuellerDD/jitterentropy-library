@@ -26,6 +26,11 @@
  * Thread handler
  ***************************************************************************/
 
+#ifdef USE_OLDER_GLIBC
+__asm__(".symver pthread_join, pthread_join@GLIBC_2.2.5");
+__asm__(".symver pthread_create, pthread_create@GLIBC_2.2.5");
+#endif
+
 JENT_PRIVATE_STATIC
 int jent_notime_init(void **ctx)
 {

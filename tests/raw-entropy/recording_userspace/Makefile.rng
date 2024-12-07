@@ -4,7 +4,9 @@ CC ?= gcc
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 -DCONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 #Hardening
 CFLAGS +=-fwrapv --param ssp-buffer-size=4
+ifneq (Darwin,$(shell uname))
 LDFLAGS +=-Wl,-z,relro,-z,now
+endif
 
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
 ifeq "$(GCCVERSIONFORMAT)" "3"

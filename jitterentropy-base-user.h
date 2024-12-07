@@ -110,11 +110,19 @@
 static inline void jent_get_nstime(uint64_t *out)
 {
 	DECLARE_ARGS(val, low, high);
+#ifdef __sun__
+	__asm("rdtsc" : EAX_EDX_RET(val, low, high));
+#else
 	asm volatile("rdtsc" : EAX_EDX_RET(val, low, high));
+#endif
 	*out = EAX_EDX_VAL(val, low, high);
 }
 
 #elif defined(__aarch64__)
+
+#ifndef AARCH64_NSTIME_REGISTER
+#define AARCH64_NSTIME_REGISTER "cntvct_el0"
+#endif
 
 static inline void jent_get_nstime(uint64_t *out)
 {
@@ -122,7 +130,7 @@ static inline void jent_get_nstime(uint64_t *out)
         /*
          * Use the system counter for aarch64 (64 bit ARM).
          */
-        asm volatile("mrs %0, cntvct_el0" : "=r" (ctr_val));
+        asm volatile("mrs %0, " AARCH64_NSTIME_REGISTER : "=r" (ctr_val));
         *out = ctr_val;
 }
 
@@ -293,7 +301,7 @@ static inline int jent_fips_enabled(void)
 	return FIPS_mode();
 #elif defined(OPENSSL)
 #ifdef OPENSSL_FIPS
-	return FIPS_mode();
+	return 1;
 #else
 	return 0;
 #endif
