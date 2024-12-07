@@ -61,7 +61,7 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
 	 * Mix the current state of the random number into the shuffle
 	 * calculation to balance that shuffle a bit more.
 	 */
-	jent_get_nstime_internal(ec, &time);
+	jent_get_nstime_internal(ec, &time_now);
 
 	/*
 	 * We fold the time value as much as possible to ensure that as many
