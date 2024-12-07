@@ -1,3 +1,10 @@
+3.6.1
+ * Add more test code
+ * Add support for SunPRO compiler
+ * Fix compilation on OpenBSD by replacing sed with tr
+ * internal timer: Add support for Apple
+ * Various small fixes to compilation to imporve portability
+
 3.6.0
  * Remove bi-modal behavior of conditioning function
  * Make jent_read_entropy_safe safer by retrying the health test
