@@ -64,7 +64,7 @@ extern "C" {
  * Also, the entropy collection is not changed in any way that would necessitate
  * a re-assessment.
  */
-#define JENT_PATCHLEVEL 0
+#define JENT_PATCHLEVEL 1
 
 #define JENT_VERSION (JENT_MAJVERSION * 1000000 + \
 		      JENT_MINVERSION * 10000 + \
