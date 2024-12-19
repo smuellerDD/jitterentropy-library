@@ -16,7 +16,7 @@ RESULTS_DIR=${RESULTS_DIR:-"../results-analysis-restart"}
 LOGFILE="$RESULTS_DIR/processdata.log"
 
 # point to the min entropy tool
-EATOOL_NONIID="../../SP800-90B_EntropyAssessment/cpp/ea_restart"
+EATOOL="../../SP800-90B_EntropyAssessment/cpp/ea_restart"
 
 # specify if you want to compile the extractlsb program in this script
 BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
@@ -151,7 +151,7 @@ do
 			if [ ! -f $outfile ]
 			then
 				echo "Analyzing entropy for $infilesingle ${bits}-bit single" | tee -a $LOGFILE
-				$EATOOL_NONIID -n -v $infilesingle ${bits} 0.333 > $outfile
+				$EATOOL -n -v $infilesingle ${bits} 0.333 > $outfile
 			else
 				echo "File $outfile already generated"
 			fi
@@ -161,7 +161,7 @@ do
 			if [ ! -f $outfile ]
 			then
 				echo "Analyzing entropy for $infilevar ${bits}-bit var" | tee -a $LOGFILE
-				$EATOOL_NONIID -n -v $infilevar ${bits} 0.333 > $outfile
+				$EATOOL -n -v $infilevar ${bits} 0.333 > $outfile
 			else
 				echo "File $outfile already generated"
 			fi
