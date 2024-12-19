@@ -130,7 +130,7 @@ do
 			then
 				echo "Analyzing entropy for $infilesingle ${bits}-bit single" | tee -a $LOGFILE
 				#python -u $EATOOL_NONIID -v $infilesingle $bits > $outfile
-				$EATOOL_NONIID $infilesingle ${bits} -i -a -v > $outfile
+				$EATOOL_NONIID -i -a -v $infilesingle ${bits} > $outfile
 			else
 				echo "File $outfile already generated"
 			fi
@@ -141,7 +141,7 @@ do
 			then
 				echo "Analyzing entropy for $infilevar ${bits}-bit single" | tee -a $LOGFILE
 				#python -u $EATOOL_NONIID -v $infilevar $bits > $outfile
-				$EATOOL_NONIID $infilevar ${bits} -i -a -v > $outfile
+				$EATOOL_NONIID -i -a -v $infilevar ${bits} > $outfile
 			else
 				echo "File $outfile already generated"
 			fi
@@ -170,7 +170,7 @@ do
 	then
 		echo "Analyzing entropy for $infile ${bits}-bit var" | tee -a $LOGFILE
 		#python -u $EATOOL_IID -v $infile $bits > $outfile
-		$EATOOL_IID $infile ${bits} -i -a -v > $outfile
+		$EATOOL_IID -i -a -v $infile ${bits} > $outfile
 	else
 		echo "File $outfile already generated"
 	fi
