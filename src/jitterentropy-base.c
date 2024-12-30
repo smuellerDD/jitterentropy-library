@@ -270,11 +270,9 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		return -1;
 
 	while (len > 0) {
-		unsigned int osr, flags, max_mem_set, apt_count,
-			     apt_observations = 0,
+		unsigned int osr, flags, max_mem_set, apt_observations = 0,
 			     lag_prediction_success_run,
 			     lag_prediction_success_count;
-		int rct_count;
 		uint64_t current_delta;
 
 		ret = jent_read_entropy(*ec, p, len);
@@ -282,23 +280,23 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		switch (ret) {
 		case -1:
 		case -4:
+
+			/* Permanent errors are returned immediately */
+		case -6:
+		case -7:
+		case -8:
 			return ret;
+
 		case -2:
 		case -3:
 		case -5:
-			apt_count = (*ec)->apt_count;
 			apt_observations = (*ec)->apt_observations;
 			current_delta = (*ec)->apt_base;
-			rct_count = (*ec)->rct_count;
 			lag_prediction_success_run =
 				(*ec)->lag_prediction_success_run;
 			lag_prediction_success_count =
 				(*ec)->lag_prediction_success_count;
 
-			/* FALLTHROUGH */
-		case -6:
-		case -7:
-		case -8:
 			osr = (*ec)->osr + 1;
 			flags = (*ec)->flags;
 			max_mem_set = (*ec)->max_mem_set;
@@ -341,12 +339,17 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			 * failures.
 			 */
 			if (apt_observations) {
-				/* APT re-initialization */
-				jent_apt_reinit(*ec, current_delta, apt_count,
+				/*
+				 * APT re-initialization to intermittent error
+				 */
+				jent_apt_reinit(*ec, current_delta, 0,
 						apt_observations);
 
-				/* RCT re-initialization */
-				(*ec)->rct_count = rct_count;
+				/*
+				 * RCT re-initialization to intermittent error
+				 */
+				(*ec)->rct_count =
+					(int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr));
 
 				/* LAG re-initialization */
 				(*ec)->lag_prediction_success_run =

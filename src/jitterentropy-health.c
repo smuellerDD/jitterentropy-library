@@ -310,8 +310,13 @@ void jent_apt_reinit(struct rand_data *ec,
 	/*
 	 * Reset APT counter
 	 * Note that we've taken in the first symbol in the window.
+	 *
+	 * Thus, if apt_count is zero, set it to the intermittent error.
 	 */
-	ec->apt_count = apt_count;
+	if (apt_count)
+		ec->apt_count = apt_count;
+	else
+		ec->apt_count = ec->apt_cutoff;
 	ec->apt_observations = apt_observations;
 }
 
@@ -348,7 +353,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		/* Note, ec->apt_count starts with one. */
 		if (ec->apt_count >= ec->apt_cutoff_permanent)
 			ec->health_failure |= JENT_APT_FAILURE_PERMANENT;
-		else if (ec->apt_count >= ec->apt_cutoff)
+		else if (ec->apt_count == ec->apt_cutoff)
 			ec->health_failure |= JENT_APT_FAILURE;
 	}
 
@@ -384,13 +389,6 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  */
 static void jent_rct_insert(struct rand_data *ec, int stuck)
 {
-	/*
-	 * If we have a count less than zero, a previous RCT round identified
-	 * a failure. We will not overwrite it.
-	 */
-	if (ec->rct_count < 0)
-		return;
-
 	if (stuck) {
 		ec->rct_count++;
 
@@ -410,11 +408,11 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		 * following SP800-90B. Thus C = ceil(-log_2(alpha)/H) = 30*osr
 		 * or 60*osr.
 		 */
-		if ((unsigned int)ec->rct_count >= (60 * ec->osr)) {
-			ec->rct_count = -1;
+		if ((unsigned int)ec->rct_count >=
+		    JENT_HEALTH_RCT_PERMANENT_CUTOFF(ec->osr)) {
 			ec->health_failure |= JENT_RCT_FAILURE_PERMANENT;
-		} else if ((unsigned int)ec->rct_count >= (30 * ec->osr)) {
-			ec->rct_count = -1;
+		} else if ((unsigned int)ec->rct_count ==
+			   JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(ec->osr)) {
 			ec->health_failure |= JENT_RCT_FAILURE;
 		}
 	} else {

@@ -1,3 +1,6 @@
+3.6.2
+ * Fix RCT re-initialization in jent_read_entropy_safe (thanks to Joshua Hill for pointing this out)
+
 3.6.1
  * Add more test code
  * Add support for SunPRO compiler
