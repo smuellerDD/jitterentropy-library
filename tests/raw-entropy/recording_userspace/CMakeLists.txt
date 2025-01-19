@@ -12,7 +12,7 @@ function(testprogram name)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../..>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../src>)
     if(NOT MSVC)
-        target_compile_options(${name} PRIVATE -Wno-unused-parameter)
+        target_compile_options(${name} PRIVATE -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum -Wextra -Wall -pedantic -O0 -fwrapv -Wconversion)
     endif()
     include(GNUInstallDirs)
     install(TARGETS ${name})
