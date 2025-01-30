@@ -130,6 +130,12 @@ static char *printbits(uint64_t sample, int value)
 	return buf;
 }
 
+uint64_t jent_delta(uint64_t prev, uint64_t next)
+{
+	return (prev < next) ?
+		(next - prev) :
+		(UINT64_MAX - prev + 1 + next);
+}
 
 int main(int argc, char *argv[])
 {
@@ -198,9 +204,7 @@ int main(int argc, char *argv[])
 			prev_timestamp_set = 1;
 			continue;
 		}
-		delta = (timestamp > prev_timestamp) ?
-			timestamp - prev_timestamp :
-			timestamp - prev_timestamp;
+		delta = jent_delta(prev_timestamp, timestamp);
 		prev_timestamp = timestamp;
 
 		unchanged0s |= delta;
