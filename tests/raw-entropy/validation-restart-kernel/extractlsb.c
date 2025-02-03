@@ -198,9 +198,7 @@ int main(int argc, char *argv[])
 			prev_timestamp_set = 1;
 			continue;
 		}
-		delta = (timestamp > prev_timestamp) ?
-			timestamp - prev_timestamp :
-			timestamp - prev_timestamp;
+		delta = timestamp - prev_timestamp;
 		prev_timestamp = timestamp;
 
 		unchanged0s |= delta;
