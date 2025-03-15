@@ -1,5 +1,7 @@
 3.6.2
  * Fix RCT re-initialization in jent_read_entropy_safe (thanks to Joshua Hill for pointing this out)
+ * simplify test code
+ * improve keyword portability
 
 3.6.1
  * Add more test code
