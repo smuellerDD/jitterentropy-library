@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Copyright (C) 2023 - 2024, Stephan Mueller <smueller@chronox.de>
+# Copyright (C) 2023 - 2025, Stephan Mueller <smueller@chronox.de>
 #
 # Test for analyzing the boot time entropy by power cycling the test machine
 # many times and record the first time stamps.
