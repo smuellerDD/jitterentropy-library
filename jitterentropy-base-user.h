@@ -229,10 +229,8 @@ static inline void jent_get_nstime(uint64_t *out)
 	 */
 	uint64_t tmp = 0;
 	timebasestruct_t aixtime;
-	read_real_time(&aixtime, TIMEBASE_SZ);
-	tmp = aixtime.tb_high;
-	tmp = tmp << 32;
-	tmp = tmp | aixtime.tb_low;
+	tmp = aixtime.tb_high * 1000000000UL;
+	tmp += aixtime.tb_low;
 	*out = tmp;
 # else /* __MACH__ */
 	/* we could use CLOCK_MONOTONIC(_RAW), but with CLOCK_REALTIME
