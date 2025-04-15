@@ -55,6 +55,21 @@
  */
 #define JENT_POWERUP_TESTLOOPCOUNT 1024
 
+/*
+ * ensure_osr_is_at_least_minimal ensures that the over sampling rate is, at
+ * minimum, JENT_MIN_OSR.
+ *
+ * @return returns the argument current_osr if equal to or larger than
+ * JENT_MIN_OSR otherwise, returns JENT_MIN_OSR.
+ */
+static unsigned int ensure_osr_is_at_least_minimal(unsigned int current_osr)
+{
+	if (current_osr < JENT_MIN_OSR)
+		return (unsigned int) JENT_MIN_OSR;
+	else
+		return current_osr;
+}
+
 /**
  * jent_version() - Return machine-usable version number of jent library
  *
@@ -447,6 +462,11 @@ static struct rand_data
 	    (flags & JENT_FORCE_INTERNAL_TIMER))
 		return NULL;
 
+	/*
+	 * Ensure over sampling rate is not too low.
+	 */
+	osr = ensure_osr_is_at_least_minimal(osr);
+
 	/* Force the self test to be run */
 	if (!jent_selftest_run && jent_entropy_init_ex(osr, flags))
 		return NULL;
@@ -495,9 +515,7 @@ static struct rand_data
 	/* Initialize the hash state */
 	jent_sha3_256_init(entropy_collector->hash_state);
 
-	/* verify and set the oversampling rate */
-	if (osr < JENT_MIN_OSR)
-		osr = JENT_MIN_OSR;
+	/* Set the oversampling rate */
 	entropy_collector->osr = osr;
 	entropy_collector->flags = flags;
 
@@ -594,6 +612,11 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	uint64_t *delta_history;
 	int i, time_backwards = 0, count_stuck = 0, ret = 0;
 	unsigned int health_test_result;
+
+	/*
+	 * Ensure over sampling rate is not too low.
+	 */
+	osr = ensure_osr_is_at_least_minimal(osr);
 
 	delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT);
 	if (!delta_history)
@@ -704,7 +727,7 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 		goto out;
 	}
 
-	ret = jent_gcd_analyze(delta_history, JENT_POWERUP_TESTLOOPCOUNT);
+	ret = jent_gcd_analyze(delta_history, JENT_POWERUP_TESTLOOPCOUNT, osr);
 	if (ret)
 		goto out;
 
