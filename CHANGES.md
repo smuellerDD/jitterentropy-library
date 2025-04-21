@@ -1,3 +1,6 @@
+3.6.4
+ * Update supported CMake version to 3.10
+
 3.6.3
  * Correct time stamp processing on AIX
  * Use high-resolution time stamp on Apple Silicon
