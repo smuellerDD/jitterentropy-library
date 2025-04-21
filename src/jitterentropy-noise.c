@@ -33,9 +33,9 @@
  * Update of the loop count used for the next round of
  * an entropy collection.
  *
- * @ec [in] entropy collector struct
- * @bits [in] is the number of low bits of the timer to consider
- * @min [in] is the number of bits we shift the timer value to the right at
+ * @param[in] ec entropy collector struct
+ * @param[in] bits is the number of low bits of the timer to consider
+ * @param[in] min is the number of bits we shift the timer value to the right at
  *	     the end to make sure we have a guaranteed minimum value
  *
  * @return Newly calculated loop counter
@@ -88,11 +88,11 @@ static uint64_t jent_loop_shuffle(struct rand_data *ec,
  * This function injects the individual bits of the time value into the
  * entropy pool using a hash.
  *
- * @ec [in] entropy collector struct
- * @time_delta [in] time delta to be injected
- * @loop_cnt [in] if a value not equal to 0 is set, use the given value as
+ * @param[in] ec entropy collector struct
+ * @param[in] time_delta time delta to be injected
+ * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
  *		  number of loops to perform the hash operation
- * @stuck [in] Is the time delta identified as stuck?
+ * @param[in] stuck Is the time delta identified as stuck?
  *
  * Output:
  * updated hash context
@@ -290,10 +290,10 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
  * to reliably access either L3 or memory, the ec->mem memory must be quite
  * large which is usually not desirable.
  *
- * @ec [in] Reference to the entropy collector with the memory access data -- if
+ * @param[in] ec Reference to the entropy collector with the memory access data -- if
  *	    the reference to the memory block to be accessed is NULL, this noise
  *	    source is disabled
- * @loop_cnt [in] if a value not equal to 0 is set, use the given value as
+ * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
  *		  number of loops to perform the hash operation
  */
 static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
@@ -349,9 +349,9 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
  * 	    of this function! This can be done by calling this function
  * 	    and not using its result.
  *
- * @ec [in] Reference to entropy collector
- * @loop_cnt [in] see jent_hash_time
- * @ret_current_delta [out] Test interface: return time delta - may be NULL
+ * @param[in] ec Reference to entropy collector
+ * @param[in] loop_cnt see jent_hash_time
+ * @param[out] ret_current_delta Test interface: return time delta - may be NULL
  *
  * @return: result of stuck test
  */
@@ -392,7 +392,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
  * Generator of one 256 bit random number
  * Function fills rand_data->hash_state
  *
- * @ec [in] Reference to entropy collector
+ * @param[in] ec Reference to entropy collector
  */
 void jent_random_data(struct rand_data *ec)
 {

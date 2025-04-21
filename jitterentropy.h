@@ -195,15 +195,15 @@ extern "C" {
  *
  * @var jent_notime_init This function is intended to initialize the threading
  *	support. All data that is required by the threading code must be
- *	held in the data structure @param ctx. The Jitter RNG maintains the
+ *	held in the data structure ctx. The Jitter RNG maintains the
  *	data structure and uses it for every invocation of the following calls.
  *
  * @var jent_notime_fini This function shall terminate the threading support.
  *	The function must dispose of all memory and resources used for the
- *	threading operation. It must also dispose of the @param ctx memory.
+ *	threading operation. It must also dispose of the ctx memory.
  *
  * @var jent_notime_start This function is called when the Jitter RNG wants
- *	to start a thread. Besides providing a pointer to the @param ctx
+ *	to start a thread. Besides providing a pointer to the ctx
  *	allocated during initialization time, the Jitter RNG provides a
  *	pointer to the function the thread shall execute and the argument
  *	the function shall be invoked with. These two parameters have the

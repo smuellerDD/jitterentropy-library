@@ -107,7 +107,7 @@ void jent_lag_init(struct rand_data *ec, unsigned int osr)
 /**
  * Reset the lag counters
  *
- * @ec [in] Reference to entropy collector
+ * @param[in] ec Reference to entropy collector
  */
 static void jent_lag_reset(struct rand_data *ec)
 {
@@ -136,8 +136,8 @@ static void jent_lag_reset(struct rand_data *ec)
 /**
  * Insert a new entropy event into the lag predictor test
  *
- * @ec [in] Reference to entropy collector
- * @current_delta [in] Current time delta
+ * @param[in] ec Reference to entropy collector
+ * @param[in] current_delta Current time delta
  */
 static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 {
@@ -323,7 +323,7 @@ void jent_apt_reinit(struct rand_data *ec,
 /**
  * Reset the APT counter
  *
- * @ec [in] Reference to entropy collector
+ * @param[in] ec Reference to entropy collector
  */
 static void jent_apt_reset(struct rand_data *ec)
 {
@@ -334,8 +334,8 @@ static void jent_apt_reset(struct rand_data *ec)
 /**
  * Insert a new entropy event into APT
  *
- * @ec [in] Reference to entropy collector
- * @current_delta [in] Current time delta
+ * @param[in] ec Reference to entropy collector
+ * @param[in] current_delta  Current time delta
  */
 static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 {
@@ -384,8 +384,8 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 /**
  * Repetition Count Test as defined in SP800-90B section 4.4.1
  *
- * @ec [in] Reference to entropy collector
- * @stuck [in] Indicator whether the value is stuck
+ * @param[in] ec Reference to entropy collector
+ * @param[in] stuck Indicator whether the value is stuck
  */
 static void jent_rct_insert(struct rand_data *ec, int stuck)
 {
@@ -428,8 +428,8 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
  *
  * All values must always be non-zero.
  *
- * @ec [in] Reference to entropy collector
- * @current_delta [in] Jitter time delta
+ * @param[in] ec Reference to entropy collector
+ * @param[in] current_delta  Jitter time delta
  *
  * @return
  * 	0 jitter measurement not stuck (good bit)
@@ -462,7 +462,7 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 /**
  * Report any health test failures
  *
- * @ec [in] Reference to entropy collector
+ * @param[in] ec Reference to entropy collector
  *
  * @return a bitmask indicating which tests failed
  * 	0 No health test failure

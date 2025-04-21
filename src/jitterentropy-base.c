@@ -149,10 +149,10 @@ static inline unsigned int jent_update_memsize(unsigned int flags)
  * This function truncates the last 64 bit entropy value output to the exact
  * size specified by the caller.
  *
- * @ec [in] Reference to entropy collector
- * @data [out] pointer to buffer for storing random data -- buffer must
+ * @param[in] ec Reference to entropy collector
+ * @param[out] data pointer to buffer for storing random data -- buffer must
  *	       already exist
- * @len [in] size of the buffer, specifying also the requested number of random
+ * @param[in] len size of the buffer, specifying also the requested number of random
  *	     in bytes
  *
  * @return number of bytes returned when request is fulfilled or an error
@@ -265,11 +265,11 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
  * getting too large. If an error is returned by this function, the Jitter RNG
  * is not safe to be used on the current system.
  *
- * @ec [in] Reference to entropy collector - this is a double pointer as
+ * @param[in] ec Reference to entropy collector - this is a double pointer as
  *	    The entropy collector may be freed and reallocated.
- * @data [out] pointer to buffer for storing random data -- buffer must
+ * @param[out] data pointer to buffer for storing random data -- buffer must
  *	       already exist
- * @len [in] size of the buffer, specifying also the requested number of random
+ * @param[in] len size of the buffer, specifying also the requested number of random
  *	     in bytes
  *
  * @return see jent_read_entropy()

@@ -35,7 +35,7 @@ int jent_gcd_selftest(void);
 
 /* Watch for common adjacent GCD values */
 #define jent_gcd_add_value(delta_history, delta, idx)			\
-	delta_history[idx] = delta;
+	delta_history[idx] = delta
 
 #ifdef __cplusplus
 }
