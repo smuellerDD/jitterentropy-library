@@ -1,5 +1,7 @@
-3.6.4
+3.7.0
  * Update supported CMake version to 3.10
+ * doc: use Doxygen-style comments
+ * NTG.1 compliance: Modify startup such that the memory access and SHA-3 loop are treated as independent noise sources which are sampled to collect at least 240 bits each before first block of random numbers is released
 
 3.6.3
  * Correct time stamp processing on AIX

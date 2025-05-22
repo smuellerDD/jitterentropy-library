@@ -57,14 +57,14 @@ extern "C" {
  * API compatible, ABI may change, functional enhancements only, consumer can be
  * left unchanged if enhancements are not considered.
  */
-#define JENT_MINVERSION 6
+#define JENT_MINVERSION 7
 
 /*
  * API / ABI compatible, no functional changes, no enhancements, bug fixes only.
  * Also, the entropy collection is not changed in any way that would necessitate
  * a re-assessment.
  */
-#define JENT_PATCHLEVEL 4
+#define JENT_PATCHLEVEL 0
 
 #define JENT_VERSION (JENT_MAJVERSION * 1000000 + \
 		      JENT_MINVERSION * 10000 + \
@@ -230,6 +230,12 @@ struct jent_notime_thread {
 	void (*jent_notime_stop)(void *ctx);
 };
 
+enum jent_startup_state {
+	jent_startup_completed,
+	jent_startup_sha3,
+	jent_startup_memory
+};
+
 /* The entropy pool */
 struct rand_data
 {
@@ -248,6 +254,9 @@ struct rand_data
 
 	unsigned int flags;		/* Flags used to initialize */
 	unsigned int osr;		/* Oversampling rate */
+
+	/* Initialization state supporting AIS 20/31 NTG.1 */
+	enum jent_startup_state startup_state;
 
 #ifdef JENT_RANDOM_MEMACCESS
   /* The step size should be larger than the cacheline size. */
@@ -378,6 +387,7 @@ struct rand_data
 #define JENT_FORCE_FIPS (1<<5)		  /* Force FIPS compliant mode
 					     including full SP800-90B
 					     compliance. */
+#define JENT_NTG1 (1<<6) /* AIS 20/31 NTG.1 compliance */
 
 /* Flags field limiting the amount of memory to be used for memory access */
 #define JENT_FLAGS_TO_MEMSIZE_SHIFT	28

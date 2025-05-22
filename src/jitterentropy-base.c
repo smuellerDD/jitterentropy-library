@@ -522,11 +522,23 @@ static struct rand_data
 	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled())
 		entropy_collector->fips_enabled = 1;
 
-	/* Initialize the APT */
-	jent_apt_init(entropy_collector, osr);
+	/*
+	 * BSI AIS 20/31 NTG.1 requires that during startup 2 noise sources
+	 * are sampled where each independently delivers 240 bits of entropy.
+	 * This is ensured by setting the startup state such that the memory
+	 * access is treated independently from the SHA3 operation and both
+	 * must separately deliver the requested amount of entropy.
+	 *
+	 * NTG.1 implies the enabling of the FIPS mode to apply noise source
+	 * oversampling and the enabling of the health tests.
+	 */
+	if (flags & JENT_NTG1) {
+		entropy_collector->startup_state = jent_startup_memory;
+		entropy_collector->fips_enabled = 1;
+	}
 
-	/* Initialize the Lag Predictor Test */
-	jent_lag_init(entropy_collector, osr);
+	/* Initialize the health tests */
+	jent_helth_init(entropy_collector);
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
 	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {

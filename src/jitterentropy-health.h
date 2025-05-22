@@ -35,28 +35,18 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 	return (next - prev);
 }
 
-#ifdef JENT_HEALTH_LAG_PREDICTOR
-void jent_lag_init(struct rand_data *ec, unsigned int osr);
-#else /* JENT_HEALTH_LAG_PREDICTOR */
-static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
-{
-	(void)ec;
-	(void)osr;
-}
-#endif /* JENT_HEALTH_LAG_PREDICTOR */
-
 /* RCT: Intermittent cutoff threshold for alpha = 2**-30 */
 #define JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(x) ((x) * 30)
 /* RCT: permanent cutoff threshold for alpha = 2**-60 */
 #define JENT_HEALTH_RCT_PERMANENT_CUTOFF(x) ((x) * 60)
 
-void jent_apt_init(struct rand_data *ec, unsigned int osr);
 void jent_apt_reinit(struct rand_data *ec,
 		     uint64_t current_delta,
 		     unsigned int apt_count,
 		     unsigned int apt_observations);
 unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
 unsigned int jent_health_failure(struct rand_data *ec);
+void jent_helth_init(struct rand_data *ec);
 
 #ifdef __cplusplus
 }

@@ -249,6 +249,11 @@ static inline uint64_t jent_delta3(struct rand_data *ec, uint64_t delta2)
 	return delta3;
 }
 
+static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
+{
+	(void)ec;
+	(void)osr;
+}
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 
 /***************************************************************************
@@ -281,7 +286,7 @@ static const unsigned int jent_apt_cutoff_permanent_lookup[15]=
 	{ 355, 447, 479, 494, 502, 507, 510, 512,
 	  512, 512, 512, 512, 512, 512, 512 };
 
-void jent_apt_init(struct rand_data *ec, unsigned int osr)
+static void jent_apt_init(struct rand_data *ec, unsigned int osr)
 {
 	/*
 	 * Establish the apt_cutoff based on the presumed entropy rate of
@@ -484,4 +489,16 @@ unsigned int jent_health_failure(struct rand_data *ec)
 	}
 
 	return ec->health_failure;
+}
+
+/**
+ * Initialize the health tests
+ *
+ * @param[in] ec Reference to entropy collector
+ */
+void jent_helth_init(struct rand_data *ec)
+{
+	ec->rct_count = 0;
+	jent_apt_init(ec, ec->osr);
+	jent_lag_init(ec, ec->osr);
 }
