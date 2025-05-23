@@ -538,7 +538,7 @@ static struct rand_data
 	}
 
 	/* Initialize the health tests */
-	jent_helth_init(entropy_collector);
+	jent_health_init(entropy_collector);
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
 	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {

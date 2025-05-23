@@ -496,7 +496,7 @@ unsigned int jent_health_failure(struct rand_data *ec)
  *
  * @param[in] ec Reference to entropy collector
  */
-void jent_helth_init(struct rand_data *ec)
+void jent_health_init(struct rand_data *ec)
 {
 	ec->rct_count = 0;
 	jent_apt_init(ec, ec->osr);

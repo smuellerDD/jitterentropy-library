@@ -570,7 +570,7 @@ void jent_random_data(struct rand_data *ec)
 		 * Initialize the health tests as we fall through to
 		 * independently invoke the next noise source.
 		 */
-		jent_helth_init(ec);
+		jent_health_init(ec);
 
 		/* FALLTHROUGH */
 	case jent_startup_sha3:
@@ -581,7 +581,7 @@ void jent_random_data(struct rand_data *ec)
 		 * Initialize the health tests as we fall through to
 		 * independently invoke the next noise source.
 		 */
-		jent_helth_init(ec);
+		jent_health_init(ec);
 
 		break;
 	case jent_startup_completed:

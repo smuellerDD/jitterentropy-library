@@ -46,7 +46,7 @@ void jent_apt_reinit(struct rand_data *ec,
 		     unsigned int apt_observations);
 unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
 unsigned int jent_health_failure(struct rand_data *ec);
-void jent_helth_init(struct rand_data *ec);
+void jent_health_init(struct rand_data *ec);
 
 #ifdef __cplusplus
 }
