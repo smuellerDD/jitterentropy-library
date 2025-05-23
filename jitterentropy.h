@@ -89,25 +89,6 @@ extern "C" {
  */
 
 /*
- * Disable the loop shuffle operation
- *
- * The shuffle operation enlarges the timing of the conditioning function
- * by a variable length defined by the LSB of a time stamp. Some mathematicians
- * are concerned that this pseudo-random selection of the loop iteration count
- * may create some form of dependency between the different loop counts
- * and the associated time duration of the conditioning function. It
- * also complicates entropy assessment because it effectively combines a bunch
- * of shifted/scaled copies the same distribution and masks failures from the
- * health testing.
- *
- * By enabling this flag, the loop shuffle operation is disabled and
- * the entropy collection operates in a way that honor the concerns.
- *
- * By enabling this flag, the time of collecting entropy may be enlarged.
- */
-#define JENT_CONF_DISABLE_LOOP_SHUFFLE
-
-/*
  * Shall the LAG predictor health test be enabled?
  */
 #define JENT_HEALTH_LAG_PREDICTOR
@@ -413,11 +394,7 @@ struct rand_data
 /* We start at 32kB -> offset is log2(32768) */
 #define JENT_MAX_MEMSIZE_OFFSET		14
 
-#ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
-# define JENT_MIN_OSR	3
-#else
-# define JENT_MIN_OSR	1
-#endif
+#define JENT_MIN_OSR	3
 
 #ifdef JENT_PRIVATE_COMPILE
 # define JENT_PRIVATE_STATIC static

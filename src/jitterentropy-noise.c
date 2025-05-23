@@ -30,58 +30,6 @@
  ***************************************************************************/
 
 /**
- * Update of the loop count used for the next round of
- * an entropy collection.
- *
- * @param[in] ec entropy collector struct
- * @param[in] bits is the number of low bits of the timer to consider
- * @param[in] min is the number of bits we shift the timer value to the right at
- *	     the end to make sure we have a guaranteed minimum value
- *
- * @return Newly calculated loop counter
- */
-static uint64_t jent_loop_shuffle(struct rand_data *ec,
-				  unsigned int bits, unsigned int min)
-{
-#ifdef JENT_CONF_DISABLE_LOOP_SHUFFLE
-
-	(void)ec;
-	(void)bits;
-
-	return (UINT64_C(1)<<min);
-
-#else /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
-
-	uint64_t time_now = 0;
-	uint64_t shuffle = 0;
-	uint64_t mask = (UINT64_C(1)<<bits) - 1;
-	unsigned int i = 0;
-
-	/*
-	 * Mix the current state of the random number into the shuffle
-	 * calculation to balance that shuffle a bit more.
-	 */
-	jent_get_nstime_internal(ec, &time_now);
-
-	/*
-	 * We fold the time value as much as possible to ensure that as many
-	 * bits of the time stamp are included as possible.
-	 */
-	for (i = 0; (((sizeof(time_now) << 3) + bits - 1) / bits) > i; i++) {
-		shuffle ^= time_now & mask;
-		time_now = time_now >> bits;
-	}
-
-	/*
-	 * We add a lower boundary value to ensure we have a minimum
-	 * RNG loop count.
-	 */
-	return (shuffle + (UINT64_C(1)<<min));
-
-#endif /* JENT_CONF_DISABLE_LOOP_SHUFFLE */
-}
-
-/**
  * Insert a data block into the entropy pool
  *
  * The function inserts the intermediary buffer and the time delta together
@@ -136,6 +84,8 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 	jent_memset_secure(intermediary, JENT_SHA3_MAX_SIZE_BLOCK);
 }
 
+#define JENT_HASH_LOOP_DEFAULT 1
+
 /**
  * Hash loop noise source -- this is the noise source based on the CPU
  * 			     execution time jitter
@@ -151,13 +101,7 @@ static void jent_hash_loop(struct rand_data *ec,
 {
 	HASH_CTX_ON_STACK(ctx);
 	uint64_t j = 0;
-#define MAX_HASH_LOOP 3
-#define MIN_HASH_LOOP 0
-
-	/* Ensure that macros cannot overflow jent_loop_shuffle() */
-	BUILD_BUG_ON((MAX_HASH_LOOP + MIN_HASH_LOOP) > 63);
-	uint64_t hash_loop_cnt =
-		jent_loop_shuffle(ec, MAX_HASH_LOOP, MIN_HASH_LOOP);
+	uint64_t hash_loop_cnt = JENT_HASH_LOOP_DEFAULT;
 
 	jent_sha3_256_init(&ctx);
 
@@ -200,8 +144,8 @@ static void jent_hash_loop(struct rand_data *ec,
 	jent_memset_secure(&ctx, JENT_SHA_MAX_CTX_SIZE);
 }
 
-#define MAX_ACC_LOOP_BIT 7
-#define MIN_ACC_LOOP_BIT 0
+#define JENT_MEM_ACC_LOOP_DEFAULT 1
+
 #ifdef JENT_RANDOM_MEMACCESS
 
 static inline uint32_t uint32rotl(const uint32_t x, int k)
@@ -242,11 +186,7 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		uint8_t b[sizeof(uint32_t) * 4];
 	} prngState = { .u = {0x8e93eec0, 0xce65608a, 0xa8d46b46, 0xe83cef69} };
 	uint32_t addressMask;
-
-	/* Ensure that macros cannot overflow jent_loop_shuffle() */
-	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);
-	uint64_t acc_loop_cnt =
-		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
+	uint64_t acc_loop_cnt = JENT_MEM_ACC_LOOP_DEFAULT;
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
@@ -320,11 +260,7 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
 	unsigned int wrap = 0;
 	uint64_t i = 0;
-
-	/* Ensure that macros cannot overflow jent_loop_shuffle() */
-	BUILD_BUG_ON((MAX_ACC_LOOP_BIT + MIN_ACC_LOOP_BIT) > 63);
-	uint64_t acc_loop_cnt =
-		jent_loop_shuffle(ec, MAX_ACC_LOOP_BIT, MIN_ACC_LOOP_BIT);
+	uint64_t acc_loop_cnt = JENT_MEM_ACC_LOOP_DEFAULT;
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
