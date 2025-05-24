@@ -418,7 +418,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
  */
 static inline uint32_t jent_memsize(unsigned int flags)
 {
-	uint32_t cache_memsize=0, max_memsize=0, memsize=0;
+	uint32_t cache_memsize = 0, max_memsize = 0, memsize = 0;
 
 	max_memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
 
@@ -432,9 +432,15 @@ static inline uint32_t jent_memsize(unsigned int flags)
 	/* Allocate memory for adding variations based on memory access */
 	cache_memsize = jent_cache_size_roundup();
 	memsize = cache_memsize << JENT_CACHE_SHIFT_BITS;
+
 	/* If this value is left-shifted too much, it may be cleared. */
 	/* If so, set the maximum possible power of two. */
-	if (cache_memsize > memsize) memsize = 0x80000000;
+	if (cache_memsize > memsize)
+		memsize = 0x80000000;
+
+	/* If no memory size can be detected, use the requested size */
+	if (!memsize)
+		memsize = max_memsize;
 
 	/* Limit the memory as defined by caller */
 	memsize = (memsize > max_memsize) ? max_memsize : memsize;
