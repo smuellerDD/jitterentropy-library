@@ -36,11 +36,19 @@
 #define REPORT_COUNTER_TICKS 1
 #endif
 
+enum jent_es {
+	jent_common,		/* Common entropy source */
+	jent_hashloop,		/* SHA3 loop exclusively */
+	jent_memaccess_loop,	/* Memory access loop exclusively */
+};
+
 /***************************************************************************
  * Statistical test logic not compiled for regular operation
  ***************************************************************************/
 static int jent_one_test(const char *pathname, unsigned long rounds,
-			 unsigned int flags, int report_counter_ticks)
+			 unsigned int flags, unsigned int osr,
+			 enum jent_es jent_es, unsigned int loopcnt,
+			 int report_counter_ticks)
 {
 	unsigned long size = 0;
 	struct rand_data *ec = NULL;
@@ -65,12 +73,12 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		goto out;
 	}
 
-	ret = jent_entropy_init();
+	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
 		printf("The initialization failed with error code %d\n", ret);
 		goto out;
 	}
-	ec = jent_entropy_collector_alloc(0, flags);
+	ec = jent_entropy_collector_alloc(osr, flags);
 	if (!ec) {
 		ret = 1;
 		goto out;
@@ -98,10 +106,24 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 
 
 	/* Prime the test */
-	jent_measure_jitter(ec, 0, NULL);
+	if (jent_es == jent_common)
+		jent_measure_jitter(ec, 0, NULL);
 	for (size = 0; size < rounds; size++) {
 		/* Disregard stuck indicator */
-		jent_measure_jitter(ec, 0, &duration[size]);
+		switch (jent_es) {
+		case jent_hashloop:
+			jent_measure_jitter_ntg1_sha3(ec, loopcnt,
+						      &duration[size]);
+			break;
+		case jent_memaccess_loop:
+			jent_measure_jitter_ntg1_memaccess(ec, loopcnt,
+							   &duration[size]);
+			break;
+		case jent_common:
+		default:
+			jent_measure_jitter(ec, loopcnt, &duration[size]);
+			break;
+		}
 	}
 
 #ifdef JENT_TEST_BINARY_OUTPUT
@@ -136,104 +158,163 @@ out:
 }
 
 /*
- * Invoke the application with
- *	argv[1]: number of raw entropy measurements to be obtained for one
- *		 entropy collector instance.
- *	argv[2]: number of test repetitions with a new entropy estimator
- *		 allocated for each round - this satisfies the restart tests
- *		 defined in SP800-90B section 3.1.4.3 and FIPS IG 7.18.
- *	argv[3]: File name of the output data
+ * Invoke the application
  */
 int main(int argc, char * argv[])
 {
+	const char *file;
 	unsigned long i, rounds, repeats;
-	unsigned int flags = 0;
+	unsigned int flags = 0, osr = 0, loopcnt = 0;
+	enum jent_es jent_es = jent_common;
 	int ret;
 	char pathname[4096];
 
-	if (argc != 4 && argc != 5 && argc != 6) {
-		printf("%s <rounds per repeat> <number of repeats> <filename> <max mem>\n", argv[0]);
+	if (argc < 4) {
+		printf("%s <rounds per repeat> <number of repeats> <filename> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess]\n", argv[0]);
 		return 1;
 	}
 
 	rounds = strtoul(argv[1], NULL, 10);
 	if (rounds >= UINT_MAX)
 		return 1;
+	argc--;
+	argv++;
 
-	repeats = strtoul(argv[2], NULL, 10);
+	repeats = strtoul(argv[1], NULL, 10);
 	if (repeats >= UINT_MAX)
 		return 1;
+	argc--;
+	argv++;
 
-	if (argc >= 5) {
-		unsigned long val = strtoul(argv[4], NULL, 10);
+	file = argv[1];
+	argc--;
+	argv++;
 
-		switch (val) {
-		case 0:
-			/* Allow to set no option */
-			break;
-		case 1:
-			flags |= JENT_MAX_MEMSIZE_32kB;
-			break;
-		case 2:
-			flags |= JENT_MAX_MEMSIZE_64kB;
-			break;
-		case 3:
-			flags |= JENT_MAX_MEMSIZE_128kB;
-			break;
-		case 4:
-			flags |= JENT_MAX_MEMSIZE_256kB;
-			break;
-		case 5:
-			flags |= JENT_MAX_MEMSIZE_512kB;
-			break;
-		case 6:
-			flags |= JENT_MAX_MEMSIZE_1MB;
-			break;
-		case 7:
-			flags |= JENT_MAX_MEMSIZE_2MB;
-			break;
-		case 8:
-			flags |= JENT_MAX_MEMSIZE_4MB;
-			break;
-		case 9:
-			flags |= JENT_MAX_MEMSIZE_8MB;
-			break;
-		case 10:
-			flags |= JENT_MAX_MEMSIZE_16MB;
-			break;
-		case 11:
-			flags |= JENT_MAX_MEMSIZE_32MB;
-			break;
-		case 12:
-			flags |= JENT_MAX_MEMSIZE_64MB;
-			break;
-		case 13:
-			flags |= JENT_MAX_MEMSIZE_128MB;
-			break;
-		case 14:
-			flags |= JENT_MAX_MEMSIZE_256MB;
-			break;
-		case 15:
-			flags |= JENT_MAX_MEMSIZE_512MB;
-			break;
-		default:
-			printf("Unknown maximum memory value\n");
+	while (argc > 1) {
+		if (!strncmp(argv[1], "--ntg1", 6))
+			flags |= JENT_NTG1;
+		else if (!strncmp(argv[1], "--force-fips", 12))
+			flags |= JENT_FORCE_FIPS;
+		else if (!strncmp(argv[1], "--disable-memory-access", 23))
+			flags |= JENT_DISABLE_MEMORY_ACCESS;
+		else if (!strncmp(argv[1], "--disable-internal-timer", 24))
+			flags |= JENT_DISABLE_INTERNAL_TIMER;
+		else if (!strncmp(argv[1], "--force-internal-timer", 22))
+			flags |= JENT_FORCE_INTERNAL_TIMER;
+		else if (!strncmp(argv[1], "--hashloop", 10))
+			jent_es |= jent_hashloop;
+		else if (!strncmp(argv[1], "--memaccess", 11))
+			jent_es |= jent_memaccess_loop;
+		else if (!strncmp(argv[1], "--osr", 5)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("OSR value missing\n");
+				return 1;
+			}
+
+			val = strtoul(argv[1], NULL, 10);
+			if (val >= UINT_MAX)
+				return 1;
+			osr = (unsigned int)val;
+		} else if (!strncmp(argv[1], "--loopcnt", 9)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("Loop count value missing\n");
+				return 1;
+			}
+
+			val = strtoul(argv[1], NULL, 10);
+			if (val >= UINT_MAX)
+				return 1;
+			loopcnt = (unsigned int)val;
+		} else if (!strncmp(argv[1], "--max-mem", 9)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("Maximum memory value missing\n");
+				return 1;
+			}
+
+			val = strtoul(argv[1], NULL, 10);;
+			switch (val) {
+			case 0:
+				/* Allow to set no option */
+				break;
+			case 1:
+				flags |= JENT_MAX_MEMSIZE_32kB;
+				break;
+			case 2:
+				flags |= JENT_MAX_MEMSIZE_64kB;
+				break;
+			case 3:
+				flags |= JENT_MAX_MEMSIZE_128kB;
+				break;
+			case 4:
+				flags |= JENT_MAX_MEMSIZE_256kB;
+				break;
+			case 5:
+				flags |= JENT_MAX_MEMSIZE_512kB;
+				break;
+			case 6:
+				flags |= JENT_MAX_MEMSIZE_1MB;
+				break;
+			case 7:
+				flags |= JENT_MAX_MEMSIZE_2MB;
+				break;
+			case 8:
+				flags |= JENT_MAX_MEMSIZE_4MB;
+				break;
+			case 9:
+				flags |= JENT_MAX_MEMSIZE_8MB;
+				break;
+			case 10:
+				flags |= JENT_MAX_MEMSIZE_16MB;
+				break;
+			case 11:
+				flags |= JENT_MAX_MEMSIZE_32MB;
+				break;
+			case 12:
+				flags |= JENT_MAX_MEMSIZE_64MB;
+				break;
+			case 13:
+				flags |= JENT_MAX_MEMSIZE_128MB;
+				break;
+			case 14:
+				flags |= JENT_MAX_MEMSIZE_256MB;
+				break;
+			case 15:
+				flags |= JENT_MAX_MEMSIZE_512MB;
+				break;
+			default:
+				printf("Unknown maximum memory value\n");
+				return 1;
+			}
+		} else {
+			printf("Unknown option %s\n", argv[1]);
 			return 1;
 		}
-	}
 
-	if (argc == 6)
-		flags |= JENT_FORCE_INTERNAL_TIMER;
+		argc--;
+		argv++;
+	}
 
 	for (i = 1; i <= repeats; i++) {
 #if defined(JENT_TEST_BINARY_OUTPUT)
-		snprintf(pathname, sizeof(pathname), "%s-%.4lu-u64.bin", argv[3], i);
+		snprintf(pathname, sizeof(pathname), "%s-%.4lu-u64.bin", file, i);
 #else
-		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", argv[3], i);
+		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", file, i);
 #endif
 
-		ret = jent_one_test(pathname, rounds, flags,
-				    REPORT_COUNTER_TICKS);
+		ret = jent_one_test(pathname, rounds, flags, osr, jent_es,
+				    loopcnt, REPORT_COUNTER_TICKS);
 
 		if (ret)
 			return ret;
