@@ -84,8 +84,6 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 	jent_memset_secure(intermediary, JENT_SHA3_MAX_SIZE_BLOCK);
 }
 
-#define JENT_HASH_LOOP_DEFAULT 1
-
 /**
  * Hash loop noise source -- this is the noise source based on the CPU
  * 			     execution time jitter
@@ -101,16 +99,14 @@ static void jent_hash_loop(struct rand_data *ec,
 {
 	HASH_CTX_ON_STACK(ctx);
 	uint64_t j = 0;
-	uint64_t hash_loop_cnt = JENT_HASH_LOOP_DEFAULT;
-
-	jent_sha3_256_init(&ctx);
 
 	/*
 	 * testing purposes -- allow test app to set the counter, not
 	 * needed during runtime
 	 */
-	if (loop_cnt)
-		hash_loop_cnt = loop_cnt;
+	uint64_t hash_loop_cnt = loop_cnt ? loop_cnt : JENT_HASH_LOOP_DEFAULT;
+
+	jent_sha3_256_init(&ctx);
 
 	/*
 	 * This loop fills a buffer which is injected into the entropy pool.
@@ -143,8 +139,6 @@ static void jent_hash_loop(struct rand_data *ec,
 
 	jent_memset_secure(&ctx, JENT_SHA_MAX_CTX_SIZE);
 }
-
-#define JENT_MEM_ACC_LOOP_DEFAULT 1
 
 #ifdef JENT_RANDOM_MEMACCESS
 
@@ -186,7 +180,12 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		uint8_t b[sizeof(uint32_t) * 4];
 	} prngState = { .u = {0x8e93eec0, 0xce65608a, 0xa8d46b46, 0xe83cef69} };
 	uint32_t addressMask;
-	uint64_t acc_loop_cnt = JENT_MEM_ACC_LOOP_DEFAULT;
+
+	/*
+	 * testing purposes -- allow test app to set the counter, not
+	 * needed during runtime
+	 */
+	uint64_t acc_loop_cnt = loop_cnt ? loop_cnt : JENT_MEM_ACC_LOOP_DEFAULT;
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
@@ -207,13 +206,6 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		jent_get_nstime_internal(ec, &time_now);
 		prngState.b[i] ^= (uint8_t)(time_now & 0xff);
 	}
-
-	/*
-	 * testing purposes -- allow test app to set the counter, not
-	 * needed during runtime
-	 */
-	if (loop_cnt)
-		acc_loop_cnt = loop_cnt;
 
 	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
 		/* Take PRNG output to find the memory location to update. */
@@ -260,18 +252,17 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 {
 	unsigned int wrap = 0;
 	uint64_t i = 0;
-	uint64_t acc_loop_cnt = JENT_MEM_ACC_LOOP_DEFAULT;
-
-	if (NULL == ec || NULL == ec->mem)
-		return;
-	wrap = ec->memblocksize * ec->memblocks;
 
 	/*
 	 * testing purposes -- allow test app to set the counter, not
 	 * needed during runtime
 	 */
-	if (loop_cnt)
-		acc_loop_cnt = loop_cnt;
+	uint64_t acc_loop_cnt = loop_cnt ? loop_cnt : JENT_MEM_ACC_LOOP_DEFAULT;
+
+	if (NULL == ec || NULL == ec->mem)
+		return;
+	wrap = ec->memblocksize * ec->memblocks;
+
 	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
 		unsigned char *tmpval = ec->mem + ec->memlocation;
 		/*
@@ -322,8 +313,11 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 	 */
 	jent_get_nstime_internal(ec, &ec->prev_time);
 
-	/* Invoke one noise source before time measurement to add variations */
-	jent_memaccess(ec, loop_cnt);
+	/*
+	 * Now call the memory noise source with tripple the default iteration
+	 * count considering this is the only noise source.
+	 */
+	jent_memaccess(ec, loop_cnt ? loop_cnt : JENT_MEM_ACC_LOOP_DEFAULT * 3);
 
 	/*
 	 * Get time stamp and calculate time delta to previous
@@ -376,8 +370,12 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	 */
 	jent_get_nstime_internal(ec, &ec->prev_time);
 
-	/* Now call the hash noise source */
-	jent_hash_loop(ec, intermediary, loop_cnt);
+	/*
+	 * Now call the hash noise source with tripple the default iteration
+	 * count considering this is the only noise source.
+	 */
+	jent_hash_loop(ec, intermediary, loop_cnt ? loop_cnt :
+						    JENT_HASH_LOOP_DEFAULT * 3);
 
 	/*
 	 * Get time stamp and calculate time delta to previous

@@ -139,6 +139,40 @@ extern "C" {
 #define JENT_CACHE_SHIFT_BITS 0
 #endif
 
+/*
+ * Meory access loop count: This value defines the default memory access loop
+ * count. The memory access loop is one of the hearts of the Jitter RNG. The
+ * number of loop counts has a direct impact on the entropy rate.
+ *
+ * It is permissible to configure this value differently at compile time if the
+ * observed entropy rate is too small.
+ *
+ * NOTE: When you modify this value, you are directly altering the behavior of
+ * the noise source. Make sure you fully understand what you do. If you want to
+ * individually measure the memory access loop entropy rate, use the
+ * jitterentropy-hashtime tool with the command line option of --memaccess.
+ */
+#ifndef JENT_MEM_ACC_LOOP_DEFAULT
+#define JENT_MEM_ACC_LOOP_DEFAULT 1
+#endif
+
+/*
+ * Hash loop count: This value defines the default hash loop count. The hash
+ * loop is one of the hearts of the Jitter RNG. The number of loop counts has a
+ * direct impact on the entropy rate.
+ *
+ * It is permissible to configure this value differently at compile time if the
+ * observed entropy rate is too small.
+ *
+ * NOTE: When you modify this value, you are directly altering the behavior of
+ * the noise source. Make sure you fully understand what you do. If you want to
+ * individually measure the memory access loop entropy rate, use the
+ * jitterentropy-hashtime tool with the command line option of --hashloop.
+ */
+#ifndef JENT_HASH_LOOP_DEFAULT
+#define JENT_HASH_LOOP_DEFAULT 1
+#endif
+
 /***************************************************************************
  * Jitter RNG State Definition Section
  ***************************************************************************/
