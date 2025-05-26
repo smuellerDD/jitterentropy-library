@@ -531,15 +531,6 @@ static inline void jent_notime_fini(void *ctx) { (void)ctx; }
 #define JENT_LAG_FAILURE_PERMANENT	JENT_PERMANENT_FAILURE(JENT_LAG_FAILURE)
 /* -- END error masks for health tests -- */
 
-/* -- BEGIN statistical test functions only complied with CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT -- */
-
-#ifdef CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT
-JENT_PRIVATE_STATIC
-uint64_t jent_lfsr_var_stat(struct rand_data *ec, unsigned int min);
-#endif /* CONFIG_CRYPTO_CPU_JITTERENTROPY_STAT */
-
-/* -- END of statistical test function -- */
-
 #ifdef __cplusplus
 }
 #endif
