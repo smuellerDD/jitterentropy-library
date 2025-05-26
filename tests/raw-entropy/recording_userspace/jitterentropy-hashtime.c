@@ -158,7 +158,26 @@ out:
 }
 
 /*
- * Invoke the application
+ * Invoke the application.
+ *
+ * The options allowed for this application are as follows:
+ *
+ * <rounds per repeat> Number of raw values generated after one reset
+ * <number of repeats> Number of resets after one set of data generation is
+ * complete (used to generate the SP800-90B restart data matrix)
+ * <filename> File to store the output data in
+ * --ntg1 Enable flag JENT_NTG1
+ * --force-fips Enable flag JENT_FORCE_FIPS
+ * --disable-memory-access Enable flag JENT_DISABLE_MEMORY_ACCESS
+ * --disable-internal-timer Enable flag JENT_FORCE_INTERNAL_TIMER
+ * --force-internal-timer Enable flag JENT_FORCE_INTERNAL_TIMER
+ * --osr Apply the given OSR value
+ * --loopcnt Apply the given loop count value for the operation (i.e. apply it
+ *	     to the respecive used noise source(s))
+ * --max-mem Set the memory size of the memory block used for the memory access
+ *	     loop
+ * --hashloop Perform the measurement of the hash loop only
+ * --memaccess Perform the measurement of the memory access loop only
  */
 int main(int argc, char * argv[])
 {
