@@ -32,7 +32,21 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb);
 
 static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 {
+	/*
+	 * Return the delta between two values. If the values are monotonic
+	 * increasing counters which can wrap, this caluculation implicitly
+	 * returns the absolute value of the delta all the time.
+	 */
 	return (next - prev);
+}
+
+static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
+{
+	/*
+	 * Return the absolute value of the delta when the values are not a
+	 * monotonic counter that may wrap.
+	 */
+	return (next > prev) ? (next - prev) : (prev - next);
 }
 
 /* RCT: Intermittent cutoff threshold for alpha = 2**-30 */

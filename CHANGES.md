@@ -4,6 +4,7 @@
  * NTG.1 compliance: Modify startup such that the memory access and SHA-3 loop are treated as independent noise sources which are sampled to collect at least 240 bits each before first block of random numbers is released
  * Remove all code when JENT_CONF_DISABLE_LOOP_SHUFFLE is unset. This code is already discouraged for a long time. Now it is taken out for good.
  * If cache size cannot be detected from base system (e.g. virtualization), use the requested memory size.
+ * Change the stuck test to always calculate the absolute values of the 2nd and 3rd discrete derivation of time.
 
 3.6.3
  * Correct time stamp processing on AIX
