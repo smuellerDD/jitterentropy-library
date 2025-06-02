@@ -43,34 +43,16 @@
  * @param[in] time_delta the time delta raw entropy value
  * @param[in] intermediary buffer that may hold other data in the first
  *			   JENT_SHA3_256_SIZE_DIGEST bytes
- * @param[in] stuck Boolean whehter the raw entropy value is stuck
  */
 static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
-			     uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK],
-			     unsigned int stuck)
+			     uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK])
 {
-	uint64_t output_value;
-
 	/*
 	 * Insert the time stamp into the intermediary buffer after the message
 	 * digest of the intermediate data.
-	 *
-	 * If the time stamp is stuck, do not finally insert the value into the
-	 * intermediary buffer. Although this operation should not do any harm
-	 * even when the time stamp has no entropy, SP800-90B requires that any
-	 * conditioning operation to have an identical amount of input data
-	 * according to section 3.1.5.
 	 */
-	if (!stuck) {
-		/* Insert the time. */
-		output_value = time_delta;
-	} else {
-		/* The time is considered stuck. Insert the fixed value 0. */
-		output_value = 0;
-	}
-
 	memcpy(intermediary + JENT_SHA3_256_SIZE_DIGEST,
-	       (uint8_t *)&output_value, sizeof(uint64_t));
+	       (uint8_t *)&time_delta, sizeof(uint64_t));
 
 	/*
 	 * Inject the data from the intermediary buffer, including the hash we
@@ -334,7 +316,7 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Insert the data into the entropy pool */
-	jent_hash_insert(ec, current_delta, intermediary, stuck);
+	jent_hash_insert(ec, current_delta, intermediary);
 
 	/* return the raw entropy value */
 	if (ret_current_delta)
@@ -392,7 +374,7 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Insert the data into the entropy pool */
-	jent_hash_insert(ec, current_delta, intermediary, stuck);
+	jent_hash_insert(ec, current_delta, intermediary);
 
 	/* return the raw entropy value */
 	if (ret_current_delta)
@@ -450,7 +432,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	jent_hash_loop(ec, intermediary, loop_cnt);
 
 	/* Insert the data into the entropy pool */
-	jent_hash_insert(ec, current_delta, intermediary, stuck);
+	jent_hash_insert(ec, current_delta, intermediary);
 
 	/* return the raw entropy value */
 	if (ret_current_delta)
