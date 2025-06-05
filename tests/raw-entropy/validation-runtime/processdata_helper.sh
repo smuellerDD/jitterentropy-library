@@ -48,7 +48,7 @@ MAX_EVENTS=1000000
 # Code only after this line -- do not change               #
 ############################################################
 
-EXTRACT="extractlsb"
+EXTRACT=${EXTRACT:-"./extractlsb"}
 CFILE="extractlsb.c"
 
 if [ ! -d $ENTROPYDATA_DIR ]
@@ -103,7 +103,7 @@ do
 		mask=${item%:*}
 		bits=${item#*:}
 		
-		./$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
+		$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
 
 	done
 done
