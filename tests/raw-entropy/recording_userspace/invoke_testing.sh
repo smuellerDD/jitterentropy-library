@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 . ./invoke_testing_helper.sh
 

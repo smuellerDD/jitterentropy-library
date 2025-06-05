@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/bin/sh
 
 # Directory where to store the measurements
-OUTDIR="../results-measurements"
+OUTDIR=${OUTDIR:-"../results-measurements"}
 
 # Maximum number of entries to be extracted from the original file
 NUM_EVENTS=1000000
@@ -15,6 +15,8 @@ NONIID_DATA="jent-raw-noise"
 NONIID_HASH_DATA="jent-raw-noise_hashloop"
 NONIID_MEMLOOP_DATA="jent-raw-noise_memaccloop"
 IID_DATA="jent-conditioned.data"
+
+JENT_HASHTIME=${JENT_HASHTIME:-"./jitterentropy-hashtime"}
 
 # Define the maximum memory size
 # 0 -> use default
@@ -73,7 +75,7 @@ raw_entropy_restart()
 		cmdopts="$cmdopts --disable-internal-timer"
 	fi
 
-	./jitterentropy-hashtime $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_RESTART_DATA $cmdopts
+	$JENT_HASHTIME $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_RESTART_DATA $cmdopts
 
 	make -s -f Makefile.hashtime clean
 }
@@ -91,7 +93,7 @@ raw_entropy()
 		cmdopts="$cmdopts --disable-internal-timer"
 	fi
 
-	./jitterentropy-hashtime $NUM_EVENTS 1 $OUTDIR/$NONIID_DATA $cmdopts
+	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/$NONIID_DATA $cmdopts
 
 	make -s -f Makefile.hashtime clean
 }
@@ -110,7 +112,7 @@ raw_entropy_ntg1_hash()
 		cmdopts="$cmdopts --disable-internal-timer"
 	fi
 
-	./jitterentropy-hashtime $NUM_EVENTS 1 $OUTDIR/$NONIID_HASH_DATA $cmdopts
+	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/$NONIID_HASH_DATA $cmdopts
 
 	make -s -f Makefile.hashtime clean
 }
@@ -128,7 +130,7 @@ raw_entropy_ntg1_memacc()
 		cmdopts="$cmdopts --disable-internal-timer"
 	fi
 
-	./jitterentropy-hashtime $NUM_EVENTS 1 $OUTDIR/$NONIID_MEMLOOP_DATA $cmdopts
+	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/$NONIID_MEMLOOP_DATA $cmdopts
 
 	make -s -f Makefile.hashtime clean
 }
