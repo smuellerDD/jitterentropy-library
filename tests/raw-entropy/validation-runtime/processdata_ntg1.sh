@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Process the entropy data
 
