@@ -197,7 +197,11 @@ int main(int argc, char *argv[])
 		unchanged1s &= sample;
 
 		var = extract(sample, mask);
-		write(fd, &var, sizeof(var));
+		rc = write(fd, &var, sizeof(var));
+		if (rc != sizeof(var)) {
+			printf("write error\n");
+			return 1;
+		}
 
 		if (i >= count)
 			break;

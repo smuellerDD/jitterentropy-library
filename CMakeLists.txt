@@ -140,4 +140,7 @@ if(INTERNAL_TIMER AND NOT ${ANDROID})
     endif()
 endif()
 
+# testing/validation tools
+add_subdirectory(tests/gcd)
+add_subdirectory(tests/raw-entropy/validation-runtime)
 add_subdirectory(tests/raw-entropy/recording_userspace)
