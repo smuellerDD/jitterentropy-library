@@ -42,7 +42,7 @@
  * @param[in] ec Reference to entropy collector
  * @param[in] time_delta the time delta raw entropy value
  * @param[in] intermediary buffer that may hold other data in the first
- *			   JENT_SHA3_256_SIZE_DIGEST bytes
+ *			   JENT_SHA3_512_SIZE_DIGEST bytes
  */
 static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 			     uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK])
@@ -51,14 +51,14 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 	 * Insert the time stamp into the intermediary buffer after the message
 	 * digest of the intermediate data.
 	 */
-	memcpy(intermediary + JENT_SHA3_256_SIZE_DIGEST,
+	memcpy(intermediary + JENT_SHA3_512_SIZE_DIGEST,
 	       (uint8_t *)&time_delta, sizeof(uint64_t));
 
 	/*
 	 * Inject the data from the intermediary buffer, including the hash we
 	 * are using for timing, and (if the timer is not stuck) the time stamp.
 	 * Only the time is considered to contain any entropy. The intermediary
-	 * buffer is exactly SHA3-256-rate-size to always cause a Keccak
+	 * buffer is exactly SHA3-512-rate-size to always cause a Keccak
 	 * operation.
 	 */
 	jent_sha3_update(ec->hash_state, intermediary,
@@ -88,7 +88,7 @@ static void jent_hash_loop(struct rand_data *ec,
 	 */
 	uint64_t hash_loop_cnt = loop_cnt ? loop_cnt : JENT_HASH_LOOP_DEFAULT;
 
-	jent_sha3_256_init(&ctx);
+	jent_sha3_512_init(&ctx);
 
 	/*
 	 * This loop fills a buffer which is injected into the entropy pool.
@@ -104,7 +104,7 @@ static void jent_hash_loop(struct rand_data *ec,
 	 * the sha3_final.
 	 */
 	for (j = 0; j < hash_loop_cnt; j++) {
-		jent_sha3_update(&ctx, intermediary, JENT_SHA3_256_SIZE_DIGEST);
+		jent_sha3_update(&ctx, intermediary, JENT_SHA3_512_SIZE_DIGEST);
 		jent_sha3_update(&ctx, (uint8_t *)&ec->rct_count,
 				 sizeof(ec->rct_count));
 		jent_sha3_update(&ctx, (uint8_t *)&ec->apt_cutoff,
@@ -315,6 +315,9 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
          */
 	stuck = jent_stuck(ec, current_delta);
 
+	/* Domain separation */
+	intermediary[JENT_SHA3_MAX_SIZE_BLOCK - 1] = 0x01;
+
 	/* Insert the data into the entropy pool */
 	jent_hash_insert(ec, current_delta, intermediary);
 
@@ -373,6 +376,9 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
          */
 	stuck = jent_stuck(ec, current_delta);
 
+	/* Domain separation */
+	intermediary[JENT_SHA3_MAX_SIZE_BLOCK - 1] = 0x02;
+
 	/* Insert the data into the entropy pool */
 	jent_hash_insert(ec, current_delta, intermediary);
 
@@ -410,7 +416,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	unsigned int stuck;
 
 	/* Ensure that everything will fit into the intermediary buffer. */
-	BUILD_BUG_ON(sizeof(intermediary) < (JENT_SHA3_256_SIZE_DIGEST +
+	BUILD_BUG_ON(sizeof(intermediary) < (JENT_SHA3_512_SIZE_DIGEST +
 					     sizeof(uint64_t)));
 
 	/* Invoke memory access loop noise source */
@@ -430,6 +436,9 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 
 	/* Invoke hash loop noise source */
 	jent_hash_loop(ec, intermediary, loop_cnt);
+
+	/* Domain separation */
+	intermediary[JENT_SHA3_MAX_SIZE_BLOCK - 1] = 0x03;
 
 	/* Insert the data into the entropy pool */
 	jent_hash_insert(ec, current_delta, intermediary);
@@ -509,19 +518,21 @@ void jent_random_data(struct rand_data *ec)
 }
 void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len)
 {
-	uint8_t jent_block[JENT_SHA3_256_SIZE_DIGEST];
+	/* 256 Bit for next state (internal memory) || 256 Bit output for user */
+	uint8_t jent_block_next_state[JENT_SHA3_512_SIZE_DIGEST];
 
-	BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != (DATA_SIZE_BITS / 8));
+	BUILD_BUG_ON(JENT_SHA3_512_SIZE_DIGEST != ((DATA_SIZE_BITS / 8) * 2));
 
 	/* The final operation automatically re-initializes the ->hash_state */
-	jent_sha3_final(ec->hash_state, jent_block);
-	if (dst_len)
-		memcpy(dst, jent_block, dst_len);
+	jent_sha3_final(ec->hash_state, jent_block_next_state);
+
+	if (dst_len && dst_len <= DATA_SIZE_BITS / 8)
+		memcpy(dst, jent_block_next_state + (DATA_SIZE_BITS / 8), dst_len);
 
 	/*
 	 * Stir the new state with the data from the old state - the digest
 	 * of the old data is not considered to have entropy.
 	 */
-	jent_sha3_update(ec->hash_state, jent_block, sizeof(jent_block));
-	jent_memset_secure(jent_block, sizeof(jent_block));
+	jent_sha3_update(ec->hash_state, jent_block_next_state, DATA_SIZE_BITS / 8);
+	jent_memset_secure(jent_block_next_state, sizeof(jent_block_next_state));
 }

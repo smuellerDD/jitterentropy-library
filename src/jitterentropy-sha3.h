@@ -28,9 +28,9 @@ extern "C"
 #endif
 
 #define JENT_SHA3_SIZE_BLOCK(bits)	((1600 - 2 * bits) >> 3)
-#define JENT_SHA3_256_SIZE_BLOCK                                               \
-	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_256_SIZE_DIGEST_BITS)
-#define JENT_SHA3_MAX_SIZE_BLOCK	JENT_SHA3_256_SIZE_BLOCK
+#define JENT_SHA3_512_SIZE_BLOCK                                               \
+	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_512_SIZE_DIGEST_BITS)
+#define JENT_SHA3_MAX_SIZE_BLOCK	JENT_SHA3_512_SIZE_BLOCK
 
 struct jent_sha_ctx {
 	uint64_t state[25];
@@ -45,7 +45,7 @@ struct jent_sha_ctx {
 #define HASH_CTX_ON_STACK(name)						       \
 	struct jent_sha_ctx name
 
-void jent_sha3_256_init(struct jent_sha_ctx *ctx);
+void jent_sha3_512_init(struct jent_sha_ctx *ctx);
 void jent_sha3_update(struct jent_sha_ctx *ctx, const uint8_t *in,
 		      size_t inlen);
 void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest);

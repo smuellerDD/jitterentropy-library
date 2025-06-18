@@ -457,6 +457,7 @@ static int jent_selftest_run = 0;
 static struct rand_data
 *jent_entropy_collector_alloc_internal(unsigned int osr, unsigned int flags)
 {
+	static const uint8_t initial_internal_state[DATA_SIZE_BITS / 8] = { 0 };
 	struct rand_data *entropy_collector;
 	uint32_t memsize = 0;
 
@@ -519,7 +520,10 @@ static struct rand_data
 		goto err;
 
 	/* Initialize the hash state */
-	jent_sha3_256_init(entropy_collector->hash_state);
+	jent_sha3_512_init(entropy_collector->hash_state);
+
+	/* Insert initial internal state (256 Bit zero bits) */
+	jent_sha3_update(entropy_collector->hash_state, initial_internal_state, sizeof(initial_internal_state));
 
 	/* Set the oversampling rate */
 	entropy_collector->osr = osr;
@@ -564,6 +568,17 @@ static struct rand_data
 		if (jent_notime_enable(entropy_collector, flags))
 			goto err;
 	}
+
+	/*
+	 * assure, that we always have 512 bit entropy in our hash state
+	 * before outputting a block by adding at least 256 bit before first usage.
+	 * 256 bit are always copied to the next state in jent_read_random_block.
+	 *
+	 * For NTG.1: already perform the startup stages here.
+	 */
+	do {
+		jent_random_data(entropy_collector);
+	} while(entropy_collector->startup_state != jent_startup_completed);
 
 	return entropy_collector;
 

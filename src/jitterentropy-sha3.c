@@ -260,12 +260,12 @@ static inline void jent_sha3_init(struct jent_sha_ctx *ctx)
 	ctx->msg_len = 0;
 }
 
-void jent_sha3_256_init(struct jent_sha_ctx *ctx)
+void jent_sha3_512_init(struct jent_sha_ctx *ctx)
 {
 	jent_sha3_init(ctx);
-	ctx->r = JENT_SHA3_256_SIZE_BLOCK;
-	ctx->rword = JENT_SHA3_256_SIZE_BLOCK / sizeof(uint64_t);
-	ctx->digestsize = JENT_SHA3_256_SIZE_DIGEST;
+	ctx->r = JENT_SHA3_512_SIZE_BLOCK;
+	ctx->rword = JENT_SHA3_512_SIZE_BLOCK / sizeof(uint64_t);
+	ctx->digestsize = JENT_SHA3_512_SIZE_DIGEST;
 }
 
 static inline void jent_sha3_fill_state(struct jent_sha_ctx *ctx,
@@ -361,22 +361,27 @@ void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest)
 int jent_sha3_tester(void)
 {
 	HASH_CTX_ON_STACK(ctx);
-	static const uint8_t msg_256[] = { 0x5E, 0x5E, 0xD6 };
-	static const uint8_t exp_256[] = { 0xF1, 0x6E, 0x66, 0xC0, 0x43, 0x72,
-					   0xB4, 0xA3, 0xE1, 0xE3, 0x2E, 0x07,
-					   0xC4, 0x1C, 0x03, 0x40, 0x8A, 0xD5,
-					   0x43, 0x86, 0x8C, 0xC4, 0x0E, 0xC5,
-					   0x5E, 0x00, 0xBB, 0xBB, 0xBD, 0xF5,
-					   0x91, 0x1E };
-	uint8_t act[JENT_SHA3_256_SIZE_DIGEST] = { 0 };
+	static const uint8_t msg_512[] = { 0x5E, 0x5E, 0xD6 };
+	static const uint8_t exp_512[] = { 0x73, 0xDE, 0xE5, 0x10, 0x3A, 0xE5,
+					   0xC1, 0x7E, 0x38, 0xFA, 0x2C, 0xE2,
+					   0xF4, 0x4B, 0x6F, 0x4C, 0xCA, 0x67,
+					   0x99, 0x1B, 0xDC, 0x9E, 0x9A, 0x9E,
+					   0x23, 0x19, 0xF9, 0xC5, 0x9A, 0x23,
+					   0x3A, 0x9A, 0xE8, 0x59, 0xB2, 0x83,
+					   0xE1, 0xF2, 0x03, 0x10, 0xF5, 0x96,
+					   0x04, 0x0A, 0x7D, 0x6A, 0x2C, 0xC9,
+					   0xA5, 0x49, 0xDE, 0x80, 0x09, 0x38,
+					   0x4B, 0xB7, 0x0B, 0x0B, 0xE5, 0xA5,
+					   0x55, 0x66, 0x6A, 0xD7 };
+	uint8_t act[JENT_SHA3_512_SIZE_DIGEST] = { 0 };
 	unsigned int i;
 
-	jent_sha3_256_init(&ctx);
-	jent_sha3_update(&ctx, msg_256, 3);
+	jent_sha3_512_init(&ctx);
+	jent_sha3_update(&ctx, msg_512, 3);
 	jent_sha3_final(&ctx, act);
 
-	for (i = 0; i < JENT_SHA3_256_SIZE_DIGEST; i++) {
-		if (exp_256[i] != act[i])
+	for (i = 0; i < JENT_SHA3_512_SIZE_DIGEST; i++) {
+		if (exp_512[i] != act[i])
 			return 1;
 	}
 
