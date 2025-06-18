@@ -4,5 +4,5 @@
 
 initialization
 #lfsroutput
-raw_entropy
-raw_entropy_restart
+raw_entropy --force-fips
+raw_entropy_restart --force-fips
