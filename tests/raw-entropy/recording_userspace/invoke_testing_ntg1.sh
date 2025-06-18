@@ -4,7 +4,7 @@
 
 initialization
 #lfsroutput
-raw_entropy
-raw_entropy_restart
-raw_entropy_ntg1_hash
-raw_entropy_ntg1_memacc
+raw_entropy --ntg1
+raw_entropy_restart --ntg1
+raw_entropy_ntg1_hash --ntg1
+raw_entropy_ntg1_memacc --ntg1

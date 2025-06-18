@@ -68,7 +68,7 @@ raw_entropy_restart()
 
 	make -s -f Makefile.hashtime
 
-	local cmdopts="--max-mem $MAX_MEMORY_SIZE"
+	local cmdopts="--max-mem $MAX_MEMORY_SIZE $@"
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
@@ -86,7 +86,7 @@ raw_entropy()
 
 	make -s -f Makefile.hashtime
 
-	local cmdopts="--max-mem $MAX_MEMORY_SIZE"
+	local cmdopts="--max-mem $MAX_MEMORY_SIZE $@"
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
@@ -105,7 +105,7 @@ raw_entropy_ntg1_hash()
 
 	make -s -f Makefile.hashtime
 
-	local cmdopts="--max-mem $MAX_MEMORY_SIZE --hashloop"
+	local cmdopts="--max-mem $MAX_MEMORY_SIZE --hashloop $@"
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
@@ -123,7 +123,7 @@ raw_entropy_ntg1_memacc()
 
 	make -s -f Makefile.hashtime
 
-	local cmdopts="--max-mem $MAX_MEMORY_SIZE --memaccess"
+	local cmdopts="--max-mem $MAX_MEMORY_SIZE --memaccess $@"
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
