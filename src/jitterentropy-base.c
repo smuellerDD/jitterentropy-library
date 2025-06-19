@@ -457,7 +457,6 @@ static int jent_selftest_run = 0;
 static struct rand_data
 *jent_entropy_collector_alloc_internal(unsigned int osr, unsigned int flags)
 {
-	static const uint8_t initial_internal_state[DATA_SIZE_BITS / 8] = { 0 };
 	struct rand_data *entropy_collector;
 	uint32_t memsize = 0;
 
@@ -519,18 +518,30 @@ static struct rand_data
 	if (jent_sha3_alloc(&entropy_collector->hash_state))
 		goto err;
 
-	/* Initialize the hash state */
-	jent_sha3_512_init(entropy_collector->hash_state);
-
-	/* Insert initial internal state (256 Bit zero bits) */
-	jent_sha3_update(entropy_collector->hash_state, initial_internal_state, sizeof(initial_internal_state));
+	/*
+	 * Initialize the hash state for the DRBG: FIPS is initialized as
+	 * SHA3-512 XDRBG-like conditioning component, otherwise as XDRBG-256.
+	 *
+	 * Ideally, the XDRBG-256 is always used, but as of now, it is no vetted
+	 * conditioning component and thus cannot be considered to provide full
+	 * entropy according to SP800-90B. Therefore, use a SHA3-512 XDRBG-like
+	 * conditioning component that is considered a vetted conditioning
+	 * component.
+	 *
+	 * When SP800-90A is updated to add the XDRBG-256 and thus SP800-90B
+	 * allows it as a vetted conditioning component, the SHA3-512 XDRBG-like
+	 * implementation is dropped.
+	 */
+	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled()) {
+		jent_sha3_512_init(entropy_collector->hash_state);
+		entropy_collector->fips_enabled = 1;
+	} else {
+		jent_shake256_init(entropy_collector->hash_state);
+	}
 
 	/* Set the oversampling rate */
 	entropy_collector->osr = osr;
 	entropy_collector->flags = flags;
-
-	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled())
-		entropy_collector->fips_enabled = 1;
 
 	/*
 	 * BSI AIS 20/31 NTG.1 requires that during startup 2 noise sources
@@ -570,9 +581,10 @@ static struct rand_data
 	}
 
 	/*
-	 * assure, that we always have 512 bit entropy in our hash state
-	 * before outputting a block by adding at least 256 bit before first usage.
-	 * 256 bit are always copied to the next state in jent_read_random_block.
+	 * Assure, that we always have 512 bit entropy in our hash state
+	 * before outputting a block by adding at least 256 bit before first
+	 * usage. 256 bit (SHA3-512 XDRBG-like) or 512 bit (XDRBG-256) are
+	 * always transferred to the next state after the generation completes.
 	 *
 	 * For NTG.1: already perform the startup stages here.
 	 */
@@ -782,14 +794,14 @@ out:
 	return ret;
 }
 
-static inline int jent_entropy_init_common_pre(void)
+static inline int jent_entropy_init_common_pre(unsigned int flags)
 {
 	int ret;
 
 	jent_notime_block_switch();
 	jent_health_cb_block_switch();
 
-	if (jent_sha3_tester())
+	if (jent_sha3_tester((flags & JENT_FORCE_FIPS) || jent_fips_enabled()))
 		return EHASH;
 
 	ret = jent_gcd_selftest();
@@ -811,7 +823,7 @@ static inline int jent_entropy_init_common_post(int ret)
 JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
 {
-	int ret = jent_entropy_init_common_pre();
+	int ret = jent_entropy_init_common_pre(0);
 
 	if (ret)
 		return ret;
@@ -829,7 +841,7 @@ int jent_entropy_init(void)
 JENT_PRIVATE_STATIC
 int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 {
-	int ret = jent_entropy_init_common_pre();
+	int ret = jent_entropy_init_common_pre(flags);
 
 	if (ret)
 		return ret;

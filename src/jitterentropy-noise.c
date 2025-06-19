@@ -23,8 +23,6 @@
 #include "jitterentropy-timer.h"
 #include "jitterentropy-sha3.h"
 
-#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
-
 /***************************************************************************
  * Noise sources
  ***************************************************************************/
@@ -56,13 +54,23 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 
 	/*
 	 * Inject the data from the intermediary buffer, including the hash we
-	 * are using for timing, and (if the timer is not stuck) the time stamp.
-	 * Only the time is considered to contain any entropy. The intermediary
-	 * buffer is exactly SHA3-512-rate-size to always cause a Keccak
-	 * operation.
+	 * are using for timing, and the time stamp. Only the time is considered
+	 * to contain any entropy. The intermediary buffer is exactly rate-size
+	 * to always cause a Keccak operation.
+	 *
+	 * This operation seeds the XDRBG / SHA3-512 XDRBG-like conditioning
+	 * component as follows:
+	 *
+	 * XDRBG reseed:
+	 * V ← XOF( encode(( V' || seed ), α, 1), |V| )
+	 *
+	 * where
+	 *
+	 * seed ← (intermediary_0 || intermediary_1 || ... ||
+	 *	   intermediary_[(osr + safety_factor)*256])
 	 */
 	jent_sha3_update(ec->hash_state, intermediary,
-			 JENT_SHA3_MAX_SIZE_BLOCK);
+			 jent_sha3_rate(ec->hash_state));
 	jent_memset_secure(intermediary, JENT_SHA3_MAX_SIZE_BLOCK);
 }
 
@@ -104,7 +112,8 @@ static void jent_hash_loop(struct rand_data *ec,
 	 * the sha3_final.
 	 */
 	for (j = 0; j < hash_loop_cnt; j++) {
-		jent_sha3_update(&ctx, intermediary, JENT_SHA3_512_SIZE_DIGEST);
+		jent_sha3_update(&ctx, intermediary,
+				 JENT_SHA3_512_SIZE_DIGEST / 2);
 		jent_sha3_update(&ctx, (uint8_t *)&ec->rct_count,
 				 sizeof(ec->rct_count));
 		jent_sha3_update(&ctx, (uint8_t *)&ec->apt_cutoff,
@@ -460,7 +469,6 @@ static void jent_random_data_one(
 
 	if (ec->fips_enabled)
 		safety_factor = ENTROPY_SAFETY_FACTOR;
-
 	while (!jent_health_failure(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
 		if (measure_jitter(ec, 0, NULL))
@@ -490,7 +498,6 @@ void jent_random_data(struct rand_data *ec)
 	case jent_startup_memory:
 		jent_random_data_one(ec, jent_measure_jitter_ntg1_memaccess);
 		ec->startup_state--;
-
 		/*
 		 * Initialize the health tests as we fall through to
 		 * independently invoke the next noise source.
@@ -516,23 +523,8 @@ void jent_random_data(struct rand_data *ec)
 		jent_random_data_one(ec, jent_measure_jitter);
 	}
 }
+
 void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len)
 {
-	/* 256 Bit for next state (internal memory) || 256 Bit output for user */
-	uint8_t jent_block_next_state[JENT_SHA3_512_SIZE_DIGEST];
-
-	BUILD_BUG_ON(JENT_SHA3_512_SIZE_DIGEST != ((DATA_SIZE_BITS / 8) * 2));
-
-	/* The final operation automatically re-initializes the ->hash_state */
-	jent_sha3_final(ec->hash_state, jent_block_next_state);
-
-	if (dst_len && dst_len <= DATA_SIZE_BITS / 8)
-		memcpy(dst, jent_block_next_state + (DATA_SIZE_BITS / 8), dst_len);
-
-	/*
-	 * Stir the new state with the data from the old state - the digest
-	 * of the old data is not considered to have entropy.
-	 */
-	jent_sha3_update(ec->hash_state, jent_block_next_state, DATA_SIZE_BITS / 8);
-	jent_memset_secure(jent_block_next_state, sizeof(jent_block_next_state));
+	jent_drbg_generate_block(ec->hash_state, (uint8_t*)dst, dst_len);
 }
