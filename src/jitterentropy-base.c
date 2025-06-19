@@ -307,10 +307,15 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		case -5:
 			apt_observations = (*ec)->apt_observations;
 			current_delta = (*ec)->apt_base;
+#ifdef JENT_HEALTH_LAG_PREDICTOR
 			lag_prediction_success_run =
 				(*ec)->lag_prediction_success_run;
 			lag_prediction_success_count =
 				(*ec)->lag_prediction_success_count;
+#else
+			(void)lag_prediction_success_run;
+			(void)lag_prediction_success_count;
+#endif
 
 			osr = (*ec)->osr + 1;
 			flags = (*ec)->flags;
@@ -367,10 +372,12 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 					(int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr));
 
 				/* LAG re-initialization */
+#ifdef JENT_HEALTH_LAG_PREDICTOR
 				(*ec)->lag_prediction_success_run =
 					lag_prediction_success_run;
 				(*ec)->lag_prediction_success_count =
 					lag_prediction_success_count;
+#endif
 			}
 
 			/*
