@@ -430,16 +430,17 @@ static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 
 	/* The final operation automatically re-initializes the ->hash_state */
 
+
 	/*
-	 * XDRBG: finalize seeding operation
+	 * SHA3-512 XDRBG-like: finalize seeding
 	 *
-	 * seed is inserted with SHAKE update
+	 * seed is inserted with SHA3-512 update
 	 *
 	 * initial seeding:
-	 * V ← SHA3-512( encode(( seed ), α, 0), |V| )
+	 * V ← XOF( encode(( seed ), α, 0), |V| )
 	 *
 	 * reseeding:
-	 * V ← SHA3-512( encode(( V' || seed ), α, 1), |V| )
+	 * V ← XOF( encode(( V' || seed ), α, 1), |V| )
 	 *
 	 * The insertion of the V' is done at the end of this function for the
 	 * next finalization of the reseeding. α is defined to be empty.
@@ -454,9 +455,9 @@ static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 	 * XDRBG: generate
 	 *
 	 * ℓ = dst_len which is at maximum 256 bits
-	 * T ← SHA3-512( encode(V', α, 2), ℓ + |V| )
-	 * V ← first 256 bits of T
-	 * Σ ← last 256 bits of T truncated to ℓ
+	 * T ← XOF( encode(V', α, 2), ℓ + |V| )
+	 * V ← first |V| bits of T
+	 * Σ ← last ℓ bits of T
 	 */
 	jent_sha3_update(ctx, jent_block_next_state, JENT_XDRBG_SIZE_STATE);
 	encode = JENT_XDRBG_DRNG_ENCODE_N(2);
@@ -512,15 +513,15 @@ static void jent_xdrbg_sha3_512_generate_block(struct jent_sha_ctx *ctx,
 	/* The final operation automatically re-initializes the ->hash_state */
 
 	/*
-	 * SHA3-512 XDRBG-like: finalize seeding
+	 * XDRBG: finalize seeding operation
 	 *
-	 * seed is inserted with SHA3-512 update
+	 * seed is inserted with SHAKE update
 	 *
 	 * initial seeding:
-	 * V ← XOF( encode(( seed ), α, 0), |V| )
+	 * V ← SHA3-512( encode(( seed ), α, 0), |V| )
 	 *
 	 * reseeding:
-	 * V ← XOF( encode(( V' || seed ), α, 1), |V| )
+	 * V ← SHA3-512( encode(( V' || seed ), α, 1), |V| )
 	 *
 	 * The insertion of the V' is done at the end of this function for the
 	 * next finalization of the reseeding. α is defined to be empty.
@@ -534,9 +535,9 @@ static void jent_xdrbg_sha3_512_generate_block(struct jent_sha_ctx *ctx,
 	 * XDRBG: generate
 	 *
 	 * ℓ = dst_len which is at maximum 256 bits
-	 * T ← XOF( encode(V', α, 2), ℓ + |V| )
-	 * V ← first |V| bits of T
-	 * Σ ← last ℓ bits of T
+	 * T ← SHA3-512( encode(V', α, 2), ℓ + |V| )
+	 * V ← first 256 bits of T
+	 * Σ ← last 256 bits of T truncated to ℓ
 	 */
 	jent_sha3_update(ctx, jent_block_next_state,
 			 sizeof(jent_block_next_state));
