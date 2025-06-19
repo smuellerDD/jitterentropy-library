@@ -6,6 +6,7 @@
  * If cache size cannot be detected from base system (e.g. virtualization), use the requested memory size.
  * Change the stuck test to always calculate the absolute values of the 2nd and 3rd discrete derivation of time.
 * Replace SHA3-256 output generation with XDRBG-256 (common case) or SHA3-512-based XDRBG-like construction
+* Prune the jitterentropy.h header file of internal definitions and delcarations which are moved to src/jitterentropy-internal.h. With that, jitterentropy.h only contains the API. This modification does not alter the Jitter RNG behavior at all.
 
 3.6.3
  * Correct time stamp processing on AIX
