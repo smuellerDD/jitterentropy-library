@@ -430,7 +430,6 @@ static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 
 	/* The final operation automatically re-initializes the ->hash_state */
 
-
 	/*
 	 * SHA3-512 XDRBG-like: finalize seeding
 	 *

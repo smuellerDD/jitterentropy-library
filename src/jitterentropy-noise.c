@@ -469,6 +469,7 @@ static void jent_random_data_one(
 
 	if (ec->fips_enabled)
 		safety_factor = ENTROPY_SAFETY_FACTOR;
+
 	while (!jent_health_failure(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
 		if (measure_jitter(ec, 0, NULL))
@@ -498,6 +499,7 @@ void jent_random_data(struct rand_data *ec)
 	case jent_startup_memory:
 		jent_random_data_one(ec, jent_measure_jitter_ntg1_memaccess);
 		ec->startup_state--;
+
 		/*
 		 * Initialize the health tests as we fall through to
 		 * independently invoke the next noise source.
