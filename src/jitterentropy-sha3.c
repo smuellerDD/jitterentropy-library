@@ -431,15 +431,15 @@ static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 	/* The final operation automatically re-initializes the ->hash_state */
 
 	/*
-	 * SHA3-512 XDRBG-like: finalize seeding
+	 * XDRBG: finalize seeding operation
 	 *
-	 * seed is inserted with SHA3-512 update
+	 * seed is inserted with SHAKE update
 	 *
 	 * initial seeding:
-	 * V ← XOF( encode(( seed ), α, 0), |V| )
+	 * V ← SHA3-512( encode(( seed ), α, 0), |V| )
 	 *
 	 * reseeding:
-	 * V ← XOF( encode(( V' || seed ), α, 1), |V| )
+	 * V ← SHA3-512( encode(( V' || seed ), α, 1), |V| )
 	 *
 	 * The insertion of the V' is done at the end of this function for the
 	 * next finalization of the reseeding. α is defined to be empty.
@@ -512,15 +512,15 @@ static void jent_xdrbg_sha3_512_generate_block(struct jent_sha_ctx *ctx,
 	/* The final operation automatically re-initializes the ->hash_state */
 
 	/*
-	 * XDRBG: finalize seeding operation
+	 * SHA3-512 XDRBG-like: finalize seeding
 	 *
-	 * seed is inserted with SHAKE update
+	 * seed is inserted with SHA3-512 update
 	 *
 	 * initial seeding:
-	 * V ← SHA3-512( encode(( seed ), α, 0), |V| )
+	 * V ← XOF( encode(( seed ), α, 0), |V| )
 	 *
 	 * reseeding:
-	 * V ← SHA3-512( encode(( V' || seed ), α, 1), |V| )
+	 * V ← XOF( encode(( V' || seed ), α, 1), |V| )
 	 *
 	 * The insertion of the V' is done at the end of this function for the
 	 * next finalization of the reseeding. α is defined to be empty.
