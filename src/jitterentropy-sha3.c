@@ -517,10 +517,10 @@ static void jent_xdrbg_sha3_512_generate_block(struct jent_sha_ctx *ctx,
 	 * seed is inserted with SHAKE update
 	 *
 	 * initial seeding:
-	 * V ← SHA3-512( encode(( seed ), α, 0), |V| )
+	 * V ← SHA3-512( encode(( seed ), α, 0) )
 	 *
 	 * reseeding:
-	 * V ← SHA3-512( encode(( V' || seed ), α, 1), |V| )
+	 * V ← SHA3-512( encode(( V' || seed ), α, 1) )
 	 *
 	 * The insertion of the V' is done at the end of this function for the
 	 * next finalization of the reseeding. α is defined to be empty.
@@ -534,7 +534,7 @@ static void jent_xdrbg_sha3_512_generate_block(struct jent_sha_ctx *ctx,
 	 * SHA3-512 XDRBG-like: generate
 	 *
 	 * ℓ = dst_len which is at maximum 256 bits
-	 * T ← SHA3-512( encode(V', α, 2), ℓ + |V| )
+	 * T ← SHA3-512( encode(V', α, 2) )
 	 * V ← first 256 bits of T
 	 * Σ ← last 256 bits of T truncated to ℓ
 	 */
