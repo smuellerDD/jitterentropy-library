@@ -37,7 +37,6 @@ extern "C"
 	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_512_SIZE_DIGEST_BITS)
 
 #define JENT_XDRBG_SIZE_STATE		64
-#define JENT_SHA3_MAX_SIZE_BLOCK	JENT_SHA3_512_SIZE_BLOCK
 
 struct jent_sha_ctx {
 	uint64_t state[25];

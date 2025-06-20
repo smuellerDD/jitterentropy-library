@@ -27,6 +27,32 @@
  * Noise sources
  ***************************************************************************/
 
+/*
+ * Structure of the intermediary buffer:
+ *
+ * | time delta | domain separator | hash loop hash | 0 ... |
+ *
+ * Note, this buffer is truncted to the current rate size which implies that
+ * data with entropy must be placed at a location to guarantee they are not
+ * truncated off. In the worst case of SHA3-512, the the intermediary buffer
+ * is truncated one byte before the end of the hash loop hash.
+ */
+#define JENT_SIZEOF_TIMEDELTA		(sizeof(uint64_t))
+#define JENT_SIZEOF_DOMAINSEPARATOR	(sizeof(uint8_t))
+#define JENT_SIZEOF_HASH_BLOCK		(JENT_SHA3_512_SIZE_DIGEST)
+#define JENT_SIZEOF_INTERMEDIARY_DATA	(JENT_SIZEOF_TIMEDELTA +               \
+					 JENT_SIZEOF_DOMAINSEPARATOR +         \
+					 JENT_SIZEOF_HASH_BLOCK)
+
+/* Intemediary is as big as the maximum rate it will be read with */
+#define JENT_SIZEOF_INTERMEDIARY	(JENT_SHA3_256_SIZE_BLOCK)
+
+#define JENT_OFFSET_TIMEDELTA		(0)
+#define JENT_OFFSET_DOMAINSEPARATOR                                            \
+	(JENT_OFFSET_TIMEDELTA + JENT_SIZEOF_TIMEDELTA)
+#define JENT_OFFSET_HASH_BLOCK                                                 \
+	(JENT_OFFSET_DOMAINSEPARATOR + JENT_SIZEOF_DOMAINSEPARATOR)
+
 /**
  * Insert a data block into the entropy pool
  *
@@ -43,14 +69,16 @@
  *			   JENT_SHA3_512_SIZE_DIGEST bytes
  */
 static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
-			     uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK])
+			     uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY])
 {
 	/*
 	 * Insert the time stamp into the intermediary buffer after the message
 	 * digest of the intermediate data.
 	 */
-	memcpy(intermediary + JENT_SHA3_512_SIZE_DIGEST,
+	memcpy(intermediary + JENT_OFFSET_TIMEDELTA,
 	       (uint8_t *)&time_delta, sizeof(uint64_t));
+
+	BUILD_BUG_ON(JENT_SIZEOF_INTERMEDIARY < JENT_SIZEOF_INTERMEDIARY_DATA);
 
 	/*
 	 * Inject the data from the intermediary buffer, including the hash we
@@ -71,7 +99,7 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 	 */
 	jent_sha3_update(ec->hash_state, intermediary,
 			 jent_sha3_rate(ec->hash_state));
-	jent_memset_secure(intermediary, JENT_SHA3_MAX_SIZE_BLOCK);
+	jent_memset_secure(intermediary, JENT_SIZEOF_INTERMEDIARY);
 }
 
 /**
@@ -84,10 +112,11 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
  * @param[in] stuck Is the time delta identified as stuck?
  */
 static void jent_hash_loop(struct rand_data *ec,
-			   uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK],
+			   uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY],
 			   uint64_t loop_cnt)
 {
 	HASH_CTX_ON_STACK(ctx);
+	uint8_t *digest = intermediary + JENT_OFFSET_HASH_BLOCK;
 	uint64_t j = 0;
 
 	/*
@@ -112,8 +141,8 @@ static void jent_hash_loop(struct rand_data *ec,
 	 * the sha3_final.
 	 */
 	for (j = 0; j < hash_loop_cnt; j++) {
-		jent_sha3_update(&ctx, intermediary,
-				 JENT_SHA3_512_SIZE_DIGEST / 2);
+		/* Limit data size to prevent Keccak operation during update */
+		jent_sha3_update(&ctx, digest, JENT_SHA3_512_SIZE_DIGEST / 2);
 		jent_sha3_update(&ctx, (uint8_t *)&ec->rct_count,
 				 sizeof(ec->rct_count));
 		jent_sha3_update(&ctx, (uint8_t *)&ec->apt_cutoff,
@@ -125,7 +154,7 @@ static void jent_hash_loop(struct rand_data *ec,
 		jent_sha3_update(&ctx,(uint8_t *) &ec->apt_base,
 				 sizeof(ec->apt_base));
 		jent_sha3_update(&ctx, (uint8_t *)&j, sizeof(uint64_t));
-		jent_sha3_final(&ctx, intermediary);
+		jent_sha3_final(&ctx, digest);
 	}
 
 	jent_memset_secure(&ctx, JENT_SHA_MAX_CTX_SIZE);
@@ -292,7 +321,7 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 						uint64_t loop_cnt,
 						uint64_t *ret_current_delta)
 {
-	uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK] = { 0 };
+	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
 	uint64_t time_now = 0;
 	uint64_t current_delta = 0;
 	unsigned int stuck;
@@ -325,7 +354,7 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Domain separation */
-	intermediary[JENT_SHA3_MAX_SIZE_BLOCK - 1] = 0x01;
+	intermediary[JENT_OFFSET_DOMAINSEPARATOR] = 0x01;
 
 	/* Insert the data into the entropy pool */
 	jent_hash_insert(ec, current_delta, intermediary);
@@ -352,7 +381,7 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 					   uint64_t loop_cnt,
 					   uint64_t *ret_current_delta)
 {
-	uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK] = { 0 };
+	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
 	uint64_t time_now = 0;
 	uint64_t current_delta = 0;
 	unsigned int stuck;
@@ -367,6 +396,9 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	/*
 	 * Now call the hash noise source with tripple the default iteration
 	 * count considering this is the only noise source.
+	 *
+	 * Place the digest at an offset allowing the time stamp and the
+	 * domain separator to be added before.
 	 */
 	jent_hash_loop(ec, intermediary, loop_cnt ? loop_cnt :
 						    JENT_HASH_LOOP_DEFAULT * 3);
@@ -386,7 +418,7 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Domain separation */
-	intermediary[JENT_SHA3_MAX_SIZE_BLOCK - 1] = 0x02;
+	intermediary[JENT_OFFSET_DOMAINSEPARATOR] = 0x02;
 
 	/* Insert the data into the entropy pool */
 	jent_hash_insert(ec, current_delta, intermediary);
@@ -418,7 +450,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 				 uint64_t *ret_current_delta)
 {
 	/* Size of intermediary ensures a Keccak operation during hash_update */
-	uint8_t intermediary[JENT_SHA3_MAX_SIZE_BLOCK] = { 0 };
+	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
 
 	uint64_t time_now = 0;
 	uint64_t current_delta = 0;
@@ -447,7 +479,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	jent_hash_loop(ec, intermediary, loop_cnt);
 
 	/* Domain separation */
-	intermediary[JENT_SHA3_MAX_SIZE_BLOCK - 1] = 0x03;
+	intermediary[JENT_OFFSET_DOMAINSEPARATOR] = 0x03;
 
 	/* Insert the data into the entropy pool */
 	jent_hash_insert(ec, current_delta, intermediary);
