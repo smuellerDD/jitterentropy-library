@@ -34,12 +34,11 @@
  *
  * Note, this buffer is truncted to the current rate size which implies that
  * data with entropy must be placed at a location to guarantee they are not
- * truncated off. In the worst case of SHA3-512, the the intermediary buffer
- * is truncated one byte before the end of the hash loop hash.
+ * truncated off.
  */
 #define JENT_SIZEOF_TIMEDELTA		(sizeof(uint64_t))
 #define JENT_SIZEOF_DOMAINSEPARATOR	(sizeof(uint8_t))
-#define JENT_SIZEOF_HASH_BLOCK		(JENT_SHA3_512_SIZE_DIGEST)
+#define JENT_SIZEOF_HASH_BLOCK		(JENT_SHA3_256_SIZE_DIGEST)
 #define JENT_SIZEOF_INTERMEDIARY_DATA	(JENT_SIZEOF_TIMEDELTA +               \
 					 JENT_SIZEOF_DOMAINSEPARATOR +         \
 					 JENT_SIZEOF_HASH_BLOCK)
@@ -65,8 +64,7 @@
  *
  * @param[in] ec Reference to entropy collector
  * @param[in] time_delta the time delta raw entropy value
- * @param[in] intermediary buffer that may hold other data in the first
- *			   JENT_SHA3_512_SIZE_DIGEST bytes
+ * @param[in] intermediary buffer that may hold other data
  */
 static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 			     uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY])
@@ -86,8 +84,7 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 	 * to contain any entropy. The intermediary buffer is exactly rate-size
 	 * to always cause a Keccak operation.
 	 *
-	 * This operation seeds the XDRBG / SHA3-512 XDRBG-like conditioning
-	 * component as follows:
+	 * This operation seeds the XDRBG conditioning component as follows:
 	 *
 	 * XDRBG reseed:
 	 * V ← XOF( encode(( V' || seed ), α, 1), |V| )
@@ -125,7 +122,7 @@ static void jent_hash_loop(struct rand_data *ec,
 	 */
 	uint64_t hash_loop_cnt = loop_cnt ? loop_cnt : JENT_HASH_LOOP_DEFAULT;
 
-	jent_sha3_512_init(&ctx);
+	jent_sha3_256_init(&ctx);
 
 	/*
 	 * This loop fills a buffer which is injected into the entropy pool.
@@ -142,7 +139,7 @@ static void jent_hash_loop(struct rand_data *ec,
 	 */
 	for (j = 0; j < hash_loop_cnt; j++) {
 		/* Limit data size to prevent Keccak operation during update */
-		jent_sha3_update(&ctx, digest, JENT_SHA3_512_SIZE_DIGEST / 2);
+		jent_sha3_update(&ctx, digest, JENT_SHA3_256_SIZE_DIGEST);
 		jent_sha3_update(&ctx, (uint8_t *)&ec->rct_count,
 				 sizeof(ec->rct_count));
 		jent_sha3_update(&ctx, (uint8_t *)&ec->apt_cutoff,
@@ -455,10 +452,6 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	uint64_t time_now = 0;
 	uint64_t current_delta = 0;
 	unsigned int stuck;
-
-	/* Ensure that everything will fit into the intermediary buffer. */
-	BUILD_BUG_ON(sizeof(intermediary) < (JENT_SHA3_512_SIZE_DIGEST +
-					     sizeof(uint64_t)));
 
 	/* Invoke memory access loop noise source */
 	jent_memaccess(ec, loop_cnt);

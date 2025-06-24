@@ -260,12 +260,13 @@ static inline void jent_sha3_init(struct jent_sha_ctx *ctx)
 	ctx->msg_len = 0;
 }
 
-void jent_sha3_512_init(struct jent_sha_ctx *ctx)
+void jent_sha3_256_init(struct jent_sha_ctx *ctx)
 {
 	jent_sha3_init(ctx);
-	ctx->r = JENT_SHA3_512_SIZE_BLOCK;
-	ctx->rword = JENT_SHA3_512_SIZE_BLOCK / sizeof(uint64_t);
-	ctx->digestsize = JENT_SHA3_512_SIZE_DIGEST;
+
+	ctx->r = JENT_SHA3_256_SIZE_BLOCK;
+	ctx->rword = JENT_SHA3_256_SIZE_BLOCK / sizeof(uint64_t);
+	ctx->digestsize = JENT_SHA3_256_SIZE_DIGEST;
 	ctx->padding = 0x06;
 }
 
@@ -277,6 +278,7 @@ void jent_shake256_init(struct jent_sha_ctx *ctx)
 	ctx->rword = JENT_SHA3_256_SIZE_BLOCK / sizeof(uint64_t);
 	ctx->digestsize = 0;
 	ctx->padding = 0x1f;
+	ctx->initially_seeded = 0;
 }
 
 static inline void jent_sha3_fill_state(struct jent_sha_ctx *ctx,
@@ -433,7 +435,7 @@ static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 	/*
 	 * XDRBG: finalize seeding
 	 *
-	 * seed is inserted with SHA3-512 update
+	 * seed is inserted with SHAKE-256 update
 	 *
 	 * initial seeding:
 	 * V ← XOF( encode(( seed ), α, 0), |V| )
@@ -487,91 +489,10 @@ static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 			   sizeof(jent_block_next_state));
 }
 
-/*
- * This operation follows the guidelines of XDRBG as defined in [1] using
- * SHA3-512 instead of SHAKE-256.
- *
- * In addition to the use of a different hash, the XDRBG state V is defined to
- * be of size 512 bits during the seeding operation and 256 bits during the
- * generate operation. See the code below marking the place where the V
- * value is handled differently than specified in XDRBG.
- *
- * The output size is [0:256] bits.
- *
- * [1] https://leancrypto.org/papers/xdrbg.pdf
- */
-static void jent_xdrbg_sha3_512_generate_block(struct jent_sha_ctx *ctx,
-					       uint8_t *dst, size_t dst_len)
-{
-	/* 256 Bit for next state (internal memory) || 256 Bit output for user */
-	uint8_t jent_block_next_state[JENT_SHA3_512_SIZE_DIGEST];
-	uint8_t encode;
-
-	BUILD_BUG_ON(JENT_SHA3_512_SIZE_DIGEST != ((DATA_SIZE_BITS / 8) * 2));
-
-	/* The final operation automatically re-initializes the ->hash_state */
-
-	/*
-	 * SHA3-512 XDRBG-like: finalize seeding operation
-	 *
-	 * seed is inserted with SHAKE update
-	 *
-	 * initial seeding:
-	 * V ← SHA3-512( encode(( seed ), α, 0) )
-	 *
-	 * reseeding:
-	 * V ← SHA3-512( encode(( V' || seed ), α, 1) )
-	 *
-	 * The insertion of the V' is done at the end of this function for the
-	 * next finalization of the reseeding. α is defined to be empty.
-	 */
-	encode = JENT_XDRBG_DRNG_ENCODE_N(ctx->initially_seeded);
-	ctx->initially_seeded = 1;
-	jent_sha3_update(ctx, &encode, 1);
-	jent_sha3_final(ctx, jent_block_next_state);
-
-	/*
-	 * SHA3-512 XDRBG-like: generate
-	 *
-	 * ℓ = dst_len which is at maximum 256 bits
-	 * T ← SHA3-512( encode(V', α, 2) )
-	 * V ← first 256 bits of T
-	 * Σ ← last 256 bits of T truncated to ℓ
-	 */
-	jent_sha3_update(ctx, jent_block_next_state,
-			 sizeof(jent_block_next_state));
-	encode = JENT_XDRBG_DRNG_ENCODE_N(2);
-	jent_sha3_update(ctx, &encode, 1);
-	jent_sha3_final(ctx, jent_block_next_state);
-
-	/* Return Σ to the caller  truncated to the requested size */
-	if (dst_len) {
-		/* Safety measure to not overflow the generated buffer */
-		if (dst_len > DATA_SIZE_BITS / 8)
-			dst_len = DATA_SIZE_BITS / 8;
-
-		memcpy(dst, jent_block_next_state + (DATA_SIZE_BITS / 8),
-		       dst_len);
-	}
-
-	/*
-	 * XDRBG: reseed
-	 * Set the V into the state.
-	 *
-	 * This invocation is the difference to XDRBG: the V state is 256 bits
-	 * instead of 512 bits as defined in XDRBG.
-	 */
-	jent_sha3_update(ctx, jent_block_next_state, DATA_SIZE_BITS / 8);
-	jent_memset_secure(jent_block_next_state, sizeof(jent_block_next_state));
-}
-
 void jent_drbg_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 			      size_t dst_len)
 {
-	if (ctx->r == JENT_SHA3_512_SIZE_BLOCK)
-		jent_xdrbg_sha3_512_generate_block(ctx, dst, dst_len);
-	else
-		jent_xdrbg256_generate_block(ctx, dst, dst_len);
+	jent_xdrbg256_generate_block(ctx, dst, dst_len);
 }
 
 /********************************** Selftest **********************************/
@@ -620,7 +541,7 @@ static int jent_xdrbg256_tester(void)
 	/*
 	 * Test vectors are generated using the leancrypto XDRBG implementation.
 	 */
-	uint8_t seed[] = {
+	static const uint8_t seed[] = {
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 	};
 	static const uint8_t exp[] = {
@@ -650,57 +571,20 @@ static int jent_xdrbg256_tester(void)
 	return 0;
 }
 
-static int jent_xdrbg_sha3_512_tester(void)
-{
-	HASH_CTX_ON_STACK(ctx);
-	uint8_t seed[] = {
-		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-	};
-	static const uint8_t exp[] = {
-		0x05, 0xc7, 0x63, 0xb5, 0x89, 0x42, 0xba, 0xe4,
-		0x00, 0xb9, 0xa8, 0x95, 0xff, 0xaf, 0x71, 0x9a,
-		0x8e, 0x18, 0x99, 0x0b, 0xb6, 0x6d, 0x59, 0xd6,
-		0x3e, 0x20, 0x5a, 0xde, 0xb5, 0x0c, 0x70, 0x3c
-	};
-	uint8_t act[sizeof(exp)] = { 0 };
-	unsigned int i;
-
-	BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != sizeof(exp));
-
-	jent_sha3_512_init(&ctx);
-	/* Initial seed */
-	jent_sha3_update(&ctx, seed, sizeof(seed));
-	jent_xdrbg_sha3_512_generate_block(&ctx, act, sizeof(act));
-	/* Reseeding */
-	jent_sha3_update(&ctx, seed, sizeof(seed));
-	jent_xdrbg_sha3_512_generate_block(&ctx, act, sizeof(act));
-
-	for (i = 0; i < sizeof(exp); i++) {
-		if (exp[i] != act[i])
-			return 1;
-	}
-
-	return 0;
-}
-
-static int jent_sha3_512_tester(void)
+static int jent_sha3_256_tester(void)
 {
 	HASH_CTX_ON_STACK(ctx);
 	static const uint8_t msg[] = { 0x5E, 0x5E, 0xD6 };
 	static const uint8_t exp[] = {
-		0x73, 0xDE, 0xE5, 0x10, 0x3A, 0xE5, 0xC1, 0x7E, 0x38, 0xFA,
-		0x2C, 0xE2, 0xF4, 0x4B, 0x6F, 0x4C, 0xCA, 0x67, 0x99, 0x1B,
-		0xDC, 0x9E, 0x9A, 0x9E, 0x23, 0x19, 0xF9, 0xC5, 0x9A, 0x23,
-		0x3A, 0x9A, 0xE8, 0x59, 0xB2, 0x83, 0xE1, 0xF2, 0x03, 0x10,
-		0xF5, 0x96, 0x04, 0x0A, 0x7D, 0x6A, 0x2C, 0xC9, 0xA5, 0x49,
-		0xDE, 0x80, 0x09, 0x38, 0x4B, 0xB7, 0x0B, 0x0B, 0xE5, 0xA5,
-		0x55, 0x66, 0x6A, 0xD7
+		0xF1, 0x6E, 0x66, 0xC0, 0x43, 0x72, 0xB4, 0xA3, 0xE1, 0xE3,
+		0x2E, 0x07, 0xC4, 0x1C, 0x03, 0x40, 0x8A, 0xD5, 0x43, 0x86,
+		0x8C, 0xC4, 0x0E, 0xC5, 0x5E, 0x00, 0xBB, 0xBB, 0xBD, 0xF5,
+		0x91, 0x1E
 	};
-
 	uint8_t act[sizeof(exp)] = { 0 };
 	unsigned int i;
 
-	jent_sha3_512_init(&ctx);
+	jent_sha3_256_init(&ctx);
 	jent_sha3_update(&ctx, msg, sizeof(msg));
 	jent_sha3_final(&ctx, act);
 
@@ -712,13 +596,9 @@ static int jent_sha3_512_tester(void)
 	return 0;
 }
 
-int jent_sha3_tester(unsigned int sha3_512)
+int jent_sha3_tester(void)
 {
-	if (jent_sha3_512_tester())
+	if (jent_sha3_256_tester())
 		return 1;
-	if (sha3_512)
-		return jent_xdrbg_sha3_512_tester();
-
 	return jent_xdrbg256_tester();
 }
-

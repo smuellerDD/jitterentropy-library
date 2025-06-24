@@ -33,8 +33,6 @@ extern "C"
 
 #define JENT_SHA3_256_SIZE_BLOCK                                               \
 	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_256_SIZE_DIGEST_BITS)
-#define JENT_SHA3_512_SIZE_BLOCK                                               \
-	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_512_SIZE_DIGEST_BITS)
 
 #define JENT_XDRBG_SIZE_STATE		64
 
@@ -64,13 +62,13 @@ static inline unsigned int jent_sha3_rate(void *hash_state)
 	return ctx->r;
 }
 
-void jent_sha3_512_init(struct jent_sha_ctx *ctx);
+void jent_sha3_256_init(struct jent_sha_ctx *ctx);
 void jent_sha3_update(struct jent_sha_ctx *ctx, const uint8_t *in,
 		      size_t inlen);
 void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest);
 int jent_sha3_alloc(void **hash_state);
 void jent_sha3_dealloc(void *hash_state);
-int jent_sha3_tester(unsigned int xdrbg);
+int jent_sha3_tester(void);
 
 void jent_shake256_init(struct jent_sha_ctx *ctx);
 static inline void jent_shake256_set_digestsize(struct jent_sha_ctx *ctx,

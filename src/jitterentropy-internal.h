@@ -169,12 +169,10 @@ extern "C" {
 
 #define JENT_SHA3_256_SIZE_DIGEST_BITS	256
 #define JENT_SHA3_256_SIZE_DIGEST	(JENT_SHA3_256_SIZE_DIGEST_BITS >> 3)
-#define JENT_SHA3_512_SIZE_DIGEST_BITS	512
-#define JENT_SHA3_512_SIZE_DIGEST	(JENT_SHA3_512_SIZE_DIGEST_BITS >> 3)
 
 /*
  * The output 256 bits can receive more than 256 bits of min entropy,
- * of course, but the 256-bit output of SHA3-512_256(M) / XDRBG-256(M) can only
+ * of course, but the 256-bit output of XDRBG-256(M) can only
  * asymptotically approach 256 bits of min entropy, not attain that bound.
  * Random maps will tend to have output collisions, which reduces the creditable
  * output entropy (that is what SP 800-90B Section 3.1.5.1.2 attempts to bound).
