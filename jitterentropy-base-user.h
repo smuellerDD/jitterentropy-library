@@ -284,6 +284,16 @@ static inline void *jent_zalloc(size_t len)
 	return tmp;
 }
 
+static inline void jent_memset_secure(void *s, size_t n)
+{
+#if defined(AWSLC)
+	OPENSSL_cleanse(s, n);
+#else
+	memset(s, 0, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
+#endif
+}
+
 static inline void jent_zfree(void *ptr, unsigned int len)
 {
 #ifdef LIBGCRYPT
@@ -297,7 +307,7 @@ static inline void jent_zfree(void *ptr, unsigned int len)
 	OPENSSL_cleanse(ptr, len);
 	OPENSSL_free(ptr);
 #else
-	memset(ptr, 0, len);
+	jent_memset_secure(ptr, len);
 	free(ptr);
 #endif /* LIBGCRYPT */
 }
@@ -327,16 +337,6 @@ static inline int jent_fips_enabled(void)
 		return 1;
 	else
 		return 0;
-#endif
-}
-
-static inline void jent_memset_secure(void *s, size_t n)
-{
-#if defined(AWSLC)
-	OPENSSL_cleanse(s, n);
-#else
-	memset(s, 0, n);
-	__asm__ __volatile__("" : : "r" (s) : "memory");
 #endif
 }
 
