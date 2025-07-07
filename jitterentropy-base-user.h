@@ -70,8 +70,7 @@
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 #ifdef LIBGCRYPT
-#include <config.h>
-#include "g10lib.h"
+#include <gcrypt.h>
 #endif
 
 #ifdef OPENSSL
@@ -305,7 +304,7 @@ static inline void jent_zfree(void *ptr, unsigned int len)
 static inline int jent_fips_enabled(void)
 {
 #ifdef LIBGCRYPT
-	return fips_mode();
+	return gcry_fips_mode_active();
 #elif defined(AWSLC)
 	return FIPS_mode();
 #elif defined(OPENSSL)
