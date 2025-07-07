@@ -232,16 +232,7 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	 * this point cannot deduce the random numbers produced by the
 	 * Jitter RNG prior to this point.
 	 */
-	/*
-	 * If we use secured memory, where backtracking support may not be
-	 * needed because the state is protected in a different method,
-	 * it is permissible to drop this support. But strongly weigh the
-	 * pros and cons considering that the SHA3 operation is not that
-	 * expensive.
-	 */
-#ifndef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 	jent_read_random_block(ec, NULL, 0);
-#endif
 
 err:
 	jent_notime_unsettick(ec);
