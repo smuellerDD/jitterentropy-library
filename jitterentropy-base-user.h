@@ -74,10 +74,7 @@
 #endif
 
 #ifdef OPENSSL
-#include <openssl/crypto.h>
-#ifdef OPENSSL_FIPS
-#include <openssl/fips.h>
-#endif
+#include <openssl/evp.h>
 #endif
 
 #if defined(AWSLC)
@@ -309,11 +306,7 @@ static inline int jent_fips_enabled(void)
 #elif defined(AWSLC)
 	return FIPS_mode();
 #elif defined(OPENSSL)
-#ifdef OPENSSL_FIPS
-	return 1;
-#else
-	return 0;
-#endif
+	return EVP_default_properties_is_fips_enabled(NULL);
 #else
 #define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
 	char buf[2] = "0";
@@ -332,7 +325,7 @@ static inline int jent_fips_enabled(void)
 
 static inline void jent_memset_secure(void *s, size_t n)
 {
-#if defined(AWSLC)
+#if defined(AWSLC) || defined(OPENSSL)
 	OPENSSL_cleanse(s, n);
 #else
 	memset(s, 0, n);
