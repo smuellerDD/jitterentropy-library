@@ -286,10 +286,11 @@ static inline void *jent_zalloc(size_t len)
 static inline void jent_zfree(void *ptr, unsigned int len)
 {
 #ifdef LIBGCRYPT
-	memset(ptr, 0, len);
+	/* gcry_free automatically wipes memory allocated with
+	 * gcry_(x)malloc_secure */
 	gcry_free(ptr);
 #elif defined(AWSLC)
-    /* AWS-LC stores the length of allocated memory internally and automatically wipes it in OPENSSL_free */
+	/* AWS-LC stores the length of allocated memory internally and automatically wipes it in OPENSSL_free */
 	(void) len;
 	OPENSSL_free(ptr);
 #elif defined(OPENSSL)
