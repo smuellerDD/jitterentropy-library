@@ -74,6 +74,7 @@
 #endif
 
 #ifdef OPENSSL
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #endif
 
@@ -267,9 +268,15 @@ static inline void *jent_zalloc(size_t len)
 	 * decision for less memory protection. */
 #define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 	tmp = gcry_xmalloc_secure(len);
-#elif defined(OPENSSL) || defined(AWSLC)
-	/* Does this allocation implies secure memory use? */
+#elif defined(AWSLC)
 	tmp = OPENSSL_malloc(len);
+#elif defined(OPENSSL)
+	if (!CRYPTO_secure_malloc_initialized() &&
+	    !CRYPTO_secure_malloc_init(32768, 32)) {
+		return NULL;
+	}
+#define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
+	tmp = OPENSSL_secure_malloc(len);
 #else
 	/* we have no secure memory allocation! Hence
 	 * we do not set CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
@@ -292,7 +299,7 @@ static inline void jent_zfree(void *ptr, unsigned int len)
 	OPENSSL_free(ptr);
 #elif defined(OPENSSL)
 	OPENSSL_cleanse(ptr, len);
-	OPENSSL_free(ptr);
+	OPENSSL_secure_free(ptr);
 #else
 	memset(ptr, 0, len);
 	free(ptr);
