@@ -83,7 +83,7 @@ static inline void *jent_zalloc(size_t len)
 {
 	void *tmp = NULL;
 	/* we have no secure memory allocation! Hence
-	 * we do not sed CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
+	 * we do not set CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
 #if defined(AWSLC)
 	tmp = OPENSSL_malloc(len);
 #else

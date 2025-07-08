@@ -61,7 +61,7 @@ static inline void *jent_zalloc(size_t len)
 {
 	void *tmp = NULL;
 	/* we have no secure memory allocation! Hence
-	 * we do not sed CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
+	 * we do not set CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
 	tmp = malloc(len);
 	if(NULL != tmp)
 		memset(tmp, 0, len);
