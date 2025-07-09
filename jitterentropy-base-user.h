@@ -262,6 +262,15 @@ static inline void *jent_zalloc(size_t len)
 {
 	void *tmp = NULL;
 #ifdef LIBGCRYPT
+	/* Set the maximum usable locked memory to 2 MiB at fist call.
+	 *
+	 * You may have to adapt or delete this, if you
+	 * also use libgcrypt at other places in your software!
+	 */
+	if (!gcry_control (GCRYCTL_INITIALIZATION_FINISHED_P)) {
+		gcry_control(GCRYCTL_INIT_SECMEM, 2097152, 0);
+		gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
+	}
 	/* When using the libgcrypt secure memory mechanism, all precautions
 	 * are taken to protect our state. If the user disables secmem during
 	 * runtime, it is his decision and we thus try not to overrule his
