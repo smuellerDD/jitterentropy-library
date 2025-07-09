@@ -272,7 +272,7 @@ static inline void *jent_zalloc(size_t len)
 	tmp = OPENSSL_malloc(len);
 #elif defined(OPENSSL)
 	/* We only call secure malloc initialization here,
-	 * if not already done. The 64 KiB reserved here
+	 * if not already done. The 2 MiB max. reserved here
 	 * are sufficient for jitterentropy but probably
 	 * too small for a whole application doing crypto
 	 * operations with OpenSSL.
@@ -283,7 +283,7 @@ static inline void *jent_zalloc(size_t len)
 	 * May preallocate more before making the first
 	 * call into jitterentropy!*/
 	if (CRYPTO_secure_malloc_initialized() ||
-	    CRYPTO_secure_malloc_init(65536, 32)) {
+	    CRYPTO_secure_malloc_init(2097152, 32)) {
 		tmp = OPENSSL_secure_malloc(len);
 	}
 #define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
