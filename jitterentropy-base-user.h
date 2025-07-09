@@ -282,25 +282,22 @@ static inline void *jent_zalloc(size_t len)
 	 *
 	 * May preallocate more before making the first
 	 * call into jitterentropy!*/
-	if (!CRYPTO_secure_malloc_initialized() &&
-	    !CRYPTO_secure_malloc_init(65536, 32)) {
-		goto out;
+	if (CRYPTO_secure_malloc_initialized() ||
+	    CRYPTO_secure_malloc_init(65536, 32)) {
+		tmp = OPENSSL_secure_malloc(len);
 	}
 #define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
-	tmp = OPENSSL_secure_malloc(len);
-	/* If secure memory was not available, OpenSSL 
+	/* If secure memory was not available, OpenSSL
 	 * falls back to "normal" memory. So double check. */
-	if (!CRYPTO_secure_allocated(tmp)) {
+	if (tmp && !CRYPTO_secure_allocated(tmp)) {
 		OPENSSL_secure_free(tmp);
 		tmp = NULL;
-		goto out;
 	}
 #else
 	/* we have no secure memory allocation! Hence
 	 * we do not set CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
 	tmp = malloc(len);
 #endif /* LIBGCRYPT */
-out:
 	if(NULL != tmp)
 		memset(tmp, 0, len);
 	return tmp;
