@@ -162,6 +162,12 @@ int jent_set_fips_failure_callback(jent_fips_failure_cb cb);
 JENT_PRIVATE_STATIC
 unsigned int jent_version(void);
 
+/* return secure memory support, must be done
+ * in jitterentropy itself, as users may not define
+ * a crypto library and so the define in jitterentropy-base-user.h
+ * is not set for them. */
+JENT_PRIVATE_STATIC
+int jent_secure_memory_supported(void);
 
 /**
  * Function pointer data structure to register an external thread handler
