@@ -89,6 +89,22 @@ unsigned int jent_version(void)
 	return JENT_VERSION;
 }
 
+/*
+ * jent_secure_memory_supported() - Return if secure memory is used
+ *
+ * Secure memory uses guard pages, swap protection and zeroize on
+ * free.
+ */
+JENT_PRIVATE_STATIC
+int jent_secure_memory_supported(void)
+{
+#ifdef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
+	return 1;
+#else
+	return 0;
+#endif
+}
+
 /***************************************************************************
  * Helper
  ***************************************************************************/
