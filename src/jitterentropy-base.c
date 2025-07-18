@@ -591,16 +591,15 @@ static struct rand_data
 	}
 
 	/*
-	 * Assure, that we always have 512 bit entropy in our hash state
-	 * before outputting a block by adding at least 256 bit before first
-	 * usage. 512 bit (XDRBG-256) are always transferred to the next state
-	 * after the generation completes.
-	 *
 	 * For NTG.1: already perform the startup stages here.
 	 */
-	do {
-		jent_random_data(entropy_collector);
-	} while(entropy_collector->startup_state != jent_startup_completed);
+	if (flags & JENT_NTG1) {
+		do {
+			/* re-enable initial seeding with 384 bit for every initiate stage. */
+			entropy_collector->initiate_done = 0;
+			jent_random_data(entropy_collector);
+		} while(entropy_collector->startup_state != jent_startup_completed);
+	}
 
 	return entropy_collector;
 

@@ -20,6 +20,7 @@
 
 #include "jitterentropy-noise.h"
 #include "jitterentropy-health.h"
+#include "jitterentropy-internal.h"
 #include "jitterentropy-timer.h"
 #include "jitterentropy-sha3.h"
 
@@ -492,8 +493,13 @@ static void jent_random_data_one(
 {
 	unsigned int k = 0, safety_factor = 0;
 
-	if (ec->fips_enabled)
-		safety_factor = ENTROPY_SAFETY_FACTOR;
+	if (ec->fips_enabled) {
+		if (!ec->initiate_done) {
+			safety_factor = ENTROPY_SAFETY_FACTOR_INITIATE;
+		} else {
+			safety_factor = ENTROPY_SAFETY_FACTOR;
+		}
+	}
 
 	while (!jent_health_failure(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
@@ -506,6 +512,11 @@ static void jent_random_data_one(
 		 */
 		if (++k >= ((DATA_SIZE_BITS + safety_factor) * ec->osr))
 			break;
+	}
+
+	if (ec->fips_enabled && !ec->initiate_done) {
+		/* only complete initiate, when all measured events were usable */
+		ec->initiate_done = !jent_health_failure(ec);
 	}
 }
 

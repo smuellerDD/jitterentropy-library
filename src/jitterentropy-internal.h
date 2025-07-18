@@ -171,18 +171,28 @@ extern "C" {
 #define JENT_SHA3_256_SIZE_DIGEST	(JENT_SHA3_256_SIZE_DIGEST_BITS >> 3)
 
 /*
+ * The cryptographic postprocessing using XDRBG is initiated and reseeded
+ * by following the RBG3(RS) definition in SP800-90C 4pd with the goal of
+ * providing full entropy with prediction resistance. Please note, that
+ * jitterentropy only follows this definition algorithmically, as a RBG3(RS)
+ * construction would need a physical entropy source!
+ *
  * The output 256 bits can receive more than 256 bits of min entropy,
  * of course, but the 256-bit output of XDRBG-256(M) can only
  * asymptotically approach 256 bits of min entropy, not attain that bound.
  * Random maps will tend to have output collisions, which reduces the creditable
  * output entropy (that is what SP 800-90B Section 3.1.5.1.2 attempts to bound).
  *
- * The value "64" is justified in Appendix A.4 of the current 90C draft,
+ * The value "64" as ENTROPY_SAFETY_FACTOR is justified in NIST IR 8427
  * and aligns with NIST's in "epsilon" definition in this document, which is
  * that a string can be considered "full entropy" if you can bound the min
  * entropy in each bit of output to at least 1-epsilon, where epsilon is
  * required to be <= 2^(-32).
+ *
+ * SP800-90C 4pd mandates to use s + 128 of full entropy for initiate of a
+ * RBG3(RS) and also these 64 for every reseed regarding full entropy outputs.
  */
+#define ENTROPY_SAFETY_FACTOR_INITIATE	128
 #define ENTROPY_SAFETY_FACTOR		64
 
 enum jent_startup_state {
@@ -265,6 +275,12 @@ struct rand_data
 	unsigned int fips_enabled:1;
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
 	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
+
+	/* RBG initiate done?
+	 * 1 -> yes: s + 64 bit of entropy needed for every s output bit
+	 * 0 -> no:  s + 128 bit of entropy needed for every s output bit
+	 */
+	unsigned int initiate_done:1; 	/* used to track add. safety factor */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
