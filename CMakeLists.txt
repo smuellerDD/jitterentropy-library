@@ -1,12 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(jitterentropy C)
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
 
 option(STACK_PROTECTOR "Compile Jitter with stack protector enabled" ON)
 option(INTERNAL_TIMER "Compile Jitter with the internal thread based timer" ON)
 option(EXTERNAL_CRYPTO "Compile Jitter and use an external libcrypto, valid options are [AWSLC, OPENSSL, LIBGCRYPT]")
-option(OLDER_GLIBC "Compile Jitter and use an older versions of pthread symbols (create and join)" OFF)
 option(AARCH64_NSTIME_REGISTER "Name of the register that should be used in jent_get_nstime function")
 
 # CMake defines the variable MSVC to true automatically when building with MSVC, replicate that for other compilers
@@ -24,10 +23,6 @@ endif()
 
 if(EXTERNAL_CRYPTO)
     list(APPEND JITTER_C_FLAGS  -D${EXTERNAL_CRYPTO})
-endif()
-
-if(OLDER_GLIBC)
-    list(APPEND JITTER_C_FLAGS  -DUSE_OLDER_GLIBC)
 endif()
 
 if (AARCH64_NSTIME_REGISTER)
@@ -87,10 +82,18 @@ target_sources(${PROJECT_NAME} PRIVATE ${JITTER_SRC})
 set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER "jitterentropy.h;jitterentropy-base-user.h")
 target_compile_options(${PROJECT_NAME} PRIVATE ${JITTER_C_FLAGS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${JITTER_LINKER_FLAGS})
-install(TARGETS ${PROJECT_NAME})
+install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/arch
+    DESTINATION include
+    FILES_MATCHING PATTERN "*.h"
+)
+install(TARGETS ${PROJECT_NAME}
+    INCLUDES DESTINATION include
+)
 
 target_include_directories(${PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/arch>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 
 if(EXTERNAL_CRYPTO STREQUAL "AWSLC")

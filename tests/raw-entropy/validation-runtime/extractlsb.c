@@ -29,9 +29,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+
+#ifdef _MSC_VER
+#include <io.h>
+#define open  _open
+#define close _close
+#else
+#include <unistd.h>
+#endif
 
 #define BITS_PER_SAMPLE 64
 
@@ -186,9 +193,13 @@ int main(int argc, char *argv[])
 
 		i++;
 
+#if defined(_MSC_VER)
+		res = strtok_s(buf, " ", &saveptr);
+#else
 		res = strtok_r(buf, " ", &saveptr);
+#endif
 		if (!res) {
-			printf("strtok_r error\n");
+			printf("strtok_r/s error\n");
 			return 1;
 		}
 

@@ -21,21 +21,25 @@
 #include "jitterentropy-base.h"
 #include "jitterentropy-timer.h"
 
+/* Timer-less entropy source */
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
+#if __MINGW32__
+#include <pthread.h>
 struct jent_notime_ctx {
-	pthread_attr_t notime_pthread_attr;	/* pthreads library */
-	pthread_t notime_thread_id;		/* pthreads thread ID */
+	pthread_attr_t notime_pthread_attr;     /* pthreads library */
+	pthread_t notime_thread_id;             /* pthreads thread ID */
 };
+#else
+#include <threads.h>
+struct jent_notime_ctx {
+	thrd_t notime_thread_id;                /* thread ID */
+};
+#endif
 
 /***************************************************************************
  * Thread handler
  ***************************************************************************/
-
-#ifdef USE_OLDER_GLIBC
-__asm__(".symver pthread_join, pthread_join@GLIBC_2.2.5");
-__asm__(".symver pthread_create, pthread_create@GLIBC_2.2.5");
-#endif
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 JENT_PRIVATE_STATIC
@@ -77,29 +81,55 @@ void jent_notime_fini(void *ctx) { (void)ctx; }
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 static int jent_notime_start(void *ctx,
-			     void *(*start_routine) (void *), void *arg)
+#ifdef __MINGW32__
+			    void *(*start_routine) (void *),
+#else
+			    int (*start_routine) (void *),
+#endif
+			    void *arg)
 {
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
+#if __MINGW32__
 	int ret;
+#endif
 
 	if (!thread_ctx)
 		return -EINVAL;
 
+#if __MINGW32__
 	ret = -pthread_attr_init(&thread_ctx->notime_pthread_attr);
 	if (ret)
 		return ret;
-
 	return -pthread_create(&thread_ctx->notime_thread_id,
 			       &thread_ctx->notime_pthread_attr,
 			       start_routine, arg);
+#else
+	switch (thrd_create(&thread_ctx->notime_thread_id, start_routine, arg)) {
+	case thrd_success:
+		return 0;
+	case thrd_nomem:
+		return -ENOMEM;
+	case thrd_timedout:
+		return -ETIMEDOUT;
+	case thrd_busy:
+		return -EBUSY;
+	case thrd_error:
+	default:
+		return -EINVAL;
+	}
+#endif
 }
 
 static void jent_notime_stop(void *ctx)
 {
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
 
+#if __MINGW32__
 	pthread_join(thread_ctx->notime_thread_id, NULL);
 	pthread_attr_destroy(&thread_ctx->notime_pthread_attr);
+#else
+	thrd_join(thread_ctx->notime_thread_id, NULL);
+#endif
 }
 
 static struct jent_notime_thread jent_notime_thread_builtin = {
@@ -134,7 +164,11 @@ static struct jent_notime_thread *notime_thread = &jent_notime_thread_builtin;
  * counter function. It conceptually acts as the low resolution
  * samples timer from a ring oscillator.
  */
+#ifdef __MINGW32__
 static void *jent_notime_sample_timer(void *arg)
+#else
+static int jent_notime_sample_timer(void *arg)
+#endif
 {
 	struct rand_data *ec = (struct rand_data *)arg;
 
@@ -142,12 +176,17 @@ static void *jent_notime_sample_timer(void *arg)
 
 	while (1) {
 		if (ec->notime_interrupt)
-			return NULL;
+			goto out;
 
 		ec->notime_timer++;
 	}
 
+out:
+#ifdef __MINGW32__
 	return NULL;
+#else
+	return 0;
+#endif
 }
 
 /*
