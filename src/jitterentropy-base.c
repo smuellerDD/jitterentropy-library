@@ -591,12 +591,16 @@ static struct rand_data
 	}
 
 	/*
-	 * Assure, that we always have 512 bit entropy in our hash state
-	 * before outputting a block by adding at least 256 bit before first
-	 * usage. 512 bit (XDRBG-256) are always transferred to the next state
-	 * after the generation completes.
+	 * Assure, that we always have 512 bits (NTG.1 compliance due to
+	 * startup_state is set to 2) or 256 bits (other cases) entropy in
+	 * our hash state before outputting a block by adding at least 256 bits
+	 * before first usage. 512 bits are always transferred to the next state
+	 * before the actual generation of random numbers to be returned to the
+	 * caller. The size is due to the XDRBG state variable.
 	 *
-	 * For NTG.1: already perform the startup stages here.
+	 * For NTG.1: already perform the startup stages guaranteeing the
+	 * invocation of 2 noise sources each delivering 240 bits of entropy
+	 * at least at this point.
 	 */
 	do {
 		jent_random_data(entropy_collector);

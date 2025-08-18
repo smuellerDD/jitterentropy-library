@@ -1,4 +1,4 @@
-/* Jitter RNG: SHA-3 Implementation
+/* Jitter RNG: Keccak / SHA-3 / SHAKE / XDRBG Implementation
  *
  * Copyright (C) 2021 - 2025, Stephan Mueller <smueller@chronox.de>
  *
