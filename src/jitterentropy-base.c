@@ -546,8 +546,15 @@ static struct rand_data
 	 */
 	jent_shake256_init(entropy_collector->hash_state);
 
-	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled())
+	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled()) {
+		/*
+		 * NIST explicitly suggested to use an identical approach
+		 * to the initialization of the conditioner as specified
+		 * for the NTG.1 compliance.
+		 */
+		entropy_collector->startup_state = jent_startup_memory;
 		entropy_collector->fips_enabled = 1;
+	}
 
 	/* Set the oversampling rate */
 	entropy_collector->osr = osr;
@@ -591,7 +598,7 @@ static struct rand_data
 	}
 
 	/*
-	 * Assure, that we always have 512 bits (NTG.1 compliance due to
+	 * Assure, that we always have 512 bits (NTG.1 / FIPS compliance due to
 	 * startup_state is set to 2) or 256 bits (other cases) entropy in
 	 * our hash state before outputting a block by adding at least 256 bits
 	 * before first usage. 512 bits are always transferred to the next state
