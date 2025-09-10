@@ -211,18 +211,18 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 
 static inline uint64_t jent_delta2(struct rand_data *ec, uint64_t current_delta)
 {
-	/* Note that delta2_n = |delta_n - delta_{n-1}| */
-	return jent_delta_abs(JENT_LAG_HISTORY(ec, 0), current_delta);
+	/* Note that delta2_n = delta_n - delta_{n-1} */
+	return jent_delta(JENT_LAG_HISTORY(ec, 0), current_delta);
 }
 
 static inline uint64_t jent_delta3(struct rand_data *ec, uint64_t delta2)
 {
 	/*
-	 * Note that delta3_n = |delta2_n - delta2_{n-1}|
-	 *		      = |delta2_n - |delta_{n-1} - delta_{n-2}||
+	 * Note that delta3_n = delta2_n - delta2_{n-1}
+	 *		      = delta2_n - (delta_{n-1} - delta_{n-2})
 	 */
-	return jent_delta_abs(jent_delta_abs(JENT_LAG_HISTORY(ec, 1),
-					     JENT_LAG_HISTORY(ec, 0)), delta2);
+	return jent_delta(jent_delta(JENT_LAG_HISTORY(ec, 1),
+				     JENT_LAG_HISTORY(ec, 0)), delta2);
 }
 
 #else /* JENT_HEALTH_LAG_PREDICTOR */

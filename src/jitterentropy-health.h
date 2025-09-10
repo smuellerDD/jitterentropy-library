@@ -40,6 +40,7 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 	return (next - prev);
 }
 
+#if 0
 static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 {
 	/*
@@ -48,6 +49,7 @@ static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 	 */
 	return (next > prev) ? (next - prev) : (prev - next);
 }
+#endif
 
 /* RCT: Intermittent cutoff threshold for alpha = 2**-30 */
 #define JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(x) ((x) * 30)
