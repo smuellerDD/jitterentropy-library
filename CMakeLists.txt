@@ -127,7 +127,7 @@ if(EXTERNAL_CRYPTO)
                 )
     else()
         find_library(LIBCRYPTO_LIBRARY
-                NAMES "${EXTERNAL_CRYPTO_LIBRARY_NAME}.so" "${EXTERNAL_CRYPTO_LIBRARY_NAME}.dylib" "${EXTERNAL_CRYPTO_LIBRARY_NAME}.dll"
+                NAMES "${EXTERNAL_CRYPTO_LIBRARY_NAME}.a" "${EXTERNAL_CRYPTO_LIBRARY_NAME}.lib"
                 HINTS "${CMAKE_INSTALL_PREFIX}"
                 PATH_SUFFIXES build/crypto build lib64 lib
                 )
