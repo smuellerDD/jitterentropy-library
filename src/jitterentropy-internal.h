@@ -87,7 +87,9 @@ extern "C" {
  * Shall the jent_memaccess use a (statistically) random selection for the
  * memory to update?
  */
+#ifndef JENT_MEASURE_RAW_MEMORY_ACCESS
 #define JENT_RANDOM_MEMACCESS
+#endif
 
 /*
  * Mask specifying the number of bits of the raw entropy data of the time delta

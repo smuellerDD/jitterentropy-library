@@ -99,9 +99,13 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	/* Enable full SP800-90B health test handling */
 	ec->fips_enabled = 1;
 
-#ifdef JENT_RANDOM_MEMACCESS
 	/* Print the size of the memory region. */
-        printf("Memory size: %" PRIu32 "\n", ec->memmask + 1);
+#ifdef JENT_RANDOM_MEMACCESS
+	printf("Random memory access - Memory size: %" PRIu32 "\n",
+	       ec->memmask + 1);
+#else
+	printf("Deterministic memory access - Memory size: %" PRIu32 "\n",
+	       ec->memblocksize * ec->memblocks);
 #endif
 
 
