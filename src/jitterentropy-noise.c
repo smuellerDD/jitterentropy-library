@@ -326,7 +326,7 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 	/*
 	 * Get time stamp to only measure the execution time of the memory
 	 * access to make this part an independent entropy source (even
-         * excluding the SHA3 update to insert the data into the entropy pool).
+	 * excluding the SHA3 update to insert the data into the entropy pool).
 	 */
 	jent_get_nstime_internal(ec, &ec->prev_time);
 
@@ -345,9 +345,9 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 				   ec->jent_common_timer_gcd;
 
 	/*
-         * Check whether we have a stuck measurement - and apply the health
-         * tests.
-         */
+	 * Check whether we have a stuck measurement - and apply the health
+	 * tests.
+	 */
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Domain separation */
@@ -386,7 +386,7 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	/*
 	 * Get time stamp to only measure the execution time of the hash loop
 	 * to make this part an independent entropy source (even excluding the
-         * SHA3 update to insert the data into the entropy pool).
+	 * SHA3 update to insert the data into the entropy pool).
 	 */
 	jent_get_nstime_internal(ec, &ec->prev_time);
 
@@ -409,9 +409,9 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 				   ec->jent_common_timer_gcd;
 
 	/*
-         * Check whether we have a stuck measurement - and apply the health
-         * tests.
-         */
+	 * Check whether we have a stuck measurement - and apply the health
+	 * tests.
+	 */
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Domain separation */
