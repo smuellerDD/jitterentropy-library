@@ -453,7 +453,11 @@ static inline uint32_t jent_memsize(unsigned int flags)
 	}
 
 	/* Allocate memory for adding variations based on memory access */
+#ifdef JENT_TESTING_MEMSIZE_NO_BOUNDSCHECK
+	cache_memsize = 0xffffffff;
+#else
 	cache_memsize = jent_cache_size_roundup();
+#endif
 	memsize = cache_memsize << JENT_CACHE_SHIFT_BITS;
 
 	/* If this value is left-shifted too much, it may be cleared. */
