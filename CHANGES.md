@@ -1,5 +1,13 @@
-3.6.4
+3.7.0
  * Update supported CMake version to 3.10
+ * doc: use Doxygen-style comments
+ * NTG.1 compliance: Modify startup such that the memory access and SHA-3 loop are treated as independent noise sources which are sampled to collect at least 240 bits each before first block of random numbers is released
+ * Remove all code when JENT_CONF_DISABLE_LOOP_SHUFFLE is unset. This code is already discouraged for a long time. Now it is taken out for good.
+ * If cache size cannot be detected from base system (e.g. virtualization), use the requested memory size.
+ * Change the stuck test to always calculate the absolute values of the 2nd and 3rd discrete derivation of time.
+* Replace SHA3-256 output generation with XDRBG-256
+* Prune the jitterentropy.h header file of internal definitions and delcarations which are moved to src/jitterentropy-internal.h. With that, jitterentropy.h only contains the API. This modification does not alter the Jitter RNG behavior at all.
+* Update secure storage memory implementation for libgcrypt and OpenSSL
 
 3.6.3
  * Correct time stamp processing on AIX

@@ -31,6 +31,7 @@ __asm__(".symver pthread_join, pthread_join@GLIBC_2.2.5");
 __asm__(".symver pthread_create, pthread_create@GLIBC_2.2.5");
 #endif
 
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 JENT_PRIVATE_STATIC
 int jent_notime_init(void **ctx)
 {
@@ -61,6 +62,13 @@ void jent_notime_fini(void *ctx)
 	if (thread_ctx)
 		free(thread_ctx);
 }
+
+#else /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
+int jent_notime_init(void **ctx) { (void)ctx; return 0; }
+void jent_notime_fini(void *ctx) { (void)ctx; }
+
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 static int jent_notime_start(void *ctx,
 			     void *(*start_routine) (void *), void *arg)

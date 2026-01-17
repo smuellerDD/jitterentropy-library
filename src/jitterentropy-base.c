@@ -89,6 +89,22 @@ unsigned int jent_version(void)
 	return JENT_VERSION;
 }
 
+/*
+ * jent_secure_memory_supported() - Return if secure memory is used
+ *
+ * Secure memory uses guard pages, swap protection and zeroize on
+ * free.
+ */
+JENT_PRIVATE_STATIC
+int jent_secure_memory_supported(void)
+{
+#ifdef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
+	return 1;
+#else
+	return 0;
+#endif
+}
+
 /***************************************************************************
  * Helper
  ***************************************************************************/
@@ -307,10 +323,15 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		case -5:
 			apt_observations = (*ec)->apt_observations;
 			current_delta = (*ec)->apt_base;
+#ifdef JENT_HEALTH_LAG_PREDICTOR
 			lag_prediction_success_run =
 				(*ec)->lag_prediction_success_run;
 			lag_prediction_success_count =
 				(*ec)->lag_prediction_success_count;
+#else
+			(void)lag_prediction_success_run;
+			(void)lag_prediction_success_count;
+#endif
 
 			osr = (*ec)->osr + 1;
 			flags = (*ec)->flags;
@@ -367,10 +388,12 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 					(int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr));
 
 				/* LAG re-initialization */
+#ifdef JENT_HEALTH_LAG_PREDICTOR
 				(*ec)->lag_prediction_success_run =
 					lag_prediction_success_run;
 				(*ec)->lag_prediction_success_count =
 					lag_prediction_success_count;
+#endif
 			}
 
 			/*
@@ -418,7 +441,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
  */
 static inline uint32_t jent_memsize(unsigned int flags)
 {
-	uint32_t cache_memsize=0, max_memsize=0, memsize=0;
+	uint32_t cache_memsize = 0, max_memsize = 0, memsize = 0;
 
 	max_memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
 
@@ -430,11 +453,21 @@ static inline uint32_t jent_memsize(unsigned int flags)
 	}
 
 	/* Allocate memory for adding variations based on memory access */
+#ifdef JENT_TESTING_MEMSIZE_NO_BOUNDSCHECK
+	cache_memsize = 0xffffffff;
+#else
 	cache_memsize = jent_cache_size_roundup();
+#endif
 	memsize = cache_memsize << JENT_CACHE_SHIFT_BITS;
+
 	/* If this value is left-shifted too much, it may be cleared. */
 	/* If so, set the maximum possible power of two. */
-	if (cache_memsize > memsize) memsize = 0x80000000;
+	if (cache_memsize > memsize)
+		memsize = 0x80000000;
+
+	/* If no memory size can be detected, use the requested size */
+	if (!memsize)
+		memsize = max_memsize;
 
 	/* Limit the memory as defined by caller */
 	memsize = (memsize > max_memsize) ? max_memsize : memsize;
@@ -512,21 +545,42 @@ static struct rand_data
 	if (jent_sha3_alloc(&entropy_collector->hash_state))
 		goto err;
 
-	/* Initialize the hash state */
-	jent_sha3_256_init(entropy_collector->hash_state);
+	/*
+	 * Initialize the hash state for the XDRBG
+	 */
+	jent_shake256_init(entropy_collector->hash_state);
+
+	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled()) {
+		/*
+		 * NIST explicitly suggested to use an identical approach
+		 * to the initialization of the conditioner as specified
+		 * for the NTG.1 compliance.
+		 */
+		entropy_collector->startup_state = jent_startup_memory;
+		entropy_collector->fips_enabled = 1;
+	}
 
 	/* Set the oversampling rate */
 	entropy_collector->osr = osr;
 	entropy_collector->flags = flags;
 
-	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled())
+	/*
+	 * BSI AIS 20/31 NTG.1 requires that during startup 2 noise sources
+	 * are sampled where each independently delivers 240 bits of entropy.
+	 * This is ensured by setting the startup state such that the memory
+	 * access is treated independently from the SHA3 operation and both
+	 * must separately deliver the requested amount of entropy.
+	 *
+	 * NTG.1 implies the enabling of the FIPS mode to apply noise source
+	 * oversampling and the enabling of the health tests.
+	 */
+	if (flags & JENT_NTG1) {
+		entropy_collector->startup_state = jent_startup_memory;
 		entropy_collector->fips_enabled = 1;
+	}
 
-	/* Initialize the APT */
-	jent_apt_init(entropy_collector, osr);
-
-	/* Initialize the Lag Predictor Test */
-	jent_lag_init(entropy_collector, osr);
+	/* Initialize the health tests */
+	jent_health_init(entropy_collector);
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
 	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {
@@ -546,6 +600,22 @@ static struct rand_data
 		if (jent_notime_enable(entropy_collector, flags))
 			goto err;
 	}
+
+	/*
+	 * Assure, that we always have 512 bits (NTG.1 / FIPS compliance due to
+	 * startup_state is set to 2) or 256 bits (other cases) entropy in
+	 * our hash state before outputting a block by adding at least 256 bits
+	 * before first usage. 512 bits are always transferred to the next state
+	 * before the actual generation of random numbers to be returned to the
+	 * caller. The size is due to the XDRBG state variable.
+	 *
+	 * For NTG.1: already perform the startup stages guaranteeing the
+	 * invocation of 2 noise sources each delivering 240 bits of entropy
+	 * at least at this point.
+	 */
+	do {
+		jent_random_data(entropy_collector);
+	} while(entropy_collector->startup_state != jent_startup_completed);
 
 	return entropy_collector;
 

@@ -49,19 +49,53 @@
 
 static inline void jent_get_nstime(uint64_t *out)
 {
-	uint64_t clk;
-	/* this is MVS code! enable with -S in the compiler */
-	/*__asm__ __volatile__("stck %0" : "=m" (clk) : : "cc"); */
-	/* this is gcc */
-	__asm__ __volatile__("stcke %0" : "=Q" (clk) : : "cc");
-	*out = (uint64_t)(clk);
+	/*
+	 * This is MVS+STCK code! Enable it with -S in the compiler.
+	 *
+	 * uint64_t clk;
+	 * __asm__ volatile("stck %0" : "=m" (clk) : : "cc");
+	 * *out = (uint64_t)(clk);
+	 */
+
+	/*
+	 * This is GCC+STCKE code. STCKE command and data format:
+	 * z/Architecture - Principles of Operation
+	 * http://publibz.boulder.ibm.com/epubs/pdf/dz9zr007.pdf
+	 *
+	 * The current value of bits 0-103 of the TOD clock is stored in bytes
+	 * 1-13 of the sixteen-byte output:
+	 *
+	 * bits 0-7: zeros (reserved for future extention)
+	 * bits 8-111: TOD Clock value
+	 * bits 112-127: Programmable Field
+	 *
+	 * Output bit 59 (TOD-Clock bit 51) effectively increments every
+	 * microsecond. Bits 60 to 111 of STCKE output are fractions of
+	 * a miscrosecond: bit 59 is 1.0us, bit 60 is .5us, bit 61 is .25us,
+	 * bit 62 is .125us, bit 63 is 62.5ns, etc.
+	 *
+	 * Some of these bits can be implemented, some not. 64 bits of
+	 * the TOD clock are implemented usually nowadays, these are
+	 * bits 8-71 of the output.
+	 *
+	 * The stepping value of TOD-clock bit position 63, if implemented,
+	 * is 2^-12 microseconds, or approximately 244 picoseconds. This value
+	 * is called a clock unit.
+	 */
+
+	uint8_t clk[16];
+
+        asm volatile("stcke %0" : "=Q" (clk) : : "cc");
+
+	/* s390x is big-endian, so just perfom a byte-by-byte copy */
+	*out = *(uint64_t *)(clk + 1);
 }
 
 static inline void *jent_zalloc(size_t len)
 {
 	void *tmp = NULL;
 	/* we have no secure memory allocation! Hence
-	 * we do not sed CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
+	 * we do not set CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
 	tmp = malloc(len);
 	if(NULL != tmp)
 		memset(tmp, 0, len);

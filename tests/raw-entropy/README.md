@@ -3,17 +3,25 @@
 This archive contains the SP800-90B analysis tool to be used for the Jitter RNG.
 The tool set consists of the following individual tools:
 
-- `recording_kernelspace`: This tool is used to gather the raw entropy of
-  the Linux kernel space Jitter RNG.
+- `recording_runtime_kernelspace`: This tool is used to gather the raw entropy
+  of the Linux kernel space Jitter RNG for the SP800-90B runtime data.
+
+- `recording_restart_kernelspace`: This tool is used to gather the raw entropy
+  of the Linux kernel space Jitter RNG for the SP800-90B restart data.
 
 - `recording_userspace`: This tools is used to gather the raw entropy of
-  the user space Jitter RNG implementation.
+  the user space Jitter RNG implementation for the SP800-90B runtime and
+  restart data.
 
 - `validation-runtime`: This tool is used to calculate the minimum entropy
-  values compliant to SP800-90B section 3.1.3.
+  values compliant to SP800-90B section 3.1.3. This tool tool is to be used
+  with the user space and kernel space runtime data obtained from the
+  aforementioned `recording_*` tools.
 
 - `validation-restart`: This tool is used to calculate the minimum entropy
-  values for the restart test compliant to SP800-90B section 3.1.4
+  values for the restart test compliant to SP800-90B section 3.1.4. This tool
+  is to be used with user space and kernel space restart data obtained from the
+  aforementioned `recording_*` tools.
 
 See the README files in the different subdirectories.
 

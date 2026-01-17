@@ -28,8 +28,9 @@
 #	interruption, the next reboot will continue collecting data for this
 #	test. The interruption does not affect the test data.
 #
-OUTFILE="/root/jent_raw_noise_restart"
-STATE="/root/jent_state"
+OUTDIR="/root/results-measurements"
+OUTFILE="$OUTDIR/jent-raw-noise-restart"
+STATE="$OUTDIR/jent_state"
 TESTS=1000
 
 # Location of libkcapi helper tool
@@ -68,13 +69,13 @@ if [ $testruns -ge $TESTS ]; then
 	systemctl stop boottime_test_record
 	systemctl disable boottime_test_record
 
-	uname -a > /root/platform.txt && 
-	cat /proc/cpuinfo >> /root/platform.txt &&
-	echo "" >> /root/platform.txt &&
-	cat /proc/cpuinfo >> /root/platform.txt &&
-	echo "" >> /root/platform.txt &&
-	echo "lspci" >> /root/platform.txt &&
-	lspci -vvv >> /root/platform.txt
+	uname -a > $OUTDIR/platform.txt &&
+	cat /proc/cpuinfo >> $OUTDIR/platform.txt &&
+	echo "" >> $OUTDIR/platform.txt &&
+	cat /proc/cpuinfo >> $OUTDIR/platform.txt &&
+	echo "" >> $OUTDIR/platform.txt &&
+	echo "lspci" >> $OUTDIR/platform.txt &&
+	lspci -vvv >> $OUTDIR/platform.txt
 
 	exit 0
 fi

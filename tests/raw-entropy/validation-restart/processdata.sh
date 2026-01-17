@@ -117,7 +117,7 @@ do
 		mask=${item%:*}
 		bits=${item#*:}
 
-		./$EXTRACT $file $filepath.${mask}bitout.var.data $filepath.${mask}bitout.single.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
+		./$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
 	done
 done
 
@@ -141,27 +141,16 @@ do
 		bits_field=${item#*:}
 		bits_list=`echo $bits_field | sed -e "s/,/ /g"`
 
-		infilesingle=$filepath.${mask}bitout.single.data
-		infilevar=$filepath.${mask}bitout.var.data
+		infile=$filepath.${mask}bitout.data
 
 		for bits in $bits_list
 		do
-			outfile=${filepath}.minentropy_${mask}_${bits}bits.single.txt
+			outfile=${filepath}.minentropy_${mask}_${bits}bits.txt
 			inprocess_file=$outfile
 			if [ ! -f $outfile ]
 			then
-				echo "Analyzing entropy for $infilesingle ${bits}-bit single" | tee -a $LOGFILE
-				$EATOOL -n -v $infilesingle ${bits} 0.333 > $outfile
-			else
-				echo "File $outfile already generated"
-			fi
-
-			outfile=${filepath}.minentropy_${mask}_${bits}bits.var.txt
-			inprocess_file=$outfile
-			if [ ! -f $outfile ]
-			then
-				echo "Analyzing entropy for $infilevar ${bits}-bit var" | tee -a $LOGFILE
-				$EATOOL -n -v $infilevar ${bits} 0.333 > $outfile
+				echo "Analyzing entropy for $infile ${bits}-bit single" | tee -a $LOGFILE
+				$EATOOL -n -v $infile ${bits} 0.333 > $outfile
 			else
 				echo "File $outfile already generated"
 			fi

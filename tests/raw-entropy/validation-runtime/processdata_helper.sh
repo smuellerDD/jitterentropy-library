@@ -2,6 +2,12 @@
 #
 # Process the entropy data
 
+if [ -z "$NONIID_DATA" ]
+then
+	echo "This script cannot be called by itself."
+	exit 1
+fi
+
 ############################################################
 # Configuration values                                     #
 ############################################################
@@ -16,7 +22,7 @@ RESULTS_DIR=${RESULTS_DIR:-"../results-analysis-runtime"}
 LOGFILE="$RESULTS_DIR/processdata.log"
 
 # point to the min entropy tool
-EATOOL="../SP800-90B_EntropyAssessment/cpp/ea_non_iid"
+EATOOL_NONIID=${EATOOL_NONIID:-"../../SP800-90B_EntropyAssessment/cpp/ea_non_iid"}
 
 # specify if you want to compile the extractlsb program in this script
 BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
@@ -35,17 +41,14 @@ MASK_LIST="0F:4 FF:8"
 # List used for ARM Cortext A9 and A7 processors
 #MASK_LIST="FF:4,8 7F8:4,8"
 
-# Number of samples to be extracted from the original file
-SAMPLES=1000000
+# Maximum number of entries to be extracted from the original file
+MAX_EVENTS=1000000
 
 ############################################################
 # Code only after this line -- do not change               #
 ############################################################
 
-#############################
-# Preparation
-#############################
-EXTRACT="extractlsb"
+EXTRACT=${EXTRACT:-"./extractlsb"}
 CFILE="extractlsb.c"
 
 if [ ! -d $ENTROPYDATA_DIR ]
@@ -59,19 +62,19 @@ then
 	mkdir $RESULTS_DIR
 	if [ $? -ne 0 ]
 	then
-		echo "ERROR: Directory for results $RESULTS_DIR could not be created"
+		echo "ERROR: Directory with raw entropy data $RESULTS_DIR could not be created"
 		exit 1
 	fi
 fi
 
-if [ ! -f $EATOOL ]
+if [ ! -f $EA_TOOL ]
 then
-	echo "ERROR: Path of Entropy Data tool $EATOOL is missing"
+	echo "ERROR: Path of Entropy Data tool $EA_TOOL is missing"
 	exit 1
 fi
 
 
-rm -f $RESULTS_DIR/*.txt $RESULTS_DIR/*.data $RESULTS_DIR/*.log
+rm -f $RESULTS_DIR/*.txt $RESULTS_DIR/*.data  $RESULTS_DIR/*.log
 
 trap "if [ "$BUILD_EXTRACT" = "yes" ]; then make clean; fi" 0 1 2 3 15
 
@@ -89,56 +92,51 @@ then
 	exit 1
 fi
 
-#############################
-# Actual data processing
-#############################
-
-#
-# Step 1: Convert input file
-#
-for item in $MASK_LIST
+for file in $NONIID_DATA
 do
-	mask=${item%:*}
+	file="$ENTROPYDATA_DIR/$file"
+	filepath=$RESULTS_DIR/`basename ${file%%.data}`
+	echo "Converting recorded entropy data $file into different bit output" | tee -a $LOGFILE
 
-	echo "Converting recorded entropy data into different bit output with mask $mask..." | tee -a $LOGFILE
-	out_file=$RESULTS_DIR/raw_noise.${mask}bitout.data
-	rm -f $out_file
+	for item in $MASK_LIST
+	do
+		mask=${item%:*}
+		bits=${item#*:}
+		
+		$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
 
-	in_file=$ENTROPYDATA_DIR/jent_raw_noise.data
-	if [ ! -f $in_file ]
-	then
-		echo "ERROR: File $in_file not found"
-		exit 1
-	fi
-
-	echo "Converting recorded entropy data $in_file into different bit output with mask $mask" >> $LOGFILE
-	./$EXTRACT $in_file $out_file $SAMPLES $mask >> $LOGFILE 2>&1
+	done
 done
 
 echo "" | tee -a $LOGFILE
 echo "Extraction finished. Now analyzing entropy for noise source ..." | tee -a $LOGFILE
 echo "" | tee -a $LOGFILE
-
-#
-# Step 2: Perform SP800-90B analysis
-#
-for item in $MASK_LIST
+ 
+for file in $NONIID_DATA
 do
-	mask=${item%:*}
-	bits_field=${item#*:}
-	bits_list=`echo $bits_field | sed -e "s/,/ /g"`
+	file="$ENTROPYDATA_DIR/$file"
+	filepath=$RESULTS_DIR/`basename ${file%%.data}`
 
-	in_file=$RESULTS_DIR/raw_noise.${mask}bitout.data
-
-	for bits in $bits_list
+	for item in $MASK_LIST
 	do
-		out_file=$RESULTS_DIR/raw_noise.minentropy_${mask}_${bits}bits.txt
-		if [ ! -f $out_file ]
-		then
-			echo "Analyzing entropy for $out_file ${bits}-bit..." | tee -a $LOGFILE
-			$EATOOL $in_file ${bits} -i -a -v > $out_file
-		else
-			echo "File $out_file already generated"
-		fi
+		mask=${item%:*}
+		bits_field=${item#*:}
+		bits_list=`echo $bits_field | sed -e "s/,/ /g"`
+
+		infile=$filepath.${mask}bitout.data
+
+		for bits in $bits_list
+		do	
+			outfile=${filepath}.minentropy_${mask}_${bits}bits.txt
+			inprocess_file=$outfile
+			if [ ! -f $outfile ]
+			then
+				echo "Analyzing entropy for $infile ${bits}-bit" | tee -a $LOGFILE
+				#python -u $EATOOL_NONIID -v $infilesingle $bits > $outfile
+				$EATOOL_NONIID -i -a -v $infile ${bits} > $outfile
+			else
+				echo "File $outfile already generated"
+			fi
+		done
 	done
 done

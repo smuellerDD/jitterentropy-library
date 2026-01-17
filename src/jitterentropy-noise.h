@@ -27,6 +27,12 @@ extern "C"
 {
 #endif
 
+unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
+						uint64_t loop_cnt,
+						uint64_t *ret_current_delta);
+unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
+					   uint64_t loop_cnt,
+					   uint64_t *ret_current_delta);
 unsigned int jent_measure_jitter(struct rand_data *ec,
 				 uint64_t loop_cnt,
 				 uint64_t *ret_current_delta);

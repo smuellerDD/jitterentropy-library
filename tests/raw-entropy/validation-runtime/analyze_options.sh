@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Tool to validate the test results for various Jitter RNG memory settings
 #

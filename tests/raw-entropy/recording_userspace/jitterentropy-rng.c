@@ -32,7 +32,7 @@ int main(int argc, char * argv[])
 	struct rand_data *ec_nostir;
 
 	if (argc < 2) {
-		printf("%s <number of measurements> [--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--max-mem <NUM>]\n", argv[0]);
+		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--max-mem <NUM>]\n", argv[0]);
 		return 1;
 	}
 
@@ -43,7 +43,9 @@ int main(int argc, char * argv[])
 	argv++;
 
 	while (argc > 1) {
-		if (!strncmp(argv[1], "--force-fips", 12))
+		if (!strncmp(argv[1], "--ntg1", 6))
+			flags |= JENT_NTG1;
+		else if (!strncmp(argv[1], "--force-fips", 12))
 			flags |= JENT_FORCE_FIPS;
 		else if (!strncmp(argv[1], "--disable-memory-access", 23))
 			flags |= JENT_DISABLE_MEMORY_ACCESS;

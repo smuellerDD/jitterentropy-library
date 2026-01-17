@@ -32,31 +32,37 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb);
 
 static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 {
+	/*
+	 * Return the delta between two values. If the values are monotonic
+	 * increasing counters which can wrap, this caluculation implicitly
+	 * returns the absolute value of the delta all the time.
+	 */
 	return (next - prev);
 }
 
-#ifdef JENT_HEALTH_LAG_PREDICTOR
-void jent_lag_init(struct rand_data *ec, unsigned int osr);
-#else /* JENT_HEALTH_LAG_PREDICTOR */
-static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
+#if 0
+static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 {
-	(void)ec;
-	(void)osr;
+	/*
+	 * Return the absolute value of the delta when the values are not a
+	 * monotonic counter that may wrap.
+	 */
+	return (next > prev) ? (next - prev) : (prev - next);
 }
-#endif /* JENT_HEALTH_LAG_PREDICTOR */
+#endif
 
 /* RCT: Intermittent cutoff threshold for alpha = 2**-30 */
 #define JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(x) ((x) * 30)
 /* RCT: permanent cutoff threshold for alpha = 2**-60 */
 #define JENT_HEALTH_RCT_PERMANENT_CUTOFF(x) ((x) * 60)
 
-void jent_apt_init(struct rand_data *ec, unsigned int osr);
 void jent_apt_reinit(struct rand_data *ec,
 		     uint64_t current_delta,
 		     unsigned int apt_count,
 		     unsigned int apt_observations);
 unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
 unsigned int jent_health_failure(struct rand_data *ec);
+void jent_health_init(struct rand_data *ec);
 
 #ifdef __cplusplus
 }

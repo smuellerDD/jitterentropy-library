@@ -70,15 +70,12 @@
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 #ifdef LIBGCRYPT
-#include <config.h>
-#include "g10lib.h"
+#include <gcrypt.h>
 #endif
 
 #ifdef OPENSSL
 #include <openssl/crypto.h>
-#ifdef OPENSSL_FIPS
-#include <openssl/fips.h>
-#endif
+#include <openssl/evp.h>
 #endif
 
 #if defined(AWSLC)
@@ -102,7 +99,7 @@
 # define EAX_EDX_VAL(val, low, high)     ((low) | (high) << 32)
 # define EAX_EDX_RET(val, low, high)     "=a" (low), "=d" (high)
 #elif __i386__
-# define DECLARE_ARGS(val, low, high)    unsigned long val
+# define DECLARE_ARGS(val, low, high)    unsigned long long val
 # define EAX_EDX_VAL(val, low, high)     val
 # define EAX_EDX_RET(val, low, high)     "=A" (val)
 #endif
@@ -265,15 +262,46 @@ static inline void *jent_zalloc(size_t len)
 {
 	void *tmp = NULL;
 #ifdef LIBGCRYPT
+	/* Set the maximum usable locked memory to 2 MiB at fist call.
+	 *
+	 * You may have to adapt or delete this, if you
+	 * also use libgcrypt at other places in your software!
+	 */
+	if (!gcry_control (GCRYCTL_INITIALIZATION_FINISHED_P)) {
+		gcry_control(GCRYCTL_INIT_SECMEM, 2097152, 0);
+		gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
+	}
 	/* When using the libgcrypt secure memory mechanism, all precautions
 	 * are taken to protect our state. If the user disables secmem during
 	 * runtime, it is his decision and we thus try not to overrule his
 	 * decision for less memory protection. */
 #define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 	tmp = gcry_xmalloc_secure(len);
-#elif defined(OPENSSL) || defined(AWSLC)
-	/* Does this allocation implies secure memory use? */
+#elif defined(AWSLC)
 	tmp = OPENSSL_malloc(len);
+#elif defined(OPENSSL)
+	/* We only call secure malloc initialization here,
+	 * if not already done. The 2 MiB max. reserved here
+	 * are sufficient for jitterentropy but probably
+	 * too small for a whole application doing crypto
+	 * operations with OpenSSL.
+	 *
+	 * Both min and max value must be power of 2.
+	 * min must be smaller than max.
+	 *
+	 * May preallocate more before making the first
+	 * call into jitterentropy!*/
+	if (CRYPTO_secure_malloc_initialized() ||
+	    CRYPTO_secure_malloc_init(2097152, 32)) {
+		tmp = OPENSSL_secure_malloc(len);
+	}
+#define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
+	/* If secure memory was not available, OpenSSL
+	 * falls back to "normal" memory. So double check. */
+	if (tmp && !CRYPTO_secure_allocated(tmp)) {
+		OPENSSL_secure_free(tmp);
+		tmp = NULL;
+	}
 #else
 	/* we have no secure memory allocation! Hence
 	 * we do not set CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
@@ -297,15 +325,17 @@ static inline void jent_memset_secure(void *s, size_t n)
 static inline void jent_zfree(void *ptr, unsigned int len)
 {
 #ifdef LIBGCRYPT
-	memset(ptr, 0, len);
+	/* gcry_free automatically wipes memory allocated with
+	 * gcry_(x)malloc_secure */
+	(void) len;
 	gcry_free(ptr);
 #elif defined(AWSLC)
-    /* AWS-LC stores the length of allocated memory internally and automatically wipes it in OPENSSL_free */
+	/* AWS-LC stores the length of allocated memory internally and automatically wipes it in OPENSSL_free */
 	(void) len;
 	OPENSSL_free(ptr);
 #elif defined(OPENSSL)
 	OPENSSL_cleanse(ptr, len);
-	OPENSSL_free(ptr);
+	OPENSSL_secure_free(ptr);
 #else
 	jent_memset_secure(ptr, len);
 	free(ptr);
@@ -315,15 +345,11 @@ static inline void jent_zfree(void *ptr, unsigned int len)
 static inline int jent_fips_enabled(void)
 {
 #ifdef LIBGCRYPT
-	return fips_mode();
+	return gcry_fips_mode_active();
 #elif defined(AWSLC)
 	return FIPS_mode();
 #elif defined(OPENSSL)
-#ifdef OPENSSL_FIPS
-	return 1;
-#else
-	return 0;
-#endif
+	return EVP_default_properties_is_fips_enabled(NULL);
 #else
 #define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
 	char buf[2] = "0";

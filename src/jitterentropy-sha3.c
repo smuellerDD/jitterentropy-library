@@ -1,4 +1,4 @@
-/* Jitter RNG: SHA-3 Implementation
+/* Jitter RNG: Keccak / SHA-3 / SHAKE / XDRBG Implementation
  *
  * Copyright (C) 2021 - 2025, Stephan Mueller <smueller@chronox.de>
  *
@@ -263,9 +263,22 @@ static inline void jent_sha3_init(struct jent_sha_ctx *ctx)
 void jent_sha3_256_init(struct jent_sha_ctx *ctx)
 {
 	jent_sha3_init(ctx);
+
 	ctx->r = JENT_SHA3_256_SIZE_BLOCK;
 	ctx->rword = JENT_SHA3_256_SIZE_BLOCK / sizeof(uint64_t);
 	ctx->digestsize = JENT_SHA3_256_SIZE_DIGEST;
+	ctx->padding = 0x06;
+}
+
+void jent_shake256_init(struct jent_sha_ctx *ctx)
+{
+	jent_sha3_init(ctx);
+
+	ctx->r = JENT_SHA3_256_SIZE_BLOCK;
+	ctx->rword = JENT_SHA3_256_SIZE_BLOCK / sizeof(uint64_t);
+	ctx->digestsize = 0;
+	ctx->padding = 0x1f;
+	ctx->initially_seeded = 0;
 }
 
 static inline void jent_sha3_fill_state(struct jent_sha_ctx *ctx,
@@ -336,7 +349,7 @@ void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest)
 	 * Add the leading and trailing bit as well as the 01 bits for the
 	 * SHA-3 suffix.
 	 */
-	ctx->partial[partial] = 0x06;
+	ctx->partial[partial] = ctx->padding;
 	ctx->partial[ctx->r - 1] |= 0x80;
 
 	/* Final transformation */
@@ -344,43 +357,20 @@ void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest)
 	jent_keccakp_1600(ctx->state);
 
 	/*
-	 * Sponge squeeze phase - the digest size is always smaller as the
-	 * state size r which implies we only have one squeeze round.
+	 * Sponge squeeze phase - This squeeze implementation is deliberately
+	 * short for the use in XDRBG-like constructions as it has the following
+	 * caveats compared to a general-purpose squeeze:
+	 *
+	 * * the digest size is always smaller than the rate size r as we do not
+	 *   have a loop around the jent_keccakp_1600 / copy out loop below
+	 *
+	 * * the requested digest size must be multiples of uint64_t
 	 */
 	for (i = 0; i < ctx->digestsize / 8; i++, digest += 8)
 		le64_to_ptr(digest, ctx->state[i]);
 
-	/* Add remaining 4 bytes if we use SHA3-224 */
-	if (ctx->digestsize % 8)
-		le32_to_ptr(digest, (uint32_t)(ctx->state[i]));
-
 	memset(ctx->partial, 0, ctx->r);
 	jent_sha3_init(ctx);
-}
-
-int jent_sha3_tester(void)
-{
-	HASH_CTX_ON_STACK(ctx);
-	static const uint8_t msg_256[] = { 0x5E, 0x5E, 0xD6 };
-	static const uint8_t exp_256[] = { 0xF1, 0x6E, 0x66, 0xC0, 0x43, 0x72,
-					   0xB4, 0xA3, 0xE1, 0xE3, 0x2E, 0x07,
-					   0xC4, 0x1C, 0x03, 0x40, 0x8A, 0xD5,
-					   0x43, 0x86, 0x8C, 0xC4, 0x0E, 0xC5,
-					   0x5E, 0x00, 0xBB, 0xBB, 0xBD, 0xF5,
-					   0x91, 0x1E };
-	uint8_t act[JENT_SHA3_256_SIZE_DIGEST] = { 0 };
-	unsigned int i;
-
-	jent_sha3_256_init(&ctx);
-	jent_sha3_update(&ctx, msg_256, 3);
-	jent_sha3_final(&ctx, act);
-
-	for (i = 0; i < JENT_SHA3_256_SIZE_DIGEST; i++) {
-		if (exp_256[i] != act[i])
-			return 1;
-	}
-
-	return 0;
 }
 
 int jent_sha3_alloc(void **hash_state)
@@ -401,4 +391,214 @@ void jent_sha3_dealloc(void *hash_state)
 	struct sha_ctx *ctx = (struct sha_ctx *)hash_state;
 
 	jent_zfree(ctx, JENT_SHA_MAX_CTX_SIZE);
+}
+
+/*********************************** XDRBG ************************************/
+
+#define JENT_XDRBG_DRNG_ENCODE_N(x) (x * 85)
+
+/*
+ * This operation implements XDRBG-256 as defined in [1].
+ *
+ * The output size is [0:256] bits.
+ *
+ * [1] https://leancrypto.org/papers/xdrbg.pdf
+ */
+static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
+					 size_t dst_len)
+{
+	/*
+	 * XDRBG:
+	 * 512 Bit for next state (internal memory) || 256 Bit output for user
+	 */
+	uint8_t jent_block_next_state[JENT_XDRBG_SIZE_STATE +
+				      JENT_SHA3_256_SIZE_DIGEST];
+	uint8_t encode;
+
+	/* Checking the output size */
+	BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != ((DATA_SIZE_BITS / 8)));
+	/*
+	 * The XOF implementation only allows the generation of up to one
+	 * rate-size block. See the comments in the squeeze operation for
+	 * details
+	 */
+	BUILD_BUG_ON(JENT_SHA3_256_SIZE_BLOCK < sizeof(jent_block_next_state));
+	/*
+	 * The squeeze operation is limited to return multiples of uint64_t -
+	 * verify all set_digestsize values.
+	 */
+	BUILD_BUG_ON(JENT_XDRBG_SIZE_STATE % sizeof(uint64_t));
+	BUILD_BUG_ON(sizeof(jent_block_next_state) % sizeof(uint64_t));
+
+	/* The final operation automatically re-initializes the ->hash_state */
+
+	/*
+	 * XDRBG: finalize seeding
+	 *
+	 * seed is inserted with SHAKE-256 update
+	 *
+	 * initial seeding:
+	 * V ← XOF( encode(( seed ), α, 0), |V| )
+	 *
+	 * reseeding:
+	 * V ← XOF( encode(( V' || seed ), α, 1), |V| )
+	 *
+	 * The insertion of the V' is done at the end of this function for the
+	 * next finalization of the reseeding. α is defined to be empty.
+	 */
+	encode = JENT_XDRBG_DRNG_ENCODE_N(ctx->initially_seeded);
+	ctx->initially_seeded = 1;
+	jent_sha3_update(ctx, &encode, 1);
+	jent_shake256_set_digestsize(ctx, JENT_XDRBG_SIZE_STATE);
+	jent_sha3_final(ctx, jent_block_next_state);
+
+	/*
+	 * XDRBG: generate
+	 *
+	 * ℓ = dst_len which is at maximum 256 bits
+	 * T ← XOF( encode(V', α, 2), ℓ + |V| )
+	 * V ← first |V| bits of T
+	 * Σ ← last ℓ bits of T
+	 */
+	jent_sha3_update(ctx, jent_block_next_state, JENT_XDRBG_SIZE_STATE);
+	encode = JENT_XDRBG_DRNG_ENCODE_N(2);
+	jent_sha3_update(ctx, &encode, 1);
+	/*
+	 * Request a full block irrespective of the output size due to
+	 * Keccak squeeze implementation limitation.
+	 */
+	jent_shake256_set_digestsize(ctx, sizeof(jent_block_next_state));
+	jent_sha3_final(ctx, jent_block_next_state);
+
+	/* Return Σ to the caller truncated to the requested size */
+	if (dst_len)  {
+		/* Safety measure to not overflow the generated buffer */
+		if (dst_len > JENT_SHA3_256_SIZE_DIGEST)
+			dst_len = JENT_SHA3_256_SIZE_DIGEST;
+
+		memcpy(dst, jent_block_next_state + JENT_XDRBG_SIZE_STATE,
+		       dst_len);
+	}
+
+	/*
+	 * XDRBG: reseed
+	 * Set the V into the state.
+	 */
+	jent_sha3_update(ctx, jent_block_next_state, JENT_XDRBG_SIZE_STATE);
+	jent_memset_secure(jent_block_next_state,
+			   sizeof(jent_block_next_state));
+}
+
+void jent_drbg_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
+			      size_t dst_len)
+{
+	jent_xdrbg256_generate_block(ctx, dst, dst_len);
+}
+
+/********************************** Selftest **********************************/
+
+/*
+ * The SHAKE-256 support is only needed to support the XDRBG. Therefore, it is
+ * implicitly self-tested with the XDRBG-256 self test. Yet, this self-test
+ * code for SHAKE-256 is left in here to allow implementors to activate it at
+ * their discretion. Furthermore it provides an example how to invoke the
+ * Keccak operation as a SHAKE-256 for testing and analysis.
+ */
+#if 0
+static int jent_shake256_tester(void)
+{
+	HASH_CTX_ON_STACK(ctx);
+	static const uint8_t msg[] = { 0x6C, 0x9E, 0xC8, 0x5C, 0xBA, 0xBA, 0x62,
+				       0xF5, 0xBC, 0xFE, 0xA1, 0x9E, 0xB9, 0xC9,
+				       0x20, 0x52, 0xD8, 0xFF, 0x18, 0x81, 0x52,
+				       0xE9, 0x61, 0xC1, 0xEC, 0x5C, 0x75, 0xBF,
+				       0xC3, 0xC9, 0x1C, 0x8D };
+	static const uint8_t exp[] = { 0x7d, 0x6a, 0x09, 0x6e, 0x13, 0x66, 0x1d,
+				       0x9d, 0x0e, 0xca, 0xf5, 0x38, 0x30, 0xa1,
+				       0x92, 0x87, 0xe0, 0xb3, 0x6e, 0xce, 0x48,
+				       0x82, 0xeb, 0x58, 0x0b, 0x78, 0x5c, 0x1d,
+				       0xef, 0x2d, 0xe5, 0xaa, 0x6c };
+	uint8_t act[sizeof(exp)] = { 0 };
+	unsigned int i;
+
+	jent_shake256_init(&ctx);
+	jent_sha3_update(&ctx, msg, sizeof(msg));
+	jent_shake256_set_digestsize(&ctx, sizeof(exp));
+	jent_sha3_final(&ctx, act);
+
+	for (i = 0; i < sizeof(exp); i++) {
+		if (exp[i] != act[i])
+			return 1;
+	}
+
+	return 0;
+}
+#endif
+
+static int jent_xdrbg256_tester(void)
+{
+	HASH_CTX_ON_STACK(ctx);
+	/*
+	 * Test vectors are generated using the leancrypto XDRBG implementation.
+	 */
+	static const uint8_t seed[] = {
+		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+	};
+	static const uint8_t exp[] = {
+		0x51, 0xe4, 0x3c, 0xf6, 0x4b, 0xa2, 0x80, 0x77,
+		0x33, 0x1a, 0x47, 0xe3, 0xf8, 0xb4, 0x1a, 0x42,
+		0xad, 0xd3, 0xa0, 0xf2, 0x53, 0x97, 0x10, 0xdd,
+		0x6e, 0xa1, 0x16, 0x1d, 0x37, 0x8a, 0x6f, 0xb6
+	};
+	uint8_t act[sizeof(exp)] = { 0 };
+	unsigned int i;
+
+	BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != sizeof(exp));
+
+	jent_shake256_init(&ctx);
+	/* Initial seed */
+	jent_sha3_update(&ctx, seed, sizeof(seed));
+	jent_xdrbg256_generate_block(&ctx, act, sizeof(act));
+	/* Reseeding */
+	jent_sha3_update(&ctx, seed, sizeof(seed));
+	jent_xdrbg256_generate_block(&ctx, act, sizeof(act));
+
+	for (i = 0; i < sizeof(exp); i++) {
+		if (exp[i] != act[i])
+			return 1;
+	}
+
+	return 0;
+}
+
+static int jent_sha3_256_tester(void)
+{
+	HASH_CTX_ON_STACK(ctx);
+	static const uint8_t msg[] = { 0x5E, 0x5E, 0xD6 };
+	static const uint8_t exp[] = {
+		0xF1, 0x6E, 0x66, 0xC0, 0x43, 0x72, 0xB4, 0xA3, 0xE1, 0xE3,
+		0x2E, 0x07, 0xC4, 0x1C, 0x03, 0x40, 0x8A, 0xD5, 0x43, 0x86,
+		0x8C, 0xC4, 0x0E, 0xC5, 0x5E, 0x00, 0xBB, 0xBB, 0xBD, 0xF5,
+		0x91, 0x1E
+	};
+	uint8_t act[sizeof(exp)] = { 0 };
+	unsigned int i;
+
+	jent_sha3_256_init(&ctx);
+	jent_sha3_update(&ctx, msg, sizeof(msg));
+	jent_sha3_final(&ctx, act);
+
+	for (i = 0; i < sizeof(exp); i++) {
+		if (exp[i] != act[i])
+			return 1;
+	}
+
+	return 0;
+}
+
+int jent_sha3_tester(void)
+{
+	if (jent_sha3_256_tester())
+		return 1;
+	return jent_xdrbg256_tester();
 }
