@@ -107,7 +107,12 @@ A return code other than
 .IR 0
 indicates a failure where the calling application
 .B MUST NOT
-use the CPU Jitter Random Number Generator.
+use the CPU Jitter Random Number Generator. Also note that,
+specifically error codes
+.IR ERCT
+and
+.IR EHEALTH
+indicate health test failure.
 .LP
 .BR jent_entropy_init_ex ()
 behaves identically to
@@ -184,6 +189,9 @@ is set, the allocation returns NULL.
 .B JENT_FORCE_FIPS
 Force full FIPS 140 and SP800-90B compliance irrespective of the
 FIPS setting of the underlying operating system.
+.TP
+.B JENT_NTG1
+Enable the BSI AIS 20/31 v3.0 NTG.1 compliant behavior.
 .TP
 .B JENT_MAX_MEMSIZE_*
 Define the maximum amount of memory that the Jitter RNG will use
