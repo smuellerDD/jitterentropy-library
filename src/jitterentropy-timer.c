@@ -22,6 +22,12 @@
 #include "jitterentropy-timer.h"
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+
+struct jent_notime_ctx {
+	pthread_attr_t notime_pthread_attr;	/* pthreads library */
+	pthread_t notime_thread_id;		/* pthreads thread ID */
+};
+
 /***************************************************************************
  * Thread handler
  ***************************************************************************/

@@ -227,11 +227,6 @@ int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread);
 /* -- END of Main interface functions -- */
 
 /* -- BEGIN timer-less threading support functions to prevent code dupes -- */
-struct jent_notime_ctx {
-	pthread_attr_t notime_pthread_attr;	/* pthreads library */
-	pthread_t notime_thread_id;		/* pthreads thread ID */
-};
-
 JENT_PRIVATE_STATIC
 int jent_notime_init(void **ctx);
 
