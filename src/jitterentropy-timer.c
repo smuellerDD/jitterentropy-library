@@ -41,7 +41,6 @@ struct jent_notime_ctx {
  * Thread handler
  ***************************************************************************/
 
-#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 JENT_PRIVATE_STATIC
 int jent_notime_init(void **ctx)
 {
@@ -79,6 +78,8 @@ int jent_notime_init(void **ctx) { (void)ctx; return 0; }
 void jent_notime_fini(void *ctx) { (void)ctx; }
 
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
 static int jent_notime_start(void *ctx,
 #ifdef __MINGW32__
