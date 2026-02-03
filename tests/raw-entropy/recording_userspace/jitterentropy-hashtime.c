@@ -22,8 +22,15 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <string.h>
+
+#ifdef _MSC_VER
+#include <io.h>
+#define open  _open
+#define close _close
+#else
+#include <unistd.h>
+#endif
 
 #include "jitterentropy-sha3.c"
 #include "jitterentropy-gcd.c"

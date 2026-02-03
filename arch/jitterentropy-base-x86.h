@@ -47,9 +47,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Timer-less entropy source */
-#include <pthread.h>
-
 typedef uint64_t __u64;
 
 /* taken from Linux kernel */

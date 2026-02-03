@@ -4,3 +4,4 @@ SP800-90B_EntropyAssessment
 build
 inst
 tests/raw-entropy/results-measurements/*.data
+/.vs
