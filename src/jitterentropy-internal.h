@@ -225,7 +225,7 @@ struct rand_data
 
 /* The step size should be larger than the cacheline size. */
 #ifndef JENT_MEMORY_BITS
-# define JENT_MEMORY_BITS 17
+# define JENT_MEMORY_BITS 23
 #endif
 #ifndef JENT_MEMORY_SIZE
 # define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
