@@ -102,7 +102,7 @@ do
 	do
 		mask=${item%:*}
 		bits=${item#*:}
-		
+
 		$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
 
 	done

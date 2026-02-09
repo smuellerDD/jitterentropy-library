@@ -101,11 +101,13 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 
 	/* Print the size of the memory region. */
 #ifdef JENT_RANDOM_MEMACCESS
+	(void)jent_memaccess_deterministic;
 	printf("Random memory access - Memory size: %" PRIu32 "\n",
 	       ec->memmask + 1);
 #else
+	(void)jent_memaccess_pseudorandom;
 	printf("Deterministic memory access - Memory size: %" PRIu32 "\n",
-	       ec->memblocksize * ec->memblocks);
+	       ec->memmask + 1);
 #endif
 
 

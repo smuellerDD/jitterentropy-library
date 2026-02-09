@@ -20,9 +20,9 @@ JENT_HASHTIME=${JENT_HASHTIME:-"./jitterentropy-hashtime"}
 
 # Define the maximum memory size
 # 0 -> use default
-# 1 -> JENT_MAX_MEMSIZE_32kB
+# 1 -> JENT_MAX_MEMSIZE_1kB
 # ...
-# 15 -> JENT_MAX_MEMSIZE_512MB
+# 20 -> JENT_MAX_MEMSIZE_512MB
 MAX_MEMORY_SIZE=0
 
 # If this variable is set to any value, the timer-less entropy source
