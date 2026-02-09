@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD 11)
 function(testprogram name)
     add_executable(${name} ${name}.c)
     target_link_libraries(${name} ${PROJECT_NAME})
-    if(MINGW)
+    if(MINGW AND INTERNAL_TIMER)
         target_link_libraries(${name} "pthread")
     endif()
     target_link_directories(${name} PUBLIC
