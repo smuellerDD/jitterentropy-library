@@ -385,20 +385,7 @@ static inline long jent_ncpu(void)
 
 #ifdef __linux__
 
-# if defined(_SC_LEVEL1_DCACHE_SIZE) &&					\
-     defined(_SC_LEVEL2_CACHE_SIZE) &&					\
-     defined(_SC_LEVEL3_CACHE_SIZE)
-
-static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
-{
-	*l1 = sysconf(_SC_LEVEL1_DCACHE_SIZE);
-	*l2 = sysconf(_SC_LEVEL2_CACHE_SIZE);
-	*l3 = sysconf(_SC_LEVEL3_CACHE_SIZE);
-}
-
-# else
-
-static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
+static inline void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 {
 #define JENT_SYSFS_CACHE_DIR "/sys/devices/system/cpu/cpu0/cache"
 	long val;
@@ -467,6 +454,34 @@ static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
 		}
 	}
 #undef JENT_SYSFS_CACHE_DIR
+}
+
+# if defined(_SC_LEVEL1_DCACHE_SIZE) &&					\
+     defined(_SC_LEVEL2_CACHE_SIZE) &&					\
+     defined(_SC_LEVEL3_CACHE_SIZE)
+
+static inline void jent_get_cachesize_libc(long *l1, long *l2, long *l3)
+{
+	*l1 = sysconf(_SC_LEVEL1_DCACHE_SIZE);
+	*l2 = sysconf(_SC_LEVEL2_CACHE_SIZE);
+	*l3 = sysconf(_SC_LEVEL3_CACHE_SIZE);
+}
+
+static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
+{
+	jent_get_cachesize_libc(l1, l2, l3);
+
+	/* not implemented in libc for this architecture, try fallback */
+	if (l1 == 0 && l2 == 0 && l3 == 0) {
+		jent_get_cachesize_sysfs(l1, l2, l3);
+	}
+}
+
+# else
+
+static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
+{
+	jent_get_cachesize_sysfs(l1, l2, l3);
 }
 
 # endif
