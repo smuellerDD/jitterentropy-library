@@ -157,8 +157,6 @@ static void jent_hash_loop(struct rand_data *ec,
 	jent_memset_secure(&ctx, JENT_SHA_MAX_CTX_SIZE);
 }
 
-#ifdef JENT_RANDOM_MEMACCESS
-
 static inline uint32_t uint32rotl(const uint32_t x, int k)
 {
 	return (x << k) | (x >> (32 - k));
@@ -189,9 +187,10 @@ static inline uint32_t xoshiro128starstar(uint32_t *s)
  * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
  *		  number of loops to perform the hash operation
  */
-static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
+static void jent_memaccess_pseudorandom(struct rand_data *ec, uint64_t loop_cnt,
+					uint64_t *current_delta)
 {
-	uint64_t i = 0, time_now = 0;
+	uint64_t i = 0, time_now_start = 0, time_now_end = 0, tmp_delta = 0;
 	union {
 		uint32_t u[4];
 		uint8_t b[sizeof(uint32_t) * 4];
@@ -220,9 +219,16 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 	 * timing, so we can now benefit from the Central Limit Theorem!
 	 */
 	for (i = 0; i < sizeof(prngState); i++) {
-		jent_get_nstime_internal(ec, &time_now);
-		prngState.b[i] ^= (uint8_t)(time_now & 0xff);
+		jent_get_nstime_internal(ec, &time_now_start);
+		prngState.b[i] ^= (uint8_t)(time_now_start & 0xff);
 	}
+
+	/*
+	 * Obtain the start time of the timing measurement when requested by
+	 * the caller.
+	 */
+	if (current_delta)
+		jent_get_nstime_internal(ec, &time_now_start);
 
 	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
 		/* Take PRNG output to find the memory location to update. */
@@ -237,9 +243,18 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 		 */
 		*tmpval = (unsigned char)((*tmpval + 1) & 0xff);
 	}
-}
 
-#else /* JENT_RANDOM_MEMACCESS */
+	/*
+	 * Calculate the execution time by measuring the end time and obtain
+	 * the time delta.
+	 */
+	if (current_delta) {
+		jent_get_nstime_internal(ec, &time_now_end);
+		tmp_delta += jent_delta(time_now_start, time_now_end) /
+					ec->jent_common_timer_gcd;
+		*current_delta = tmp_delta;
+	}
+}
 
 /**
  * Memory Access noise source -- this is a noise source based on variations in
@@ -265,8 +280,11 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
  * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
  *		  number of loops to perform the hash operation
  */
-static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
+static void jent_memaccess_deterministic(struct rand_data *ec,
+					 uint64_t loop_cnt,
+					 uint64_t *current_delta)
 {
+	uint64_t time_now_start = 0, time_now_end = 0, tmp_delta = 0;
 	unsigned int wrap = 0;
 	uint64_t i = 0;
 
@@ -278,27 +296,37 @@ static void jent_memaccess(struct rand_data *ec, uint64_t loop_cnt)
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
-	wrap = ec->memblocksize * ec->memblocks;
+	wrap = ec->memmask + 1;
+
+        if (current_delta)
+		jent_get_nstime_internal(ec, &time_now_start);
 
 	for (i = 0; i < (ec->memaccessloops + acc_loop_cnt); i++) {
 		unsigned char *tmpval = ec->mem + ec->memlocation;
+
 		/*
 		 * memory access: just add 1 to one byte,
 		 * wrap at 255 -- memory access implies read
 		 * from and write to memory location
 		 */
 		*tmpval = (unsigned char)((*tmpval + 1) & 0xff);
+
 		/*
 		 * Addition of memblocksize - 1 to pointer
 		 * with wrap around logic to ensure that every
 		 * memory location is hit evenly
 		 */
-		ec->memlocation = ec->memlocation + ec->memblocksize - 1;
+		ec->memlocation = ec->memlocation + JENT_MEMORY_BLOCKSIZE - 1;
 		ec->memlocation = ec->memlocation % wrap;
 	}
-}
 
-#endif /* JENT_RANDOM_MEMACCESS */
+	if (current_delta) {
+		jent_get_nstime_internal(ec, &time_now_end);
+		tmp_delta += jent_delta(time_now_start, time_now_end) /
+					ec->jent_common_timer_gcd;
+		*current_delta = tmp_delta;
+	}
+}
 
 /***************************************************************************
  * Start of entropy processing logic
@@ -319,30 +347,33 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 						uint64_t *ret_current_delta)
 {
 	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
-	uint64_t time_now = 0;
 	uint64_t current_delta = 0;
 	unsigned int stuck;
 
 	/*
-	 * Get time stamp to only measure the execution time of the memory
-	 * access to make this part an independent entropy source (even
-	 * excluding the SHA3 update to insert the data into the entropy pool).
-	 */
-	jent_get_nstime_internal(ec, &ec->prev_time);
-
-	/*
 	 * Now call the memory noise source with tripple the default iteration
 	 * count considering this is the only noise source.
+	 *
+	 * The call returns the execution time delta.
+	 *
+	 * For the NTG.1 discussion, the following is of interest. NTG.1
+	 * mandates that 2 separate noise sources are used. The hash loop
+	 * operation uses the variations from the CPU instructions and the L1
+	 * cache data. The memory access loop here shall deliver variations from
+	 * the L2, L3 caches or RAM. To ensure that as little as possible L1
+	 * operations are present, the xoshiro128starstar operation is not used.
+	 * The deterministic operation has less instructions and less L1
+	 * accesses. Therefore, the deterministic operation only is used here.
+	 *
+	 * Furthermore, the increase of the memory access loop by 3 (the value
+	 * below is added to the original memory access loop) to ensure that
+	 * sufficient variations from L2 are collected to meet the NTG.1
+	 * requirement of at least 240 bits of entropy from the L2/L3/RAM
+	 * accesses.
 	 */
-	jent_memaccess(ec, loop_cnt ? loop_cnt : JENT_MEM_ACC_LOOP_DEFAULT * 3);
-
-	/*
-	 * Get time stamp and calculate time delta to previous
-	 * invocation to measure the timing variations
-	 */
-	jent_get_nstime_internal(ec, &time_now);
-	current_delta = jent_delta(ec->prev_time, time_now) /
-				   ec->jent_common_timer_gcd;
+	jent_memaccess_deterministic(ec, loop_cnt ? loop_cnt :
+						    ec->memaccessloops * 2,
+				     &current_delta);
 
 	/*
 	 * Check whether we have a stuck measurement - and apply the health
@@ -454,7 +485,11 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	unsigned int stuck;
 
 	/* Invoke memory access loop noise source */
-	jent_memaccess(ec, loop_cnt);
+#ifdef JENT_RANDOM_MEMACCESS
+	jent_memaccess_pseudorandom(ec, loop_cnt, NULL);
+#else
+	jent_memaccess_deterministic(ec, loop_cnt, NULL);
+#endif
 
 	/*
 	 * Get time stamp and calculate time delta to previous
@@ -462,7 +497,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	 */
 	jent_get_nstime_internal(ec, &time_now);
 	current_delta = jent_delta(ec->prev_time, time_now) /
-						ec->jent_common_timer_gcd;
+				   ec->jent_common_timer_gcd;
 	ec->prev_time = time_now;
 
 	/* Check whether we have a stuck measurement. */

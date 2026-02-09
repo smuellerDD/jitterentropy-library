@@ -223,36 +223,24 @@ struct rand_data
 	/* Initialization state supporting AIS 20/31 NTG.1 */
 	enum jent_startup_state startup_state;
 
-#ifdef JENT_RANDOM_MEMACCESS
-  /* The step size should be larger than the cacheline size. */
-# ifndef JENT_MEMORY_BITS
-#  define JENT_MEMORY_BITS 17
-# endif
-# ifndef JENT_MEMORY_SIZE
-#  define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
-# endif
-#else /* JENT_RANDOM_MEMACCESS */
-# ifndef JENT_MEMORY_BLOCKS
-#  define JENT_MEMORY_BLOCKS 512
-# endif
-# ifndef JENT_MEMORY_BLOCKSIZE
-#  define JENT_MEMORY_BLOCKSIZE 128
-# endif
-# ifndef JENT_MEMORY_SIZE
-#  define JENT_MEMORY_SIZE (JENT_MEMORY_BLOCKS*JENT_MEMORY_BLOCKSIZE)
-# endif
-#endif /* JENT_RANDOM_MEMACCESS */
+/* The step size should be larger than the cacheline size. */
+#ifndef JENT_MEMORY_BITS
+# define JENT_MEMORY_BITS 17
+#endif
+#ifndef JENT_MEMORY_SIZE
+# define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
+#endif
+#ifndef JENT_MEMORY_BLOCKSIZE
+# define JENT_MEMORY_BLOCKSIZE 128
+#endif
+#define JENT_MEMORY_BLOCKS (JENT_MEMORY_SIZE / JENT_MEMORY_BLOCKSIZE)
 
 #define JENT_MEMORY_ACCESSLOOPS 128
 	unsigned char *mem;		/* Memory access location with size of
 					 * JENT_MEMORY_SIZE or memsize */
-#ifdef JENT_RANDOM_MEMACCESS
+
 	uint32_t memmask;		/* Memory mask (size of memory - 1) */
-#else
 	unsigned int memlocation; 	/* Pointer to byte in *mem */
-	unsigned int memblocks;		/* Number of memory blocks in *mem */
-	unsigned int memblocksize; 	/* Size of one memory block in bytes */
-#endif
 	unsigned int memaccessloops;	/* Number of memory accesses per random
 					 * bit generation */
 
