@@ -42,7 +42,7 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #include "arch/jitterentropy-base-windows.h"
 #else
 #include "jitterentropy-base-user.h"
@@ -221,7 +221,11 @@ struct jent_notime_thread {
 	int (*jent_notime_init)(void **ctx);
 	void (*jent_notime_fini)(void *ctx);
 	int (*jent_notime_start)(void *ctx,
-				 void *(*start_routine) (void *), void *arg);
+#ifdef __MINGW32__
+		void *(*start_routine) (void *), void *arg);
+#else
+		int (*start_routine)(void *), void *arg);
+#endif
 	void (*jent_notime_stop)(void *ctx);
 };
 

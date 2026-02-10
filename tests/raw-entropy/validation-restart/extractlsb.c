@@ -185,9 +185,13 @@ int main(int argc, char *argv[])
 
 		i++;
 
+#if defined(_MSC_VER)
+		res = strtok_s(buf, " ", &saveptr);
+#else
 		res = strtok_r(buf, " ", &saveptr);
+#endif
 		if (!res) {
-			printf("strtok_r error (%s)\n", buf);
+			printf("strtok_r/s error (%s)\n", buf);
 			return 1;
 		}
 

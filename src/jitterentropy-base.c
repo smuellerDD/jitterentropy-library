@@ -580,6 +580,8 @@ static struct rand_data
 	if (!(flags & JENT_DISABLE_INTERNAL_TIMER)) {
 		if (jent_notime_enable(entropy_collector, flags))
 			goto err;
+		if (jent_notime_settick(entropy_collector))
+			goto err;
 	}
 
 	/*
@@ -598,9 +600,14 @@ static struct rand_data
 		jent_random_data(entropy_collector);
 	} while(entropy_collector->startup_state != jent_startup_completed);
 
+	/* Disable timer thread again after initialization.
+	 * Also works if not used above. */
+	jent_notime_unsettick(entropy_collector);
+
 	return entropy_collector;
 
 err:
+	jent_notime_unsettick(entropy_collector);
 	if (entropy_collector->mem != NULL)
 		jent_zfree(entropy_collector->mem, memsize);
 	if (entropy_collector->hash_state != NULL)
