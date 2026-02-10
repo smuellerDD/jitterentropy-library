@@ -122,6 +122,10 @@ static void jent_hash_loop(struct rand_data *ec,
 	 */
 	uint64_t hash_loop_cnt = loop_cnt ? loop_cnt : JENT_HASH_LOOP_DEFAULT;
 
+	BUILD_BUG_ON(JENT_HASH_LOOP_DEFAULT < 1);
+	BUILD_BUG_ON(JENT_HASH_LOOP_INIT < 1);
+	BUILD_BUG_ON(JENT_HASH_LOOP_DEFAULT > JENT_HASH_LOOP_INIT);
+
 	jent_sha3_256_init(&ctx);
 
 	/*
@@ -429,7 +433,7 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	 * domain separator to be added before.
 	 */
 	jent_hash_loop(ec, intermediary, loop_cnt ? loop_cnt :
-						    JENT_HASH_LOOP_DEFAULT * 3);
+						    JENT_HASH_LOOP_INIT);
 
 	/*
 	 * Get time stamp and calculate time delta to previous

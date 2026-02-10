@@ -27,8 +27,6 @@ extern "C"
 {
 #endif
 
-#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
-
 #define JENT_SHA3_SIZE_BLOCK(bits)	((1600 - 2 * bits) >> 3)
 
 #define JENT_SHA3_256_SIZE_BLOCK                                               \
