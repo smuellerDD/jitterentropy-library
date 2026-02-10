@@ -174,6 +174,10 @@ int jent_set_fips_failure_callback(jent_fips_failure_cb cb);
 JENT_PRIVATE_STATIC
 unsigned int jent_version(void);
 
+/* print out human-readable status of the Jitter RNG */
+JENT_PRIVATE_STATIC
+int jent_status(const struct rand_data *ec, char *buf, size_t buflen);
+
 /* return secure memory support, must be done
  * in jitterentropy itself, as users may not define
  * a crypto library and so the define in jitterentropy-base-user.h

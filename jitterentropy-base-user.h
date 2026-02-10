@@ -500,13 +500,14 @@ static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
 static inline uint32_t jent_cache_size_roundup(int all_caches)
 {
 	static int checked = 0;
-	static uint32_t cache_size = 0;
+	uint32_t cache_size = 0;
+	int checked_all_caches = all_caches + 1;
 
-	if (!checked) {
+	if (checked != checked_all_caches) {
 		long l1 = 0, l2 = 0, l3 = 0;
 
 		jent_get_cachesize_sysconf(&l1, &l2, &l3);
-		checked = 1;
+		checked = checked_all_caches;
 
 		cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
 		if (cache_size == 0) {

@@ -20,12 +20,15 @@
 #ifndef JITTERENTROPY_BASE_H
 #define JITTERENTROPY_BASE_H
 
+#include "jitterentropy.h"
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
 int jent_time_entropy_init(unsigned int osr, unsigned int flags);
+uint32_t jent_memsize(unsigned int flags);
 
 #ifdef __cplusplus
 }

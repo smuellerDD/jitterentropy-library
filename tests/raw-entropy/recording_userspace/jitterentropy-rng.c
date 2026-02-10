@@ -30,6 +30,7 @@ int main(int argc, char * argv[])
 	int ret = 0;
 	unsigned int flags = 0, osr = 0;
 	struct rand_data *ec_nostir;
+	char status[400];
 
 	if (argc < 2) {
 		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>]\n", argv[0]);
@@ -154,17 +155,28 @@ int main(int argc, char * argv[])
 		return 1;
 	}
 
+	if (jent_status(ec_nostir, status, sizeof(status))) {
+		printf("Cannot obtain status information\n");
+		ret = 1;
+		goto out;
+	}
+
+	fprintf(stderr, "%s", status);
+
 	for (size = 0; size < rounds; size++) {
 		char tmp[32];
 
 		if (0 > jent_read_entropy_safe(&ec_nostir, tmp, sizeof(tmp))) {
 			fprintf(stderr, "FIPS 140-2 continuous test failed\n");
-			return 1;
+			ret = 1;
+			goto out;
 		}
 		fwrite(&tmp, sizeof(tmp), 1, stdout);
 	}
 
-	jent_entropy_collector_free(ec_nostir);
+	ret = 0;
 
-	return 0;
+out:
+	jent_entropy_collector_free(ec_nostir);
+	return ret;
 }

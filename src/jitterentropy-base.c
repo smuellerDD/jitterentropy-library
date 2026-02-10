@@ -456,7 +456,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
  * Initialization logic
  ***************************************************************************/
 
-static inline uint32_t jent_memsize(unsigned int flags)
+uint32_t jent_memsize(unsigned int flags)
 {
 	uint32_t memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
 
