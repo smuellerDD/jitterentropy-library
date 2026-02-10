@@ -48,6 +48,8 @@
 extern "C" {
 #endif
 
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 #ifndef JENT_STUCK_INIT_THRES
@@ -160,11 +162,29 @@ extern "C" {
  *
  * NOTE: When you modify this value, you are directly altering the behavior of
  * the noise source. Make sure you fully understand what you do. If you want to
- * individually measure the memory access loop entropy rate, use the
+ * individually measure the hash loop entropy rate, use the
  * jitterentropy-hashtime tool with the command line option of --hashloop.
  */
 #ifndef JENT_HASH_LOOP_DEFAULT
 #define JENT_HASH_LOOP_DEFAULT 1
+#endif
+
+/*
+ * Hash loop initialization count: This value defines the hash loop count
+ * during initialization phase, when the SHA-3-based loop is the sole entropy
+ * provider. Typically a higher iteration count is necessary to take enough time.
+ *
+ * It is permissible to configure this value differently at compile time if the
+ * observed entropy rate is too small.
+ *
+ * NOTE: When you modify this value, you are directly altering the behavior of
+ * the noise source during NTG.1 initialization.
+ * Make sure you fully understand what you do. If you want to
+ * individually measure the hash loop entropy rate, use the
+ * jitterentropy-hashtime tool with the command line option of --hashloop.
+ */
+#ifndef JENT_HASH_LOOP_INIT
+#define JENT_HASH_LOOP_INIT 3
 #endif
 
 /***************************************************************************
