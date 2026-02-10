@@ -138,6 +138,10 @@ extern "C" {
 #endif
 #endif
 
+#if defined(__MINGW32__) || defined(__APPLE__)
+#define JENT_PTHREAD
+#endif
+
 /* Forward declaration of opaque value */
 struct rand_data;
 
@@ -225,7 +229,7 @@ struct jent_notime_thread {
 	int (*jent_notime_init)(void **ctx);
 	void (*jent_notime_fini)(void *ctx);
 	int (*jent_notime_start)(void *ctx,
-#ifdef __MINGW32__
+#ifdef JENT_PTHREAD
 		void *(*start_routine) (void *), void *arg);
 #else
 		int (*start_routine)(void *), void *arg);

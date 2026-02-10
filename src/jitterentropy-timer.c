@@ -24,7 +24,7 @@
 /* Timer-less entropy source */
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
-#if __MINGW32__
+#ifdef JENT_PTHREAD
 #include <pthread.h>
 struct jent_notime_ctx {
 	pthread_attr_t notime_pthread_attr;     /* pthreads library */
@@ -82,7 +82,7 @@ void jent_notime_fini(void *ctx) { (void)ctx; }
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
 static int jent_notime_start(void *ctx,
-#ifdef __MINGW32__
+#ifdef JENT_PTHREAD
 			    void *(*start_routine) (void *),
 #else
 			    int (*start_routine) (void *),
@@ -90,14 +90,14 @@ static int jent_notime_start(void *ctx,
 			    void *arg)
 {
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
-#if __MINGW32__
+#ifdef JENT_PTHREAD
 	int ret;
 #endif
 
 	if (!thread_ctx)
 		return -EINVAL;
 
-#if __MINGW32__
+#ifdef JENT_PTHREAD
 	ret = -pthread_attr_init(&thread_ctx->notime_pthread_attr);
 	if (ret)
 		return ret;
@@ -125,7 +125,7 @@ static void jent_notime_stop(void *ctx)
 {
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
 
-#if __MINGW32__
+#ifdef JENT_PTHREAD
 	pthread_join(thread_ctx->notime_thread_id, NULL);
 	pthread_attr_destroy(&thread_ctx->notime_pthread_attr);
 #else
@@ -165,7 +165,7 @@ static struct jent_notime_thread *notime_thread = &jent_notime_thread_builtin;
  * counter function. It conceptually acts as the low resolution
  * samples timer from a ring oscillator.
  */
-#ifdef __MINGW32__
+#ifdef JENT_PTHREAD
 static void *jent_notime_sample_timer(void *arg)
 #else
 static int jent_notime_sample_timer(void *arg)
@@ -183,7 +183,7 @@ static int jent_notime_sample_timer(void *arg)
 	}
 
 out:
-#ifdef __MINGW32__
+#ifdef JENT_PTHREAD
 	return NULL;
 #else
 	return 0;
