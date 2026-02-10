@@ -200,7 +200,7 @@ static inline unsigned int jent_update_hashloop(unsigned int flags,
 	max = (max > global_max) ? global_max : max;
 
 	/* Clear out the max size */
-	flags &= ~JENT_MAX_HASHLOOP_MASK;
+	flags &= ~(unsigned int)JENT_MAX_HASHLOOP_MASK;
 	/* Set the freshly calculated max size */
 	flags |= JENT_HASHLOOP_TO_FLAGS(max);
 
