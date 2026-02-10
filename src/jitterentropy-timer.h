@@ -76,7 +76,7 @@ static inline void jent_notime_disable(struct rand_data *ec)
 static inline int jent_notime_switch(struct jent_notime_thread *new_thread)
 {
 	(void)new_thread;
-	return -ENOENT;
+	return -1;
 }
 
 static inline void jent_notime_force(void) { }
