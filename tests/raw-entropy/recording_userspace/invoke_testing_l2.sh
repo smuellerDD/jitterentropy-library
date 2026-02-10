@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # This test is intended to analyze the memory access entropy rate. It invokes
 # the memory access with all supported memory sizes and measures its execution
