@@ -29,6 +29,7 @@ extern "C"
 
 int jent_time_entropy_init(unsigned int osr, unsigned int flags);
 uint32_t jent_memsize(unsigned int flags);
+unsigned int jent_hashloop_cnt(unsigned int flags);
 
 #ifdef __cplusplus
 }

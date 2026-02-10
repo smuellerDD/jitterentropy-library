@@ -174,7 +174,7 @@ static inline unsigned int jent_update_memsize(unsigned int flags,
 
 		/* Adjust offset */
 		max = (max > JENT_MAX_MEMSIZE_OFFSET) ?
-			max - JENT_MAX_MEMSIZE_OFFSET :	0;
+			max - JENT_MAX_MEMSIZE_OFFSET : 0;
 	} else {
 		max += inc;
 	}
@@ -185,6 +185,24 @@ static inline unsigned int jent_update_memsize(unsigned int flags,
 	flags &= ~JENT_MAX_MEMSIZE_MASK;
 	/* Set the freshly calculated max size */
 	flags |= JENT_MAX_MEMSIZE_TO_FLAGS(max);
+
+	return flags;
+}
+
+static inline unsigned int jent_update_hashloop(unsigned int flags,
+						unsigned int inc)
+{
+	unsigned int global_max = JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP);
+	unsigned int max;
+
+	max = JENT_FLAGS_TO_HASHLOOP(flags);
+	max += inc;
+	max = (max > global_max) ? global_max : max;
+
+	/* Clear out the max size */
+	flags &= ~JENT_MAX_HASHLOOP_MASK;
+	/* Set the freshly calculated max size */
+	flags |= JENT_HASHLOOP_TO_FLAGS(max);
 
 	return flags;
 }
@@ -387,6 +405,9 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			if (!max_mem_set)
 				flags = jent_update_memsize(flags, 1);
 
+			/* Increment hash loop count by one */
+			flags = jent_update_hashloop(flags, 1);
+
 			/*
 			 * re-allocate entropy collector with higher OSR and
 			 * memory size
@@ -471,6 +492,17 @@ uint32_t jent_memsize(unsigned int flags)
 	return memsize;
 }
 
+unsigned int jent_hashloop_cnt(unsigned int flags)
+{
+	unsigned int cnt = JENT_FLAGS_TO_HASHLOOP(flags);
+
+	cnt = UINT32_C(1) << cnt;
+	if (cnt == 0)
+		cnt = JENT_HASH_LOOP_DEFAULT;
+
+	return cnt;
+}
+
 static int jent_selftest_run = 0;
 
 static struct rand_data
@@ -522,6 +554,10 @@ static struct rand_data
 			goto err;
 		entropy_collector->memaccessloops = JENT_MEMORY_ACCESSLOOPS;
 	}
+
+	/* Set the hash loop count */
+	flags = jent_update_hashloop(flags, 0);
+	entropy_collector->hashloopcnt = jent_hashloop_cnt(flags);
 
 	if (jent_sha3_alloc(&entropy_collector->hash_state))
 		goto err;

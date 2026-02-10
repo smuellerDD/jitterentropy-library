@@ -4,9 +4,8 @@
 # the memory access with all supported memory sizes and measures its execution
 # time.
 #
-# The testing (a) disables the maximum memory check to allow analyzing all
-# memory sizes, and (b) it invokes the testing with the deterministic and
-# with the quasi-random memory access pattern.
+# The testing disables the maximum memory check to allow analyzing all
+# memory sizes.
 #
 # Specifically with the deterministic memory access pattern, the measurement
 # is intended to show the access variations of the "just" the cache that
@@ -29,10 +28,6 @@
 #    reading the same byte again only happens if all other bytes are accessed
 #    which implies that by using a memory size that is larger than L1, there
 #    will always be L1 data cache-misses for accessing the bytes in the memory.
-#
-# By providing the measurement of deterministic and quasi-random (the default
-# behavior of the Jitter RNG) access patterns, the impact of the access patterns
-# on the entropy rate can be analyzed.
 #
 
 . ./invoke_testing_helper.sh

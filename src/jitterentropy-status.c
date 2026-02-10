@@ -43,6 +43,12 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 		 jent_cache_size_roundup(0), jent_cache_size_roundup(1));
 
 	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		 " Hash loop count:\n  runtime: %u\n  initialization: %u\n",
+		 jent_hashloop_cnt(ec->flags),
+		 jent_hashloop_cnt(ec->flags) * JENT_HASH_LOOP_INIT);
+
+	used = strlen(buf);
 	snprintf(buf + used, buflen - used, " Flags:\n");
 
 	used = strlen(buf);

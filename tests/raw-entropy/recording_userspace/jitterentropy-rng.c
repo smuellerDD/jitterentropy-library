@@ -30,10 +30,10 @@ int main(int argc, char * argv[])
 	int ret = 0;
 	unsigned int flags = 0, osr = 0;
 	struct rand_data *ec_nostir;
-	char status[400];
+	char status[500];
 
 	if (argc < 2) {
-		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>]\n", argv[0]);
+		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>|--hloopcnt <NUM>]\n", argv[0]);
 		return 1;
 	}
 
@@ -132,6 +132,46 @@ int main(int argc, char * argv[])
 				break;
 			default:
 				printf("Unknown maximum memory value\n");
+				return 1;
+			}
+		} else if (!strncmp(argv[1], "--hloopcnt", 10)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("Maximum memory value missing\n");
+				return 1;
+			}
+
+			val = strtoul(argv[1], NULL, 10);
+			switch (val) {
+			case 0:
+				flags |= JENT_HASHLOOP_1;
+				break;
+			case 1:
+				flags |= JENT_HASHLOOP_2;
+				break;
+			case 2:
+				flags |= JENT_HASHLOOP_4;
+				break;
+			case 3:
+				flags |= JENT_HASHLOOP_8;
+				break;
+			case 4:
+				flags |= JENT_HASHLOOP_16;
+				break;
+			case 5:
+				flags |= JENT_HASHLOOP_32;
+				break;
+			case 6:
+				flags |= JENT_HASHLOOP_64;
+				break;
+			case 7:
+				flags |= JENT_HASHLOOP_128;
+				break;
+			default:
+				printf("Unknown hashloop value\n");
 				return 1;
 			}
 		} else {

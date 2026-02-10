@@ -39,6 +39,11 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
   `JENT_NTG1` to obtain the BSI NTG.1 behavior. Its analysis tool is
   `validation-runtime/processdata_l2.sh`. See [NTG.1 Raw Noise Sources] for
   details.
+  
+* `invoke_testing_hashloop.sh`: This test tool initializes the Jitter RNG with
+  `JENT_NTG1` to obtain the BSI NTG.1 behavior. Its analysis tool is
+  `validation-runtime/processdata_hashloop.sh`. See [NTG.1 Raw Noise Sources] for
+  details.
 
 ## Recording of Raw Entropy Data
 
@@ -126,7 +131,9 @@ hardly has any interference with the memory access noise source), because
 on bigger CPUs like Intel, the Keccak state fits into registers and thus the
 "hash loop" measurement outlined in [NTG.1 Recording] measures this operation.
 This is due to the fact that the "hash loop" measurement exclusively times
-the Keccak operation.
+the Keccak operation. Nonetheless, if the hash loop provides insufficient
+data, the analysis script `invoke_testing_hashloop.sh` can be invoked. The
+data is analyzed with `validation-runtime/processdata_hashloop.sh`.
 
 However, for the memory access, only the access to L2 or higher caches or the
 main RAM are considered relevant, because the L1 at least to some degree used by

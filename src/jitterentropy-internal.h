@@ -170,9 +170,10 @@ extern "C" {
 #endif
 
 /*
- * Hash loop initialization count: This value defines the hash loop count
- * during initialization phase, when the SHA-3-based loop is the sole entropy
- * provider. Typically a higher iteration count is necessary to take enough time.
+ * Hash loop initialization count: This value defines the multiplier of the
+ * hash loop count during initialization phase, when the SHA-3-based loop is the
+ * sole entropy provider. Typically a higher iteration count is necessary to
+ * take enough time.
  *
  * It is permissible to configure this value differently at compile time if the
  * observed entropy rate is too small.
@@ -260,6 +261,8 @@ struct rand_data
 	unsigned int memlocation; 	/* Pointer to byte in *mem */
 	unsigned int memaccessloops;	/* Number of memory accesses per random
 					 * bit generation */
+
+	unsigned int hashloopcnt;	/* Hash loop count */
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */
