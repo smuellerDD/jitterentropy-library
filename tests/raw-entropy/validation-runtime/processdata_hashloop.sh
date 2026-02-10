@@ -12,7 +12,7 @@ NONIID_DATA="$(for i in ../results-measurements/jent*; do basename $i; done)"
 # Code only after this line -- do not change               #
 ############################################################
 
-#. ./processdata_helper.sh
+. ./processdata_helper.sh
 
 size=0
 deterministic=""
