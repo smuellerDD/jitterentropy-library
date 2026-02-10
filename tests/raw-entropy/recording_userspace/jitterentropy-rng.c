@@ -30,7 +30,7 @@ int main(int argc, char * argv[])
 	int ret = 0;
 	unsigned int flags = 0, osr = 0;
 	struct rand_data *ec_nostir;
-	char status[500];
+	char status[600];
 
 	if (argc < 2) {
 		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>|--hloopcnt <NUM>]\n", argv[0]);
