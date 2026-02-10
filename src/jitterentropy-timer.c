@@ -52,7 +52,7 @@ int jent_notime_init(void **ctx)
 
 	/* We need at least two CPUs to enable the timer thread */
 	if (ncpu < 2)
-		return -EOPNOTSUPP;
+		return -ENOENT;
 
 	thread_ctx = calloc(1, sizeof(struct jent_notime_ctx));
 	if (!thread_ctx)
