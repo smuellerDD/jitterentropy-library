@@ -134,7 +134,6 @@ if(EXTERNAL_CRYPTO)
     endif()
     message(STATUS "Found external crypto library ${LIBCRYPTO_LIBRARY}")
     target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBCRYPTO_LIBRARY})
-
 endif()
 
 if(INTERNAL_TIMER AND NOT ${ANDROID})
