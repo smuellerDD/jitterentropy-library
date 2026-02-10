@@ -85,6 +85,11 @@
 #include <unistd.h>
 #endif
 
+/* Override this, if you want to allocate more than 2 MB of secure memory */
+#ifndef JENT_SECURE_MEMORY_SIZE_MAX
+#define JENT_SECURE_MEMORY_SIZE_MAX 2097152
+#endif
+
 #if (__x86_64__) || (__i386__)
 /* Support rdtsc read on 64-bit and 32-bit x86 architectures */
 
@@ -255,6 +260,9 @@ static inline void jent_get_nstime(uint64_t *out)
 
 static inline void *jent_zalloc(size_t len)
 {
+	#define JENT_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+	#define JENT_IS_POWER_OF_2(n) (JENT_BUILD_BUG_ON((n & (n - 1)) != 0))
+
 	void *tmp = NULL;
 #ifdef LIBGCRYPT
 	/* Set the maximum usable locked memory to 2 MiB at fist call.
@@ -263,7 +271,7 @@ static inline void *jent_zalloc(size_t len)
 	 * also use libgcrypt at other places in your software!
 	 */
 	if (!gcry_control (GCRYCTL_INITIALIZATION_FINISHED_P)) {
-		gcry_control(GCRYCTL_INIT_SECMEM, 2097152, 0);
+		gcry_control(GCRYCTL_INIT_SECMEM, JENT_SECURE_MEMORY_SIZE_MAX, 0);
 		gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
 	}
 	/* When using the libgcrypt secure memory mechanism, all precautions
@@ -286,8 +294,9 @@ static inline void *jent_zalloc(size_t len)
 	 *
 	 * May preallocate more before making the first
 	 * call into jitterentropy!*/
+	JENT_IS_POWER_OF_2(JENT_SECURE_MEMORY_SIZE_MAX);
 	if (CRYPTO_secure_malloc_initialized() ||
-	    CRYPTO_secure_malloc_init(2097152, 32)) {
+	    CRYPTO_secure_malloc_init(JENT_SECURE_MEMORY_SIZE_MAX, 32)) {
 		tmp = OPENSSL_secure_malloc(len);
 	}
 #define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
@@ -305,6 +314,9 @@ static inline void *jent_zalloc(size_t len)
 	if(NULL != tmp)
 		memset(tmp, 0, len);
 	return tmp;
+
+#undef JENT_IS_POWER_OF_2
+#undef JENT_BUILD_BUG_ON
 }
 
 static inline void jent_memset_secure(void *s, size_t n)
