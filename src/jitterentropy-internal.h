@@ -224,20 +224,17 @@ struct rand_data
 	enum jent_startup_state startup_state;
 
 /* The step size should be larger than the cacheline size. */
-#ifndef JENT_MEMORY_BITS
-# define JENT_MEMORY_BITS 17
-#endif
-#ifndef JENT_MEMORY_SIZE
-# define JENT_MEMORY_SIZE (UINT32_C(1)<<JENT_MEMORY_BITS)
+#ifndef JENT_DEFAULT_MEMORY_BITS
+# define JENT_DEFAULT_MEMORY_BITS 18
 #endif
 #ifndef JENT_MEMORY_BLOCKSIZE
 # define JENT_MEMORY_BLOCKSIZE 128
 #endif
-#define JENT_MEMORY_BLOCKS (JENT_MEMORY_SIZE / JENT_MEMORY_BLOCKSIZE)
+#define JENT_MEMORY_BLOCKS(ec) ((ec->memmask + 1) / JENT_MEMORY_BLOCKSIZE)
 
 #define JENT_MEMORY_ACCESSLOOPS 128
 	unsigned char *mem;		/* Memory access location with size of
-					 * JENT_MEMORY_SIZE or memsize */
+					 * memmask + 1 */
 
 	uint32_t memmask;		/* Memory mask (size of memory - 1) */
 	unsigned int memlocation; 	/* Pointer to byte in *mem */

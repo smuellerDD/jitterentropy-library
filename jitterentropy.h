@@ -91,6 +91,10 @@ extern "C" {
 					     including full SP800-90B
 					     compliance. */
 #define JENT_NTG1 (1<<6) /* AIS 20/31 NTG.1 compliance */
+#define JENT_CACHE_ALL (1<<7) /* Shall size of all caches be used to
+				 automatically determine the memory size for the
+				 memory access? By default it is only the L1
+				 cache size. */
 
 /* Flags field limiting the amount of memory to be used for memory access */
 #define JENT_FLAGS_TO_MEMSIZE_SHIFT	27
@@ -117,7 +121,7 @@ extern "C" {
 #define JENT_MAX_MEMSIZE_256MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(19))
 #define JENT_MAX_MEMSIZE_512MB		JENT_MAX_MEMSIZE_TO_FLAGS(UINT32_C(20))
 #define JENT_MAX_MEMSIZE_MAX		JENT_MAX_MEMSIZE_512MB
-#define JENT_MAX_MEMSIZE_MASK		JENT_MAX_MEMSIZE_MAX
+#define JENT_MAX_MEMSIZE_MASK		JENT_MAX_MEMSIZE_TO_FLAGS(0xffffffff)
 /*
  * We start at 1kB -> offset is log2(1024) - 1 as the flag value above is added
  * to this offset.

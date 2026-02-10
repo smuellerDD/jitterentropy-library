@@ -119,10 +119,9 @@ appropriate for you. As you need exactly one memory setting, analyze again
 the results to detect the memory setting that gives suitable entropy rates
 for both, the runtime and restart tests.
 
-Once you found the suitable memory setting, compile the Jitter RNG library
-with the following defines:
-
-`CFLAGS="-DJENT_MEMORY_BLOCKS=<blocks> -DJENT_MEMORY_BLOCKSIZE=<blocksize>"`
+Once you found the suitable memory setting, invoke the Jitter RNG with the
+respective option `JENT_MAX_MEMSIZE_*` as flag in `jent_entropy_init_ex` and
+`jent_entropy_collector_alloc`.
 
 ### Example - JENT_RANDOM_MEMACCESS not defined
 
@@ -152,12 +151,9 @@ You now conclude that the following line is good for you:
 64      512      0.401778
 ```
 
-This now implies that your CFLAGS setting for compiling the Jitter RNG is
-
-`CFLAGS="-DJENT_MEMORY_BLOCKS=64 -DJENT_MEMORY_BLOCKSIZE=512"`
-
-Note, the Jitter RNG will allocate JENT_MEMORY_BLOCKS * JENT_MEMORY_BLOCKSIZE
-bytes for its memory access operation.
+Once you found the suitable memory setting, invoke the Jitter RNG with the
+respective option `JENT_MAX_MEMSIZE_*` as flag in `jent_entropy_init_ex` and
+`jent_entropy_collector_alloc`.
 
 ### Example - JENT_RANDOM_MEMACCESS defined
 
@@ -201,20 +197,9 @@ underestimates the available entropy - which is the result you want.
 
 This value means that the allocated memory is 2^21 = 2MBytes.
 
-You now have two options how to apply this value: either recompiling the
-library and use this value as the default allocation or use it as
-a flags field when allocating your Jitter RNG instance which does not
-need to change the binary.
-
-When recompiling, you need to apply the value `21` with your
-CFLAGS setting for compiling the Jitter RNG like this:
-
-`CFLAGS="-DJENT_MEMORY_BITS=21"`
-
-When using the value to allocate the Jitter RNG instance when you did not
-recompile the library code you specify this value when invoking
-`jent_entropy_init_ex` and `jent_entropy_collector_alloc` by adding the
-following to your flags field:
+Once you found the suitable memory setting, invoke the Jitter RNG with the
+respective option `JENT_MAX_MEMSIZE_*` as flag in `jent_entropy_init_ex` and
+`jent_entropy_collector_alloc` as follows:
 
 ```
 unsigned int flags = 0;

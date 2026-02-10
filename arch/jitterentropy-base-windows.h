@@ -134,8 +134,9 @@ static inline long jent_ncpu(void)
 
 static inline void jent_yield(void) { }
 
-static inline uint32_t jent_cache_size_roundup(void)
+static inline uint32_t jent_cache_size_roundup(int all_caches)
 {
+	(void)all_caches;
 	return 0;
 }
 

@@ -195,7 +195,7 @@ int main(int argc, char * argv[])
 	char pathname[4096];
 
 	if (argc < 4) {
-		printf("%s <rounds per repeat> <number of repeats> <filename> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess]\n", argv[0]);
+		printf("%s <rounds per repeat> <number of repeats> <filename> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches]\n", argv[0]);
 		return 1;
 	}
 
@@ -226,6 +226,8 @@ int main(int argc, char * argv[])
 			flags |= JENT_DISABLE_INTERNAL_TIMER;
 		else if (!strncmp(argv[1], "--force-internal-timer", 22))
 			flags |= JENT_FORCE_INTERNAL_TIMER;
+		else if (!strncmp(argv[1], "--all-caches", 12))
+			flags |= JENT_CACHE_ALL;
 		else if (!strncmp(argv[1], "--hashloop", 10))
 			jent_es |= jent_hashloop;
 		else if (!strncmp(argv[1], "--memaccess", 11))

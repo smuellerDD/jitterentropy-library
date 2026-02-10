@@ -127,21 +127,25 @@ static inline void jent_yield(void)
 	sched_yield();
 }
 
-static inline uint32_t jent_cache_size_roundup(void)
+static inline uint32_t jent_cache_size_roundup(int all_caches)
 {
 #ifdef __linux__
 	long l1 = sysconf(_SC_LEVEL1_DCACHE_SIZE);
-	long l2 = sysconf(_SC_LEVEL2_CACHE_SIZE);
-	long l3 = sysconf(_SC_LEVEL3_CACHE_SIZE);
 	uint32_t cache_size = 0;
 
 	/* Cache size reported by system */
 	if (l1 > 0)
 		cache_size += (uint32_t)l1;
-	if (l2 > 0)
-		cache_size += (uint32_t)l2;
-	if (l3 > 0)
-		cache_size += (uint32_t)l3;
+
+	if (all_caches) {
+		long l2 = sysconf(_SC_LEVEL2_CACHE_SIZE);
+		long l3 = sysconf(_SC_LEVEL3_CACHE_SIZE);
+
+		if (l2 > 0)
+			cache_size += (uint32_t)l2;
+		if (l3 > 0)
+			cache_size += (uint32_t)l3;
+	}
 
 	/* Force the output_size to be of the form (bounding_power_of_2 - 1). */
 	cache_size |= (cache_size >> 1);
@@ -158,6 +162,7 @@ static inline uint32_t jent_cache_size_roundup(void)
 
 	return cache_size;
 #else
+	(void)all_caches;
 	return 0;
 #endif
 }

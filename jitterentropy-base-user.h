@@ -389,7 +389,7 @@ static inline long jent_ncpu(void)
      defined(_SC_LEVEL2_CACHE_SIZE) &&					\
      defined(_SC_LEVEL3_CACHE_SIZE)
 
-static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
+static inline void jent_get_cachesize_sysconf(long *l1, long *l2, long *l3)
 {
 	*l1 = sysconf(_SC_LEVEL1_DCACHE_SIZE);
 	*l2 = sysconf(_SC_LEVEL2_CACHE_SIZE);
@@ -398,7 +398,15 @@ static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
 
 # else
 
-static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
+static inline void jent_get_cachesize_sysconf(long *l1, long *l2, long *l3)
+{
+	*l1 = 0;
+	*l2 = 0;
+	*l3 = 0;
+}
+# endif
+
+static inline void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 {
 #define JENT_SYSFS_CACHE_DIR "/sys/devices/system/cpu/cpu0/cache"
 	long val;
@@ -469,9 +477,32 @@ static inline void jent_get_cachesize(long *l1, long *l2, long *l3)
 #undef JENT_SYSFS_CACHE_DIR
 }
 
-# endif
+static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
+						 int all_caches)
+{
+	uint32_t cache_size = 0;
 
-static inline uint32_t jent_cache_size_roundup(void)
+	/* Cache size reported by system */
+	if (l1 > 0)
+		cache_size += (uint32_t)l1;
+	if (all_caches) {
+		if (l2 > 0)
+			cache_size += (uint32_t)l2;
+		if (l3 > 0)
+			cache_size += (uint32_t)l3;
+	}
+
+	/* Force the output_size to be of the form (bounding_power_of_2 - 1). */
+	cache_size |= (cache_size >> 1);
+	cache_size |= (cache_size >> 2);
+	cache_size |= (cache_size >> 4);
+	cache_size |= (cache_size >> 8);
+	cache_size |= (cache_size >> 16);
+
+	return cache_size;
+}
+
+static inline uint32_t jent_cache_size_roundup(int all_caches)
 {
 	static int checked = 0;
 	static uint32_t cache_size = 0;
@@ -479,29 +510,18 @@ static inline uint32_t jent_cache_size_roundup(void)
 	if (!checked) {
 		long l1 = 0, l2 = 0, l3 = 0;
 
-		jent_get_cachesize(&l1, &l2, &l3);
+		jent_get_cachesize_sysconf(&l1, &l2, &l3);
 		checked = 1;
 
-		/* Cache size reported by system */
-		if (l1 > 0)
-			cache_size += (uint32_t)l1;
-		if (l2 > 0)
-			cache_size += (uint32_t)l2;
-		if (l3 > 0)
-			cache_size += (uint32_t)l3;
+		cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
+		if (cache_size == 0) {
+			jent_get_cachesize_sysfs(&l1, &l2, &l3);
+			cache_size = jent_cache_size_to_memory(l1, l2, l3,
+							       all_caches);
 
-		/*
-		 * Force the output_size to be of the form
-		 * (bounding_power_of_2 - 1).
-		 */
-		cache_size |= (cache_size >> 1);
-		cache_size |= (cache_size >> 2);
-		cache_size |= (cache_size >> 4);
-		cache_size |= (cache_size >> 8);
-		cache_size |= (cache_size >> 16);
-
-		if (cache_size == 0)
-			return 0;
+			if (cache_size == 0)
+				return 0;
+		}
 
 		/*
 		 * Make the output_size the smallest power of 2 strictly
