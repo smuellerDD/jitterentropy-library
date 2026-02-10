@@ -27,10 +27,15 @@ extern "C"
 {
 #endif
 
+JENT_PRIVATE_STATIC
 int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr);
+JENT_PRIVATE_STATIC
 uint64_t *jent_gcd_init(size_t nelem);
+JENT_PRIVATE_STATIC
 void jent_gcd_fini(uint64_t *delta_history, size_t nelem);
+JENT_PRIVATE_STATIC
 int jent_gcd_get(uint64_t *value);
+JENT_PRIVATE_STATIC
 int jent_gcd_selftest(void);
 
 /* Watch for common adjacent GCD values */
