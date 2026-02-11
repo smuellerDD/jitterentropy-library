@@ -63,6 +63,9 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 #ifdef JENT_TEST_BINARY_OUTPUT
 	size_t recordsWritten;
 #endif
+	unsigned int (*measure_jitter)(struct rand_data *ec,
+			               uint64_t loop_cnt,
+				       uint64_t *ret_current_delta);
 
 	FILE *out = NULL;
 	int ret = 0;
@@ -117,26 +120,25 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	       ec->memmask + 1, ec->hashloopcnt * JENT_HASH_LOOP_INIT);
 #endif
 
+	switch (jent_es) {
+	case jent_hashloop:
+		measure_jitter = jent_measure_jitter_ntg1_sha3;
+		break;
+	case jent_memaccess_loop:
+		measure_jitter = jent_measure_jitter_ntg1_memaccess;
+		break;
+	case jent_common:
+	default:
+		measure_jitter = jent_measure_jitter;
+		break;
+	}
 
 	/* Prime the test */
 	if (jent_es == jent_common)
 		jent_measure_jitter(ec, 0, NULL);
 	for (size = 0; size < rounds; size++) {
 		/* Disregard stuck indicator */
-		switch (jent_es) {
-		case jent_hashloop:
-			jent_measure_jitter_ntg1_sha3(ec, loopcnt,
-						      &duration[size]);
-			break;
-		case jent_memaccess_loop:
-			jent_measure_jitter_ntg1_memaccess(ec, loopcnt,
-							   &duration[size]);
-			break;
-		case jent_common:
-		default:
-			jent_measure_jitter(ec, loopcnt, &duration[size]);
-			break;
-		}
+		measure_jitter(ec, loopcnt, &duration[size]);
 	}
 
 #ifdef JENT_TEST_BINARY_OUTPUT
