@@ -85,6 +85,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
+
 /* Override this, if you want to allocate more than 2 MB of secure memory */
 #ifndef JENT_SECURE_MEMORY_SIZE_MAX
 #define JENT_SECURE_MEMORY_SIZE_MAX 2097152
@@ -484,6 +488,34 @@ static inline void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 #undef JENT_SYSFS_CACHE_DIR
 }
 
+#endif
+
+#ifdef __APPLE__
+
+static inline void jent_get_cachesize_sysconf(long *l1, long *l2, long *l3)
+{
+	size_t size;
+
+	size = sizeof(*l1);
+	if (sysctlbyname("hw.l1dcachesize", l1, &size, NULL, 0) != 0) {
+		*l1 = 0;
+	}
+
+	size = sizeof(*l2);
+	if (sysctlbyname("hw.l2cachesize", l2, &size, NULL, 0) != 0) {
+		*l2 = 0;
+	}
+
+	size = sizeof(*l3);
+	if (sysctlbyname("hw.l3cachesize", l3, &size, NULL, 0) != 0) {
+		*l3 = 0;
+	}
+}
+
+#endif
+
+#if defined(__linux__) || defined(__APPLE__)
+
 static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
 						 int all_caches)
 {
@@ -522,6 +554,7 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 		checked = checked_all_caches;
 
 		cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
+		#ifdef __linux__
 		if (cache_size == 0) {
 			jent_get_cachesize_sysfs(&l1, &l2, &l3);
 			cache_size = jent_cache_size_to_memory(l1, l2, l3,
@@ -530,6 +563,7 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 			if (cache_size == 0)
 				return 0;
 		}
+		#endif
 
 		/*
 		 * Make the output_size the smallest power of 2 strictly
@@ -541,7 +575,7 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 	return cache_size;
 }
 
-#else /* __linux__ */
+#else /* __linux__ || __APPLE__ */
 
 static inline uint32_t jent_cache_size_roundup(int all_caches)
 {
@@ -549,7 +583,7 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 	return 0;
 }
 
-#endif /* __linux__ */
+#endif /* __linux__ || __APPLE__ */
 
 static inline void jent_yield(void)
 {
