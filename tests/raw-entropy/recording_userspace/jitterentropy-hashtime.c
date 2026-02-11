@@ -280,7 +280,7 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);;
+			val = strtoul(argv[1], NULL, 10);
 			switch (val) {
 			case 0:
 				/* Allow to set no option */
@@ -355,7 +355,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("Maximum memory value missing\n");
+				printf("Hash loop count value missing\n");
 				return 1;
 			}
 
