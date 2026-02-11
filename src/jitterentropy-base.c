@@ -552,7 +552,7 @@ static struct rand_data
 		entropy_collector->memmask = memsize - 1;
 		if (entropy_collector->mem == NULL)
 			goto err;
-		entropy_collector->memaccessloops = JENT_MEMORY_ACCESSLOOPS;
+		entropy_collector->memaccessloops = JENT_MEM_ACC_LOOP_DEFAULT;
 	}
 
 	/* Set the hash loop count */

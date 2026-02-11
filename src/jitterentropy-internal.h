@@ -149,7 +149,26 @@ extern "C" {
  * jitterentropy-hashtime tool with the command line option of --memaccess.
  */
 #ifndef JENT_MEM_ACC_LOOP_DEFAULT
-#define JENT_MEM_ACC_LOOP_DEFAULT 1
+#define JENT_MEM_ACC_LOOP_DEFAULT 128
+#endif
+
+/*
+ * Memory access loop initialization count: This value defines the multiplier of
+ * the memory access loop count during initialization phase, when the memory
+ * access based loop is the sole entropy provider. Typically a higher iteration
+ * count is necessary to take enough time.
+ *
+ * It is permissible to configure this value differently at compile time if the
+ * observed entropy rate is too small.
+ *
+ * NOTE: When you modify this value, you are directly altering the behavior of
+ * the noise source during NTG.1 initialization.
+ * Make sure you fully understand what you do. If you want to
+ * individually measure the hash loop entropy rate, use the
+ * jitterentropy-hashtime tool with the command line option of --hashloop.
+ */
+#ifndef JENT_MEM_ACC_LOOP_INIT
+#define JENT_MEM_ACC_LOOP_INIT 3
 #endif
 
 /*
@@ -253,7 +272,6 @@ struct rand_data
 #endif
 #define JENT_MEMORY_BLOCKS(ec) ((ec->memmask + 1) / JENT_MEMORY_BLOCKSIZE)
 
-#define JENT_MEMORY_ACCESSLOOPS 128
 	unsigned char *mem;		/* Memory access location with size of
 					 * memmask + 1 */
 
