@@ -27,6 +27,7 @@
 #include <assert.h>
 
 #include "jitterentropy.h"
+#include "jitterentropy-internal.h"
 
 /* We use a linear interpolation to estimate where the value is going to be.
  * The way these variable are named, this is technically the inverse function
