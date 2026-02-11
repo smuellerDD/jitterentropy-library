@@ -690,6 +690,10 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 {
 	if (entropy_collector != NULL) {
 		jent_sha3_dealloc(entropy_collector->hash_state);
+
+		/* Safety measure */
+		jent_notime_unsettick(entropy_collector);
+
 		jent_notime_disable(entropy_collector);
 		if (entropy_collector->mem != NULL) {
 			jent_zfree(entropy_collector->mem,
