@@ -496,9 +496,10 @@ unsigned int jent_hashloop_cnt(unsigned int flags)
 {
 	unsigned int cnt = JENT_FLAGS_TO_HASHLOOP(flags);
 
-	cnt = UINT32_C(1) << cnt;
 	if (cnt == 0)
 		cnt = JENT_HASH_LOOP_DEFAULT;
+	else
+		cnt = UINT32_C(1) << cnt;
 
 	return cnt;
 }
