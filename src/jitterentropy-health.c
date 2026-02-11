@@ -377,8 +377,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		if (ec->apt_count >= ec->apt_cutoff_permanent)
 			ec->health_failure |= JENT_APT_FAILURE_PERMANENT;
 		else if (ec->apt_count == ec->apt_cutoff)
-fprintf(stderr, "intermediate failure\n");
-			//ec->health_failure |= JENT_APT_FAILURE;
+			ec->health_failure |= JENT_APT_FAILURE;
 	}
 
 	ec->apt_observations++;
