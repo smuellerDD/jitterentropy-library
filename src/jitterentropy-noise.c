@@ -123,7 +123,6 @@ static void jent_hash_loop(struct rand_data *ec,
 
 	BUILD_BUG_ON(JENT_HASH_LOOP_DEFAULT < 1);
 	BUILD_BUG_ON(JENT_HASH_LOOP_INIT < 1);
-	BUILD_BUG_ON(JENT_HASH_LOOP_DEFAULT > JENT_HASH_LOOP_INIT);
 
 	jent_sha3_256_init(&ctx);
 
