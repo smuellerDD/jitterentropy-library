@@ -26,7 +26,7 @@
 
 int main(int argc, char * argv[])
 {
-	unsigned long size, rounds;
+	unsigned long long size, rounds;
 	int ret = 0;
 	unsigned int flags = 0, osr = 0;
 	struct rand_data *ec_nostir;
@@ -37,8 +37,8 @@ int main(int argc, char * argv[])
 		return 1;
 	}
 
-	rounds = strtoul(argv[1], NULL, 10);
-	if (rounds >= UINT_MAX)
+	rounds = strtoull(argv[1], NULL, 10);
+	if (rounds >= ULLONG_MAX)
 		return 1;
 	argc--;
 	argv++;
@@ -207,7 +207,7 @@ int main(int argc, char * argv[])
 		char tmp[32];
 
 		if (0 > jent_read_entropy_safe(&ec_nostir, tmp, sizeof(tmp))) {
-			fprintf(stderr, "FIPS 140-2 continuous test failed\n");
+			fprintf(stderr, "FIPS 140-3 health test failed\n");
 			ret = 1;
 			goto out;
 		}
