@@ -20,3 +20,5 @@ function(testprogram name)
 endfunction()
 
 testprogram(jitterentropy-hashtime)
+testprogram(jitterentropy-osr)
+testprogram(jitterentropy-rng)
