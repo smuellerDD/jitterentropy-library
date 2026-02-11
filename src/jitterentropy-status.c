@@ -50,13 +50,13 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		 " Memory Access loop count: %u\n",
-		 JENT_MEMORY_ACCESSLOOPS);
+		 " Memory Access loop count:\n  base: %u\n  extra: %u\n",
+		 JENT_MEMORY_ACCESSLOOPS, JENT_MEM_ACC_LOOP_DEFAULT);
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		" Secure Memory: %i\n",
-			jent_secure_memory_supported());
+		 " Secure Memory: %i\n",
+		 jent_secure_memory_supported());
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used, " Flags:\n");
