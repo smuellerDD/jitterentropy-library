@@ -835,7 +835,8 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 out:
 	jent_gcd_fini(delta_history, JENT_POWERUP_TESTLOOPCOUNT);
 
-	if ((flags & JENT_FORCE_INTERNAL_TIMER) && ec)
+	/* NOOP if notime disabled. Can be done unconditionally */
+	if (ec)
 		jent_notime_unsettick(ec);
 
 	jent_entropy_collector_free(ec);
