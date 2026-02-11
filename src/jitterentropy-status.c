@@ -57,7 +57,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
 		" Secure Memory: %i\n",
-		jent_secure_memory_supported());
+			jent_secure_memory_supported());
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used, " Flags:\n");

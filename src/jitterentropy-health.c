@@ -266,7 +266,7 @@ static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
  * See the SP 800-90B comment #10b for the corrected cutoff for the SP 800-90B
  * APT.
  * http://www.untruth.org/~josh/sp80090b/UL%20SP800-90B-final%20comments%20v1.9%2020191212.pdf
- * In in the syntax of R, this is C = 2 + qbinom(1 - 2^(-30), 511, 2^(-1/osr)).
+ * In in the syntax of R, this is C = 2 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
  * (The original formula wasn't correct because the first symbol must
  * necessarily have been observed, so there is no chance of observing 0 of these
  * symbols.)
@@ -279,30 +279,12 @@ static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
  * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that
  * renders the test unable to fail).
  */
-//static const unsigned int jent_apt_cutoff_lookup[15]=
-//	{ 325, 422, 459, 477, 488, 494, 499, 502,
-//	  505, 507, 508, 509, 510, 511, 512 };
+static const unsigned int jent_apt_cutoff_lookup[15]=
+	{ 325, 422, 459, 477, 488, 494, 499, 502,
+	  505, 507, 508, 509, 510, 511, 512 };
 static const unsigned int jent_apt_cutoff_permanent_lookup[15]=
 	{ 355, 447, 479, 494, 502, 507, 510, 512,
 	  512, 512, 512, 512, 512, 512, 512 };
-
-/*
- * For NTG.1: 8-fold security margin during startup
- *
- * C = 2 + qbinom(1 - 2^(-30), 511, 2^(-8/osr))
- */
-static const unsigned int jent_apt_cutoff_lookup[15]=
-	{ 17, 71, 136, 191, 236, 272, 301, 325,
-	  345, 361, 375, 388, 398, 407, 415 };
-
-/*
- * For NTG.1: 4-fold security margin during startup
- *
- * C = 2 + qbinom(1 - 2^(-30), 511, 2^(-4/osr))
- */
-// static const unsigned int jent_apt_cutoff_lookup[15]=
-// 	{ 71, 191, 272, 325, 361, 388, 407, 422,
-// 	  434, 444, 452, 459, 464, 469, 473 };
 
 static void jent_apt_init(struct rand_data *ec, unsigned int osr)
 {
@@ -377,8 +359,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 		if (ec->apt_count >= ec->apt_cutoff_permanent)
 			ec->health_failure |= JENT_APT_FAILURE_PERMANENT;
 		else if (ec->apt_count == ec->apt_cutoff)
-fprintf(stderr, "intermediate failure\n");
-			//ec->health_failure |= JENT_APT_FAILURE;
+			ec->health_failure |= JENT_APT_FAILURE;
 	}
 
 	ec->apt_observations++;
