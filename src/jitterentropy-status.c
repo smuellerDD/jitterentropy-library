@@ -60,6 +60,11 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 		jent_secure_memory_supported());
 
 	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		" Internal Timer: %i\n",
+		ec->enable_notime);
+
+	used = strlen(buf);
 	snprintf(buf + used, buflen - used, " Flags:\n");
 
 	used = strlen(buf);
