@@ -29,9 +29,12 @@ pair_filedata <- odd_filedata * 1000000 + even_filedata
 first_filedata <- filedata[c(TRUE,FALSE,FALSE)]
 second_filedata <- filedata[c(FALSE,TRUE,FALSE)]
 third_filedata <- filedata[c(FALSE,FALSE,TRUE)]
-# Now calculate the pairs by simply "concatenating" the data. As R cannot really concatenate, we multiply the third by 10,000 * 10,000 and the second by 10,000 (an arbitrary value to guarantee be larger than the largest value in file data) and add the first entries
-triplet_filedata <- (third_filedata * 10000 * 10000) + (second_filedata * 10000) + first_filedata
 
-round(min.entropy(filedata), 3)
-round(min.entropy(pair_filedata), 3) / 2
-round(min.entropy(triplet_filedata), 3) / 3
+first_filedata <- first_filedata[0:length(second_filedata)]
+
+# Now calculate the pairs by simply "concatenating" the data. As R cannot really concatenate, we multiply the third by 1,000 * 1,000 and the second by 1,000 (an arbitrary value to guarantee be larger than the largest value in file data) and add the first entries
+triplet_filedata <- (third_filedata * 1000 * 1000) + (second_filedata * 1000) + first_filedata
+
+min.entropy(filedata)
+min.entropy(pair_filedata) / 2
+min.entropy(triplet_filedata) / 3
