@@ -159,15 +159,15 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 
 out:
 	free(duration);
-	if (flags & JENT_FORCE_INTERNAL_TIMER) {
-		if (ec)
-			jent_notime_unsettick(ec);
-	}
+
 	if (out)
 		fclose(out);
 
-	if (ec)
+	if (ec) {
+		/* checks internally if timer was used, maybe NOOP */
+		jent_notime_unsettick(ec);
 		jent_entropy_collector_free(ec);
+	}
 
 	return ret;
 }
