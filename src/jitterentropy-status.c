@@ -56,13 +56,19 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		" Secure Memory: %i\n",
-		jent_secure_memory_supported());
+		 " Secure Memory: %i\n", jent_secure_memory_supported());
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		" Internal Timer: %i\n",
-		ec->enable_notime);
+		 " Internal Timer: %i\n", ec->enable_notime);
+
+	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		 " FIPS mode: %i\n", ec->fips_enabled);
+
+	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		 " AIS 20/31 NTG.1 mode: %i\n", !!(ec->flags & JENT_NTG1));
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used, " Flags:\n");
