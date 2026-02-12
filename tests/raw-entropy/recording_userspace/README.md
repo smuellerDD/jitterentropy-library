@@ -35,9 +35,9 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
   to obtain the entropy rate for each data stream. See [NTG.1 Recording] for
   details.
   
-* `invoke_testing_l2.sh`: This test tool initializes the Jitter RNG with
+* `invoke_testing_memloop.sh`: This test tool initializes the Jitter RNG with
   `JENT_NTG1` to obtain the BSI NTG.1 behavior. Its analysis tool is
-  `validation-runtime/processdata_l2.sh`. See [NTG.1 Raw Noise Sources] for
+  `validation-runtime/processdata_memloop.sh`. See [NTG.1 Raw Noise Sources] for
   details.
   
 * `invoke_testing_hashloop.sh`: This test tool initializes the Jitter RNG with
@@ -139,7 +139,7 @@ However, for the memory access, only the access to L2 or higher caches or the
 main RAM are considered relevant, because the L1 at least to some degree used by
 the hash loop operation and the remainder of the Jitter RNG logic as well
 (e.g. the initial fetches). To achieve that testing of mainly the L2 cache, the
-script `invoke_testing_l2.sh` invokes the memory access loop with the
+script `invoke_testing_memloop.sh` invokes the memory access loop with the
 "deterministic" access pattern. This ensures the following:
 
 * the decision on which byte in the memory array to access is determined with
@@ -159,9 +159,9 @@ for the timing variations when selecting a memory block size that is larger than
 the L1 data cache size. This approach now allows to almost exclusively
 measure the timing variations derived from L2 or higher caches, or RAM itself.
   
-The script `invoke_testing_l2.sh` performs the testing with all commonly
+The script `invoke_testing_memloop.sh` performs the testing with all commonly
 supported memory sizes. Along with the analysis script 
-`validation-runtime/processdata_l2.sh` the entropy rate for each memory block
-size is calculated. When now the memory sizes that are larger than the tested
-CPU's L1 data cache are considered, the entropy rate that almost entirely
+`validation-runtime/processdata_memloop.sh` the entropy rate for each memory
+block size is calculated. When now the memory sizes that are larger than the
+tested CPU's L1 data cache are considered, the entropy rate that almost entirely
 is derived from L2 is visible.

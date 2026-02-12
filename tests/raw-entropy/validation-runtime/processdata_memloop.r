@@ -3,11 +3,11 @@
 #
 
 # Data to be modified: provide the cache size here in bytes
-L1 <- 544 * 1024
-L2 <- 11.5 * 1024 * 1024
+L1 <- 48 * 1024
+L2 <- 2 * 1024 * 1024
 L3 <- 24 * 1024 * 1024
 
-# Load the file created by processdata_l2.sh
+# Load the file created by processdata_memloop.sh
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) != 1) {
@@ -18,15 +18,12 @@ src <- args[1]
 out <- args[1]
 
 deterministic <- scan(src, sep=",", nlines=1, what=numeric())
-#quasirandom <- scan(src, sep=",", nlines=1, skip=1, what=numeric())
 min_deterministic <- scan(src, sep=",", nlines=1, skip=1, what=numeric())
-#min_quasirandom <- scan(src, sep=",", nlines=1, skip=3, what=numeric())
 min_pairs_deterministic <- scan(src, sep=",", nlines=1, skip=2, what=numeric())
 min_triple_deterministic <- scan(src, sep=",", nlines=1, skip=3, what=numeric())
 
 x <- c(1:length(deterministic))
 coln <- c("Deterministic Memory Access (90B Entropy)", "Deterministic Memory Access (Min Entropy)", "Deterministic Memory Access (Min Entropy Pairs)", "Deterministic Memory Access (Min Entropy Triplets)")
-#coln <- c("Deterministic Memory Access (90B Entropy)", "Quasirandom Memory Access (90B Entropy)", "Deterministic Memory Access (Min Entropy)", "Quasirandom Memory Access (Min Entropy)")
 rown <- c("1kB", "2kB", "4kB", "8kB", "16kB", "32kB", "64kB", "128kB", "256kB", "512kB",
 	  "1MB", "2MB", "4MB", "8MB", "16MB", "32MB", "64MB", "128MB", "256MB", "512MB")
 
@@ -49,11 +46,7 @@ plot(x, deterministic, xlim=c(1,20), ylim=c(0, 8),
 	ylab="Entropy Rate [bits/time delta]", type="b")
 
 lines(x, deterministic, type = "b", col = "red")
-#lines(x, quasirandom, type = "b", col = "blue")
-
 lines(x, min_deterministic, type = "b", col = "blue")
-#lines(x, min_quasirandom, type = "b", col = "cyan")
-
 lines(x, min_pairs_deterministic, type = "b", col = "cyan")
 lines(x, min_triple_deterministic, type = "b", col = "orange")
 

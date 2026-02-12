@@ -23,7 +23,7 @@ while [ $size -le 7 ]
 do
 	det=$(grep H_original ../results-analysis-runtime/jent-raw-noise_hashloop_${size}-0001.minentropy_FF_8bits.txt | grep min | cut -f2 -d":")
 
-	tmp_det=$(Rscript --vanilla processdata_l2_minentropy.r ../results-measurements/jent-raw-noise_hashloop_${size}-0001.data 2>/dev/null| cut -d " " -f 2)
+	tmp_det=$(Rscript --vanilla processdata_minentropy.r ../results-measurements/jent-raw-noise_hashloop_${size}-0001.data 2>/dev/null| cut -d " " -f 2)
 
 	min_det=$(echo $tmp_det | cut -d " " -f 1)
 
@@ -53,8 +53,8 @@ do
 	size=$((size+1))
 done
 
-echo $deterministic > ../results-analysis-runtime/minentropy_hashloop_collected
-echo $min_deterministic >> ../results-analysis-runtime/minentropy_hashloop_collected
-echo $min_pair_deterministic >> ../results-analysis-runtime/minentropy_hashloop_collected
-echo $min_triple_deterministic >> ../results-analysis-runtime/minentropy_hashloop_collected
-Rscript --vanilla processdata_hashloop.r ../results-analysis-runtime/minentropy_hashloop_collected
+echo $deterministic > ../results-analysis-runtime/minentropy_collected_hashloop
+echo $min_deterministic >> ../results-analysis-runtime/minentropy_collected_hashloop
+echo $min_pair_deterministic >> ../results-analysis-runtime/minentropy_collected_hashloop
+echo $min_triple_deterministic >> ../results-analysis-runtime/minentropy_collected_hashloop
+Rscript --vanilla processdata_hashloop.r ../results-analysis-runtime/minentropy_collected_hashloop

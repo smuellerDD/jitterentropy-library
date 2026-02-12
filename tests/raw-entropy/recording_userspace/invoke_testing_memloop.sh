@@ -32,7 +32,7 @@
 
 . ./invoke_testing_helper.sh
 
-raw_entropy_ntg1_l2()
+raw_entropy_ntg1_memloop()
 {
 	local memsize=$1
 	shift
@@ -63,22 +63,8 @@ CFLAGS="-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS -DJENT_TESTING_MEMSIZE_NO_BOUNDSCH
 size=1
 while [ $size -le 20 ]
 do
-	raw_entropy_ntg1_l2 $size "deterministic" --ntg1
+	raw_entropy_ntg1_memloop $size "deterministic" --ntg1
 	size=$((size+1))
 done
 
 make -s -f Makefile.hashtime clean
-
-################################################################################
-# Measure with random memory access not tested as NTG.1 memory access is always
-# deterministic
-# CFLAGS="-DJENT_TESTING_MEMSIZE_NO_BOUNDSCHECK" make -s -f Makefile.hashtime
-#
-# size=1
-# while [ $size -le 20 ]
-# do
-# 	raw_entropy_ntg1_l2 $size "quasirandom" --ntg1
-# 	size=$((size+1))
-# done
-#
-# make -s -f Makefile.hashtime clean

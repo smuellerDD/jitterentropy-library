@@ -2,7 +2,7 @@
 # R script for visualizing the entropy rates from the memory access
 #
 
-# Load the file created by processdata_l2.sh
+# Load the file created by processdata_hashloop.sh
 args <- commandArgs(trailingOnly = TRUE)
 
 if (length(args) != 1) {
