@@ -34,6 +34,9 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	snprintf(buf + used, buflen - used, "Configuration:\n");
 
 	used = strlen(buf);
+	snprintf(buf + used, buflen - used, " OSR: %u\n", ec->osr);
+
+	used = strlen(buf);
 	snprintf(buf + used, buflen - used, " Memory Block Size: %u bytes\n",
 		 jent_memsize(ec->flags));
 
