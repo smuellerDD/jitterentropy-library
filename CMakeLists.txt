@@ -7,6 +7,7 @@ option(STACK_PROTECTOR "Compile Jitter with stack protector enabled" ON)
 option(INTERNAL_TIMER "Compile Jitter with the internal thread based timer" ON)
 option(EXTERNAL_CRYPTO "Compile Jitter and use an external libcrypto, valid options are [AWSLC, OPENSSL, LIBGCRYPT]")
 option(AARCH64_NSTIME_REGISTER "Name of the register that should be used in jent_get_nstime function")
+option(ENABLE_SANITIZERS "Compile with address and undefined behavior sanitizers (only for development)" OFF)
 
 # CMake defines the variable MSVC to true automatically when building with MSVC, replicate that for other compilers
 if(CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -25,8 +26,13 @@ if(EXTERNAL_CRYPTO)
     list(APPEND JITTER_C_FLAGS  -D${EXTERNAL_CRYPTO})
 endif()
 
-if (AARCH64_NSTIME_REGISTER)
+if(AARCH64_NSTIME_REGISTER)
     list(APPEND JITTER_C_FLAGS -DAARCH64_NSTIME_REGISTER="${AARCH64_NSTIME_REGISTER}")
+endif()
+
+if(ENABLE_SANITIZERS)
+    add_compile_options(-fsanitize=address,undefined)
+    add_link_options(-fsanitize=address,undefined)
 endif()
 
 if(WIN32)
