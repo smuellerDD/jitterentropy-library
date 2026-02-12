@@ -48,7 +48,7 @@ double linearInverse(double y, double x1, double y1, double x2, double y2) {
 }
 
 /* Returns the number of nanoseconds per output for the selected flags and osr. */
-uint64_t jent_output_time(unsigned int rounds, unsigned int osr, unsigned int flags)
+uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 {
 	struct rand_data *ec_nostir;
 	struct timespec start, finish;
@@ -58,7 +58,7 @@ uint64_t jent_output_time(unsigned int rounds, unsigned int osr, unsigned int fl
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
 		fprintf(stderr, "The initialization failed with error code %d\n", ret);
-		return ret;
+		return 1;
 	}
 
 	ec_nostir = jent_entropy_collector_alloc(osr, flags);
@@ -98,7 +98,7 @@ int main(int argc, char * argv[])
 	uint64_t minTime, maxTime, firstLinearTime, secondLinearTime;
 
 	if (argc < 2) {
-		fprintf(stderr, "%s <number of measurements> <target time> [--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--max-mem <NUM>]\n", argv[0]);
+		fprintf(stderr, "%s <number of measurements> <target time> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--max-mem <NUM>|--hloopcnt <NUM>|--all-caches]\n", argv[0]);
 		return 1;
 	}
 
@@ -118,7 +118,9 @@ int main(int argc, char * argv[])
 	argv++;
 
 	while (argc > 1) {
-		if (!strncmp(argv[1], "--force-fips", 12))
+		if (!strncmp(argv[1], "--ntg1", 6))
+			flags |= JENT_NTG1;
+		else if (!strncmp(argv[1], "--force-fips", 12))
 			flags |= JENT_FORCE_FIPS;
 		else if (!strncmp(argv[1], "--disable-memory-access", 23))
 			flags |= JENT_DISABLE_MEMORY_ACCESS;
@@ -126,13 +128,15 @@ int main(int argc, char * argv[])
 			flags |= JENT_DISABLE_INTERNAL_TIMER;
 		else if (!strncmp(argv[1], "--force-internal-timer", 22))
 			flags |= JENT_FORCE_INTERNAL_TIMER;
+		else if (!strncmp(argv[1], "--all-caches", 12))
+			flags |= JENT_CACHE_ALL;
 		else if (!strncmp(argv[1], "--max-mem", 9)) {
 			unsigned long val;
 
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				fprintf(stderr, "Maximum memory value missing.\n");
+				printf("Maximum memory value missing\n");
 				return 1;
 			}
 
@@ -142,52 +146,107 @@ int main(int argc, char * argv[])
 				/* Allow to set no option */
 				break;
 			case 1:
-				flags |= JENT_MAX_MEMSIZE_32kB;
+				flags |= JENT_MAX_MEMSIZE_1kB;
 				break;
 			case 2:
-				flags |= JENT_MAX_MEMSIZE_64kB;
+				flags |= JENT_MAX_MEMSIZE_2kB;
 				break;
 			case 3:
-				flags |= JENT_MAX_MEMSIZE_128kB;
+				flags |= JENT_MAX_MEMSIZE_4kB;
 				break;
 			case 4:
-				flags |= JENT_MAX_MEMSIZE_256kB;
+				flags |= JENT_MAX_MEMSIZE_8kB;
 				break;
 			case 5:
-				flags |= JENT_MAX_MEMSIZE_512kB;
+				flags |= JENT_MAX_MEMSIZE_16kB;
 				break;
 			case 6:
-				flags |= JENT_MAX_MEMSIZE_1MB;
+				flags |= JENT_MAX_MEMSIZE_32kB;
 				break;
 			case 7:
-				flags |= JENT_MAX_MEMSIZE_2MB;
+				flags |= JENT_MAX_MEMSIZE_64kB;
 				break;
 			case 8:
-				flags |= JENT_MAX_MEMSIZE_4MB;
+				flags |= JENT_MAX_MEMSIZE_128kB;
 				break;
 			case 9:
-				flags |= JENT_MAX_MEMSIZE_8MB;
+				flags |= JENT_MAX_MEMSIZE_256kB;
 				break;
 			case 10:
-				flags |= JENT_MAX_MEMSIZE_16MB;
+				flags |= JENT_MAX_MEMSIZE_512kB;
 				break;
 			case 11:
-				flags |= JENT_MAX_MEMSIZE_32MB;
+				flags |= JENT_MAX_MEMSIZE_1MB;
 				break;
 			case 12:
-				flags |= JENT_MAX_MEMSIZE_64MB;
+				flags |= JENT_MAX_MEMSIZE_2MB;
 				break;
 			case 13:
-				flags |= JENT_MAX_MEMSIZE_128MB;
+				flags |= JENT_MAX_MEMSIZE_4MB;
 				break;
 			case 14:
-				flags |= JENT_MAX_MEMSIZE_256MB;
+				flags |= JENT_MAX_MEMSIZE_8MB;
 				break;
 			case 15:
+				flags |= JENT_MAX_MEMSIZE_16MB;
+				break;
+			case 16:
+				flags |= JENT_MAX_MEMSIZE_32MB;
+				break;
+			case 17:
+				flags |= JENT_MAX_MEMSIZE_64MB;
+				break;
+			case 18:
+				flags |= JENT_MAX_MEMSIZE_128MB;
+				break;
+			case 19:
+				flags |= JENT_MAX_MEMSIZE_256MB;
+				break;
+			case 20:
 				flags |= JENT_MAX_MEMSIZE_512MB;
 				break;
 			default:
-				fprintf(stderr, "Unknown maximum memory value\n");
+				printf("Unknown maximum memory value\n");
+				return 1;
+			}
+		} else if (!strncmp(argv[1], "--hloopcnt", 10)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("Hash loop count value missing\n");
+				return 1;
+			}
+
+			val = strtoul(argv[1], NULL, 10);
+			switch (val) {
+			case 0:
+				flags |= JENT_HASHLOOP_1;
+				break;
+			case 1:
+				flags |= JENT_HASHLOOP_2;
+				break;
+			case 2:
+				flags |= JENT_HASHLOOP_4;
+				break;
+			case 3:
+				flags |= JENT_HASHLOOP_8;
+				break;
+			case 4:
+				flags |= JENT_HASHLOOP_16;
+				break;
+			case 5:
+				flags |= JENT_HASHLOOP_32;
+				break;
+			case 6:
+				flags |= JENT_HASHLOOP_64;
+				break;
+			case 7:
+				flags |= JENT_HASHLOOP_128;
+				break;
+			default:
+				printf("Unknown hashloop value\n");
 				return 1;
 			}
 		} else {
