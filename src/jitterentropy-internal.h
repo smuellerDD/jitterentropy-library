@@ -119,6 +119,21 @@ extern "C" {
  */
 #define JENT_APT_MASK		(UINT64_C(0xffffffffffffffff))
 
+/*
+ * This parameter defines the default memory buffer size for the memory access
+ * loop. This value implies a memory size of 1 << JENT_DEFAULT_MEMORY_BITS.
+ *
+ * It is permissible to configure this value differently at compile time if the
+ * observed entropy rate is too small.
+ *
+ * This parameter is applied if the Jitter RNG:
+ * - is not instantiated with JENT_MAX_MEMSIZE_* flag
+ * - cannot determine the L1 cache size during starup.
+ */
+#ifndef JENT_DEFAULT_MEMORY_BITS
+# define JENT_DEFAULT_MEMORY_BITS 18
+#endif
+
 /* This parameter establishes the multiplicative factor that the desired
  * memory region size should be larger than the observed cache size; the
  * multiplicative factor is 2^JENT_CACHE_SHIFT_BITS.
@@ -136,7 +151,7 @@ extern "C" {
 #endif
 
 /*
- * Meory access loop count: This value defines the default memory access loop
+ * Memory access loop count: This value defines the default memory access loop
  * count. The memory access loop is one of the hearts of the Jitter RNG. The
  * number of loop counts has a direct impact on the entropy rate.
  *
@@ -179,6 +194,9 @@ extern "C" {
  * It is permissible to configure this value differently at compile time if the
  * observed entropy rate is too small.
  *
+ * This value is applied if the Jitter RNG:
+ * - is not instantiated with JENT_HASHLOOP_* flag
+ *
  * NOTE: When you modify this value, you are directly altering the behavior of
  * the noise source. Make sure you fully understand what you do. If you want to
  * individually measure the hash loop entropy rate, use the
@@ -205,6 +223,19 @@ extern "C" {
  */
 #ifndef JENT_HASH_LOOP_INIT
 #define JENT_HASH_LOOP_INIT 3
+#endif
+
+/*
+ * Oversampling rate: This value defines the default oversampling rate. The
+ * OSR defines the global heuristic entropy rate of 1/OSR.
+ *
+ * It is permissible to configure this value differently at compile time.
+ *
+ * This value is applied if the Jitter RNG:
+ * - is instantiated with an OSR of 0 provided to the initialization API
+ */
+#ifndef JENT_MIN_OSR
+#define JENT_MIN_OSR	3
 #endif
 
 /***************************************************************************
@@ -264,9 +295,6 @@ struct rand_data
 	enum jent_startup_state startup_state;
 
 /* The step size should be larger than the cacheline size. */
-#ifndef JENT_DEFAULT_MEMORY_BITS
-# define JENT_DEFAULT_MEMORY_BITS 18
-#endif
 #ifndef JENT_MEMORY_BLOCKSIZE
 # define JENT_MEMORY_BLOCKSIZE 128
 #endif
@@ -364,8 +392,6 @@ struct rand_data
 	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE];
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 };
-
-#define JENT_MIN_OSR	3
 
 #ifdef __cplusplus
 }
