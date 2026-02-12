@@ -25,6 +25,7 @@
 #include <math.h>
 #include <float.h>
 #include <assert.h>
+#include <time.h>
 
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
@@ -63,7 +64,10 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 
 	ec_nostir = jent_entropy_collector_alloc(osr, flags);
 
-	clock_gettime(CLOCK_REALTIME, &start);
+	if (timespec_get(&start, TIME_UTC) == 0) {
+		fprintf(stderr, "Unable to get start time\n");
+		return 1;
+	}
 	
 	if (!ec_nostir) {
 		fprintf(stderr, "Jitter RNG handle cannot be allocated\n");
@@ -79,7 +83,10 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 		}
 	}
 
-	clock_gettime(CLOCK_REALTIME, &finish);
+	if (timespec_get(&finish, TIME_UTC) == 0) {
+		fprintf(stderr, "Unable to get finish time\n");
+		return 1;
+	}
 	runtime = ((uint64_t)finish.tv_sec * UINT64_C(1000000000) + (uint64_t)finish.tv_nsec) - ((uint64_t)start.tv_sec * UINT64_C(1000000000) + (uint64_t)start.tv_nsec);
 
 	jent_entropy_collector_free(ec_nostir);
