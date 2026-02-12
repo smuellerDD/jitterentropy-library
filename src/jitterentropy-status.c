@@ -72,7 +72,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		 "CPU Cores: %ld\n",
+		 " CPU Cores: %ld\n",
 		 jent_ncpu());
 
 	used = strlen(buf);
