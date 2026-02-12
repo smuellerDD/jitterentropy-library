@@ -31,9 +31,11 @@ int main(int argc, char * argv[])
 	unsigned int flags = 0, osr = 0;
 	struct rand_data *ec_nostir;
 	char status[700];
+	int hex = 0;
+	size_t i;
 
 	if (argc < 2) {
-		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>|--hloopcnt <NUM>]\n", argv[0]);
+		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>|--hloopcnt <NUM>|--hex]\n", argv[0]);
 		return 1;
 	}
 
@@ -189,6 +191,8 @@ int main(int argc, char * argv[])
 				printf("Unknown hashloop value\n");
 				return 1;
 			}
+		} else if (!strncmp(argv[1], "--hex", 5)) {
+			hex = 1;
 		} else {
 			printf("Unknown option %s\n", argv[1]);
 			return 1;
@@ -219,14 +223,20 @@ int main(int argc, char * argv[])
 	fprintf(stderr, "%s", status);
 
 	for (size = 0; size < rounds; size++) {
-		char tmp[32];
+		uint8_t tmp[32];
 
-		if (0 > jent_read_entropy_safe(&ec_nostir, tmp, sizeof(tmp))) {
+		if (0 > jent_read_entropy_safe(&ec_nostir, (char*)tmp, sizeof(tmp))) {
 			fprintf(stderr, "FIPS 140-3 health test failed\n");
 			ret = 1;
 			goto out;
 		}
-		fwrite(&tmp, sizeof(tmp), 1, stdout);
+		if (hex) {
+			for (i = 0; i < sizeof(tmp); ++i) {
+				fprintf(stdout, "%02X", (unsigned int)tmp[i]);
+			}
+		} else {
+			fwrite(&tmp, sizeof(tmp), 1, stdout);
+		}
 	}
 
 	ret = 0;
