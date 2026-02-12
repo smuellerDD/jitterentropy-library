@@ -71,6 +71,11 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 		 " AIS 20/31 NTG.1 mode: %i\n", !!(ec->flags & JENT_NTG1));
 
 	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		 "CPU Cores: %ld\n",
+		 jent_ncpu());
+
+	used = strlen(buf);
 	snprintf(buf + used, buflen - used, " Flags:\n");
 
 	used = strlen(buf);
