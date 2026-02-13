@@ -77,11 +77,22 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	if (!duration)
 		return 1;
 
+	/*
+	 * Do not perform the common startup check as the health test may
+	 * disable the Jitter RNG. However, as we are in test mode, we
+	 * *want* to also know about insufficient entropy.
+	 * Thus, only perform the cryptographic self tests and go on.
+	 */
+#if 0
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
 		printf("The initialization failed with error code %d\n", ret);
 		goto out;
 	}
+#else
+	jent_entropy_init_common_pre();
+#endif
+
 	ec = jent_entropy_collector_alloc(osr, flags);
 	if (!ec) {
 		ret = 1;
