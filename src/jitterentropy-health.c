@@ -454,7 +454,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 
 static void jent_rct_init(struct rand_data *ec, unsigned short safety)
 {
-	unsigned int osr = ec->osr;
+	unsigned short osr = (unsigned short)ec->osr;
 
 	ec->rct_cutoff = JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr);
 	ec->rct_cutoff_permanent = JENT_HEALTH_RCT_PERMANENT_CUTOFF(osr);
