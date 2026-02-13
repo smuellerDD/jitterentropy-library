@@ -38,6 +38,7 @@
 #include "jitterentropy-noise.c"
 #include "jitterentropy-timer.c"
 #include "jitterentropy-base.c"
+#include "jitterentropy-status.c"
 
 #ifndef REPORT_COUNTER_TICKS
 #define REPORT_COUNTER_TICKS 1
