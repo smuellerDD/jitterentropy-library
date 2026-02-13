@@ -547,7 +547,7 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 	uint32_t cache_size = 0;
 	int checked_all_caches = all_caches + 1;
 
-	if (checked != checked_all_caches) {
+	if (!cache_size || checked != checked_all_caches) {
 		long l1 = 0, l2 = 0, l3 = 0;
 
 		jent_get_cachesize_sysconf(&l1, &l2, &l3);
