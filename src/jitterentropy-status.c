@@ -31,6 +31,30 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 		 JENT_MAJVERSION, JENT_MINVERSION, JENT_PATCHLEVEL);
 
 	used = strlen(buf);
+	snprintf(buf + used, buflen - used, "Health Status:\n");
+
+	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		 " APT:\n  intermittent: %s\n  permanent: %s\n",
+		 ec->health_failure & JENT_APT_FAILURE ? "fail" : "pass",
+		 ec->health_failure & JENT_APT_FAILURE_PERMANENT ? "fail" :
+								   "pass");
+	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		 " RCT:\n  intermittent: %s\n  permanent: %s\n",
+		 ec->health_failure & JENT_RCT_FAILURE ? "fail" : "pass",
+		 ec->health_failure & JENT_RCT_FAILURE_PERMANENT ? "fail" :
+								   "pass");
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	used = strlen(buf);
+	snprintf(buf + used, buflen - used,
+		 " LAG:\n  intermittent: %s\n  permanent: %s\n",
+		 ec->health_failure & JENT_LAG_FAILURE ? "fail" : "pass",
+		 ec->health_failure & JENT_LAG_FAILURE_PERMANENT ? "fail" :
+								   "pass");
+#endif
+
+	used = strlen(buf);
 	snprintf(buf + used, buflen - used, "Configuration:\n");
 
 	used = strlen(buf);
@@ -83,41 +107,32 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		 "  JENT_DISABLE_MEMORY_ACCESS %u - Memory access %s\n",
-		 !!(ec->flags & JENT_DISABLE_MEMORY_ACCESS),
-		 ec->flags & JENT_DISABLE_MEMORY_ACCESS ? "disabled" :
-							  "enabled");
+		 "  JENT_DISABLE_MEMORY_ACCESS %u\n",
+		 !!(ec->flags & JENT_DISABLE_MEMORY_ACCESS));
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		 "  JENT_FORCE_INTERNAL_TIMER %u - Internal timer %s\n",
-		 !!(ec->flags & JENT_FORCE_INTERNAL_TIMER),
-		 ec->flags & JENT_FORCE_INTERNAL_TIMER ? "forced" :
-							 "not forced");
+		 "  JENT_FORCE_INTERNAL_TIMER %u\n",
+		 !!(ec->flags & JENT_FORCE_INTERNAL_TIMER));
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		 "  JENT_DISABLE_INTERNAL_TIMER %u - Internal timer %s\n",
-		 !!(ec->flags & JENT_DISABLE_INTERNAL_TIMER),
-		 ec->flags & JENT_DISABLE_INTERNAL_TIMER ? "disabled" :
-							   "enabled");
+		 "  JENT_DISABLE_INTERNAL_TIMER %u\n",
+		 !!(ec->flags & JENT_DISABLE_INTERNAL_TIMER));
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		 "  JENT_FORCE_FIPS %u - FIPS modus %s\n",
-		 !!(ec->flags & JENT_FORCE_FIPS),
-		 ec->flags & JENT_FORCE_FIPS ? "forced" : "not forced");
+		 "  JENT_FORCE_FIPS %u\n",
+		 !!(ec->flags & JENT_FORCE_FIPS));
 
 	used = strlen(buf);
-	snprintf(buf + used, buflen - used, "  JENT_NTG1 %u - NTG.1 modus %s\n",
-		 !!(ec->flags & JENT_NTG1),
-		 ec->flags & JENT_NTG1 ? "enabled" : "disabled");
+	snprintf(buf + used, buflen - used, "  JENT_NTG1 %u\n",
+		 !!(ec->flags & JENT_NTG1));
 
 	used = strlen(buf);
 	snprintf(buf + used, buflen - used,
-		 "  JENT_CACHE_ALL %u - Full cache size %sapplied\n",
-		 !!(ec->flags & JENT_CACHE_ALL),
-		 ec->flags & JENT_CACHE_ALL ? "" : "not ");
+		 "  JENT_CACHE_ALL %u\n",
+		 !!(ec->flags & JENT_CACHE_ALL));
 
 	return 0;
 }

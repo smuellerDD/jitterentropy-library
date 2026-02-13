@@ -30,7 +30,7 @@ int main(int argc, char * argv[])
 	int ret = 0;
 	unsigned int flags = 0, osr = 0;
 	struct rand_data *ec_nostir;
-	char status[700];
+	char status[850];
 	int hex = 0;
 	size_t i;
 
