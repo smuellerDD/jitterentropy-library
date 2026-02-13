@@ -312,6 +312,8 @@ struct rand_data
 
 	/* Repetition Count Test */
 	int rct_count;			/* Number of stuck values */
+	unsigned short rct_cutoff;	/* RCT intermittent cutoff */
+	unsigned short rct_cutoff_permanent; /* RCT permanent cutoff */
 
 	/* Adaptive Proportion Test for a significance level of 2^-30 */
 	unsigned int apt_cutoff;	/* Intermittent health test failure */

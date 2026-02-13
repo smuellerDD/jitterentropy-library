@@ -604,7 +604,9 @@ static struct rand_data
 	}
 
 	/* Initialize the health tests */
-	jent_health_init(entropy_collector);
+	jent_health_init(entropy_collector, flags & JENT_NTG1 ?
+					    jent_health_init_type_ntg1_startup :
+					    jent_health_init_type_common);
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
 	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {

@@ -266,7 +266,7 @@ static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
  * See the SP 800-90B comment #10b for the corrected cutoff for the SP 800-90B
  * APT.
  * http://www.untruth.org/~josh/sp80090b/UL%20SP800-90B-final%20comments%20v1.9%2020191212.pdf
- * In in the syntax of R, this is C = 2 + qbinom(1 − 2^(−30), 511, 2^(-1/osr)).
+ * In in the syntax of R, this is C = 2 + qbinom(1 - 2^(-30), 511, 2^(-1/osr)).
  * (The original formula wasn't correct because the first symbol must
  * necessarily have been observed, so there is no chance of observing 0 of these
  * symbols.)
@@ -286,8 +286,10 @@ static const unsigned int jent_apt_cutoff_permanent_lookup[15]=
 	{ 355, 447, 479, 494, 502, 507, 510, 512,
 	  512, 512, 512, 512, 512, 512, 512 };
 
-static void jent_apt_init(struct rand_data *ec, unsigned int osr)
+static void jent_apt_init(struct rand_data *ec)
 {
+	unsigned int osr = ec->osr;
+
 	/*
 	 * Establish the apt_cutoff based on the presumed entropy rate of
 	 * 1/osr.
@@ -301,6 +303,70 @@ static void jent_apt_init(struct rand_data *ec, unsigned int osr)
 		ec->apt_cutoff = jent_apt_cutoff_lookup[osr - 1];
 		ec->apt_cutoff_permanent =
 				jent_apt_cutoff_permanent_lookup[osr - 1];
+	}
+}
+
+/*
+ * For NTG.1: 8-fold security margin during startup
+ * alpha for intermdiate error: 2^-30
+ * alpha for permanent error: 2^-60
+ *
+ * Example formula for R for intermediate cutoffs:
+ * C = 2 + qbinom(1 - 2^(-30), 511, 2^(-8/osr))
+ */
+static const unsigned int jent_apt_cutoff_lookup_ntg1_startup[15]=
+	{ 17, 71, 136, 191, 236, 272, 301, 325,
+	  345, 361, 375, 388, 398, 407, 415 };
+static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1_startup[15]=
+	{ 26, 92, 162, 221, 267, 303, 332, 355,
+	  375, 390, 404, 415, 425, 433, 440 };
+
+static void jent_apt_init_ntg1_startup(struct rand_data *ec)
+{
+	unsigned int osr = ec->osr;
+
+	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_startup)) {
+		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_startup[
+			ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_startup) - 1];
+		ec->apt_cutoff_permanent =
+			jent_apt_cutoff_permanent_lookup_ntg1_startup[
+			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1_startup) - 1];
+	} else {
+		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_startup[osr - 1];
+		ec->apt_cutoff_permanent =
+			jent_apt_cutoff_permanent_lookup_ntg1_startup[osr - 1];
+	}
+}
+
+/*
+ * For NTG.1: 4-fold security margin during runtime
+ * alpha for intermdiate error: 2^-30
+ * alpha for permanent error: 2^-60
+ *
+ * Example formula for R for intermediate cutoffs:
+ * C = 2 + qbinom(1 - 2^(-30), 511, 2^(-4/osr))
+ */
+static const unsigned int jent_apt_cutoff_lookup_ntg1_runtime[15]=
+	{ 71, 191, 272, 325, 361, 388, 407, 422,
+	  434, 444, 452, 459, 464, 469, 473 };
+static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1_runtime[15]=
+	{ 92, 221, 303, 355, 390, 415, 433, 447,
+	  458, 466, 473, 479, 484, 487, 491 };
+
+static void jent_apt_init_ntg1_runtime(struct rand_data *ec)
+{
+	unsigned int osr = ec->osr;
+
+	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_runtime)) {
+		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_runtime[
+			ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_runtime) - 1];
+		ec->apt_cutoff_permanent =
+			jent_apt_cutoff_permanent_lookup_ntg1_runtime[
+			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1_runtime) - 1];
+	} else {
+		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_runtime[osr - 1];
+		ec->apt_cutoff_permanent =
+			jent_apt_cutoff_permanent_lookup_ntg1_runtime[osr - 1];
 	}
 }
 
@@ -386,6 +452,20 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  * the end. The caller of the Jitter RNG is informed with an error code.
  ***************************************************************************/
 
+static void jent_rct_init(struct rand_data *ec, unsigned short safety)
+{
+	unsigned int osr = ec->osr;
+
+	ec->rct_cutoff = JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr);
+	ec->rct_cutoff_permanent = JENT_HEALTH_RCT_PERMANENT_CUTOFF(osr);
+
+	if (safety) {
+		ec->rct_cutoff = (ec->rct_cutoff + safety - 1) / safety;
+		ec->rct_cutoff_permanent =
+			(ec->rct_cutoff_permanent + safety - 1) / safety;
+	}
+}
+
 /**
  * Repetition Count Test as defined in SP800-90B section 4.4.1
  *
@@ -413,11 +493,9 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 		 * following SP800-90B. Thus C = ceil(-log_2(alpha)/H) = 30*osr
 		 * or 60*osr.
 		 */
-		if ((unsigned int)ec->rct_count >=
-		    JENT_HEALTH_RCT_PERMANENT_CUTOFF(ec->osr)) {
+		if ((unsigned int)ec->rct_count >= ec->rct_cutoff_permanent) {
 			ec->health_failure |= JENT_RCT_FAILURE_PERMANENT;
-		} else if ((unsigned int)ec->rct_count ==
-			   JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(ec->osr)) {
+		} else if ((unsigned int)ec->rct_count == ec->rct_cutoff) {
 			ec->health_failure |= JENT_RCT_FAILURE;
 		}
 	} else {
@@ -495,10 +573,25 @@ unsigned int jent_health_failure(struct rand_data *ec)
  * Initialize the health tests
  *
  * @param[in] ec Reference to entropy collector
+ * @param[in] inittype Startup type
  */
-void jent_health_init(struct rand_data *ec)
+void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 {
 	ec->rct_count = 0;
-	jent_apt_init(ec, ec->osr);
 	jent_lag_init(ec, ec->osr);
+	switch (inittype) {
+	case jent_health_init_type_ntg1_startup:
+		jent_apt_init_ntg1_startup(ec);
+		jent_rct_init(ec, 8);
+		break;
+	case jent_health_init_type_ntg1_runtime:
+		jent_apt_init_ntg1_runtime(ec);
+		jent_rct_init(ec, 4);
+		break;
+	case jent_health_init_type_common:
+	default:
+		jent_apt_init(ec);
+		jent_rct_init(ec, 0);
+		break;
+	}
 }
