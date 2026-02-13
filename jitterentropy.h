@@ -194,7 +194,7 @@ int jent_set_fips_failure_callback(jent_fips_failure_cb cb);
 JENT_PRIVATE_STATIC
 unsigned int jent_version(void);
 
-/* print out human-readable status of the Jitter RNG */
+/* print out human-readable status of the Jitter RNG (JSON) */
 JENT_PRIVATE_STATIC
 int jent_status(const struct rand_data *ec, char *buf, size_t buflen);
 
