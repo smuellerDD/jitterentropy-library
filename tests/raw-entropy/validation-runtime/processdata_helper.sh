@@ -84,6 +84,8 @@ then
 	echo "Building $EXTRACT ..."
 	make clean
 	make
+else
+	make
 fi
 
 if [ ! -x $EXTRACT ] 
