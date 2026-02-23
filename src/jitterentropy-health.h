@@ -51,6 +51,21 @@ static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 }
 #endif
 
+
+/*
+* The cutoff value is based on the following consideration:
+* alpha = 2^-30 or 2^-60 as recommended in SP800-90B.
+* In addition, we require an entropy value H of 1/osr as this is the minimum
+* entropy required to provide full entropy. Note, we collect
+* (DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR)*osr deltas for inserting them into
+* the entropy pool which should then have (close to) DATA_SIZE_BITS bits of
+* entropy in the conditioned output.
+*
+* Note, ec->rct_count (which equals to value B in the pseudo code of SP800-90B
+* section 4.4.1) starts with zero (see jent_health_init(), jent_rct_insert()).
+* Hence we need to subtract one from the cutoff value as calculated following
+* SP800-90B. Thus C = ceil(-log_2(alpha)/H) = 30*osr or 60*osr.
+*/
 /* RCT: Intermittent cutoff threshold for alpha = 2**-30 */
 #define JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(x) ((x) * 30)
 /* RCT: permanent cutoff threshold for alpha = 2**-60 */

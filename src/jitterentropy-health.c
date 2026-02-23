@@ -477,28 +477,13 @@ static void jent_rct_insert(struct rand_data *ec, int stuck)
 	if (stuck) {
 		ec->rct_count++;
 
-		/*
-		 * The cutoff value is based on the following consideration:
-		 * alpha = 2^-30 or 2^-60 as recommended in SP800-90B.
-		 * In addition, we require an entropy value H of 1/osr as this
-		 * is the minimum entropy required to provide full entropy.
-		 * Note, we collect (DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR)*osr
-		 * deltas for inserting them into the entropy pool which should
-		 * then have (close to) DATA_SIZE_BITS bits of entropy in the
-		 * conditioned output.
-		 *
-		 * Note, ec->rct_count (which equals to value B in the pseudo
-		 * code of SP800-90B section 4.4.1) starts with zero. Hence
-		 * we need to subtract one from the cutoff value as calculated
-		 * following SP800-90B. Thus C = ceil(-log_2(alpha)/H) = 30*osr
-		 * or 60*osr.
-		 */
 		if ((unsigned int)ec->rct_count >= ec->rct_cutoff_permanent) {
 			ec->health_failure |= JENT_RCT_FAILURE_PERMANENT;
 		} else if ((unsigned int)ec->rct_count == ec->rct_cutoff) {
 			ec->health_failure |= JENT_RCT_FAILURE;
 		}
 	} else {
+		/* Must start at zero to reach the correct cutoff value */
 		ec->rct_count = 0;
 	}
 }
@@ -577,6 +562,7 @@ unsigned int jent_health_failure(struct rand_data *ec)
  */
 void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 {
+	/* Must start at zero to reach the correct cutoff value */
 	ec->rct_count = 0;
 	jent_lag_init(ec, ec->osr);
 	switch (inittype) {
