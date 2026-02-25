@@ -469,8 +469,13 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			break;
 
 		default:
-			len -= (size_t)ret;
-			p += (size_t)ret;
+			/* defensive check for uncaught errors */
+			if (ret >= 0) {
+				len -= (size_t)ret;
+				p += (size_t)ret;
+			} else {
+				return -1;
+			}
 		}
 	}
 
@@ -702,12 +707,16 @@ JENT_PRIVATE_STATIC
 void jent_entropy_collector_free(struct rand_data *entropy_collector)
 {
 	if (entropy_collector != NULL) {
-		jent_sha3_dealloc(entropy_collector->hash_state);
-
 		/* Safety measure */
 		jent_notime_unsettick(entropy_collector);
 
 		jent_notime_disable(entropy_collector);
+
+		if (entropy_collector->hash_state != NULL) {
+			jent_sha3_dealloc(entropy_collector->hash_state);
+			entropy_collector->hash_state = NULL;
+		}
+
 		if (entropy_collector->mem != NULL) {
 			jent_zfree(entropy_collector->mem,
 				   jent_memsize(entropy_collector->flags));
