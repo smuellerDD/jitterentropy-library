@@ -6,6 +6,9 @@ project(jitterentropy
 )
 set(CMAKE_C_STANDARD 11)
 
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
 option(STACK_PROTECTOR "Compile Jitter with stack protector enabled" ON)
 option(INTERNAL_TIMER "Compile Jitter with the internal thread based timer" ON)
 option(EXTERNAL_CRYPTO "Compile Jitter and use an external libcrypto, valid options are [AWSLC, OPENSSL, LIBGCRYPT]")
@@ -175,8 +178,6 @@ endif()
 add_subdirectory(tests/gcd)
 add_subdirectory(tests/raw-entropy/validation-runtime)
 add_subdirectory(tests/raw-entropy/recording_userspace)
-
-include(CMakePackageConfigHelpers)
 
 # pkg-config
 configure_package_config_file(
