@@ -206,3 +206,7 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/jitterentropyConfigVersion.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake
 )
+
+# man page(s)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/doc/jitterentropy.3
+        DESTINATION ${CMAKE_INSTALL_MANDIR}/man3)
