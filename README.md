@@ -85,7 +85,7 @@ is needed.
 Flags set in the `flags` field:
 
 - `JENT_NTG1` may be set (i.e. the SP800-90B configuration and the
-   [NTG.1 configuration](#AIS 20/31 NTG.1 Compliance) can be jointly enabled)
+   [NTG.1 configuration](#ais-2031-ntg1-compliance) can be jointly enabled)
 
 - Either `JENT_FORCE_FIPS` MUST be set or base OS is in FIPS mode (i.e. the
   helper function `jent_fips_enabled` returns true).
@@ -115,7 +115,7 @@ following configuration is needed.
 Flags set in the `flags` field:
 
 - `JENT_FORCE_FIPS` may be set (i.e. the NTG.1 configuration and the
-   [SP800-90B configuration](#NIST SP800-90B Compliance) can be jointly enabled)
+   [SP800-90B configuration](#nist-sp800-90b-compliance) can be jointly enabled)
 
 - `JENT_NTG1` MUST be set
 
