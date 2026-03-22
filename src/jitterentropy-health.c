@@ -288,21 +288,19 @@ static const unsigned int jent_apt_cutoff_permanent_lookup[15]=
 
 static void jent_apt_init(struct rand_data *ec)
 {
-	unsigned int osr = ec->osr;
-
 	/*
 	 * Establish the apt_cutoff based on the presumed entropy rate of
 	 * 1/osr.
 	 */
-	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
+	if (ec->osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
 		ec->apt_cutoff = jent_apt_cutoff_lookup[
 			ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
 		ec->apt_cutoff_permanent = jent_apt_cutoff_permanent_lookup[
 			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) - 1];
 	} else {
-		ec->apt_cutoff = jent_apt_cutoff_lookup[osr - 1];
+		ec->apt_cutoff = jent_apt_cutoff_lookup[ec->osr - 1];
 		ec->apt_cutoff_permanent =
-				jent_apt_cutoff_permanent_lookup[osr - 1];
+				jent_apt_cutoff_permanent_lookup[ec->osr - 1];
 	}
 }
 
@@ -323,18 +321,16 @@ static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1_startup[15]=
 
 static void jent_apt_init_ntg1_startup(struct rand_data *ec)
 {
-	unsigned int osr = ec->osr;
-
-	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_startup)) {
+	if (ec->osr >= ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_startup)) {
 		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_startup[
 			ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_startup) - 1];
 		ec->apt_cutoff_permanent =
 			jent_apt_cutoff_permanent_lookup_ntg1_startup[
 			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1_startup) - 1];
 	} else {
-		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_startup[osr - 1];
+		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_startup[ec->osr - 1];
 		ec->apt_cutoff_permanent =
-			jent_apt_cutoff_permanent_lookup_ntg1_startup[osr - 1];
+			jent_apt_cutoff_permanent_lookup_ntg1_startup[ec->osr - 1];
 	}
 }
 
@@ -355,18 +351,16 @@ static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1_runtime[15]=
 
 static void jent_apt_init_ntg1_runtime(struct rand_data *ec)
 {
-	unsigned int osr = ec->osr;
-
-	if (osr >= ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_runtime)) {
+	if (ec->osr >= ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_runtime)) {
 		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_runtime[
 			ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1_runtime) - 1];
 		ec->apt_cutoff_permanent =
 			jent_apt_cutoff_permanent_lookup_ntg1_runtime[
 			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1_runtime) - 1];
 	} else {
-		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_runtime[osr - 1];
+		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1_runtime[ec->osr - 1];
 		ec->apt_cutoff_permanent =
-			jent_apt_cutoff_permanent_lookup_ntg1_runtime[osr - 1];
+			jent_apt_cutoff_permanent_lookup_ntg1_runtime[ec->osr - 1];
 	}
 }
 
@@ -436,6 +430,119 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
 }
 
 /***************************************************************************
+ * Stuck Test and its use as Repetition Count with Memory Test
+ *
+ * The Jitter RNG applies the stuck test to the repetition count test with
+ * memory as defined in a paper "Überlegungen zum Jitter-RNG" by Jonas Fiege,
+ * Johannes Mittmann, Werner Schindler, 6. Februar 2026. This document
+ * outlines a health test which applies the standard normal distribution. Using
+ * the distribution, the cutoffs are calculated by applying the heuristic
+ * entropy value (potentially adjusted by a safety factor).
+ *
+ * The test is defined to cover the window required non-rejected time deltas
+ * to be generated for one output block of 256 bits of data. This window
+ * is 321 * OSR as implemented by jent_random_data_one.
+ *
+ * The intermittent cutoff is defined by calculating
+ * round(pnorm(2^(-(safety_factor)/OSR))*321*OSR)
+ * where safety_factor is 1 for common case, 8 for the NTG.1 startup and 4
+ * for the NTG.1 runtime.
+ *
+ * The permanent cutoff is defined by calculating
+ * round(pnorm(2^(-(safety_factor / 2)/OSR))*321*OSR)
+ ***************************************************************************/
+static const unsigned short jent_rct_mem_cutoff_lookup[] =
+	{ 222,  488,  757,  1027, 1297, 1567, 1837, 2107, 2377, 2647,
+	  2917, 3187, 3457, 3727, 3997, 4267, 4537, 4807, 5078, 5348 };
+static const unsigned short jent_rct_mem_cutoff_permanent_lookup[] =
+	{ 244,  513,  783,  1053, 1323, 1594, 1864, 2134, 2404, 2674,
+	  2944, 3214, 3484, 3754, 4024, 4294, 4564, 4834, 5104, 5375 };
+
+static void jent_rct_mem_init(struct rand_data *ec)
+{
+	if (ec->osr >= ARRAY_SIZE(jent_rct_mem_cutoff_lookup)) {
+		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[
+			ARRAY_SIZE(jent_rct_mem_cutoff_lookup) - 1];
+		ec->rct_mem_cutoff_permanent =
+			jent_rct_mem_cutoff_permanent_lookup[
+			ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) - 1];
+	} else {
+		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[ec->osr - 1];
+		ec->rct_mem_cutoff_permanent =
+			jent_rct_mem_cutoff_permanent_lookup[ec->osr - 1];
+	}
+}
+
+/* For NTG.1: 8-fold security margin during startup */
+static const unsigned short jent_rct_mem_cutoff_lookup_ntg1_startup[] =
+	{ 161,  337,  542,  769,  1010, 1260, 1516, 1776, 2038, 2302,
+	  2567, 2834, 3101, 3368, 3636, 3905, 4173, 4442, 4711, 4980 };
+static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1_startup[] =
+	{ 168,  384,  630,  888,  1151, 1417, 1684, 1952, 2221, 2490,
+	  2759, 3029, 3298, 3568, 3838, 4108, 4378, 4648, 4917, 5187 };
+
+static void jent_rct_mem_init_ntg1_startup(struct rand_data *ec)
+{
+	if (ec->osr >= ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1_startup)) {
+		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup_ntg1_startup[
+			ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1_startup) - 1];
+		ec->rct_mem_cutoff_permanent =
+			jent_rct_mem_cutoff_permanent_lookup_ntg1_startup[
+			ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1_startup) - 1];
+	} else {
+		ec->rct_mem_cutoff =
+			jent_rct_mem_cutoff_lookup_ntg1_startup[ec->osr - 1];
+		ec->rct_mem_cutoff_permanent =
+			jent_rct_mem_cutoff_permanent_lookup_ntg1_startup[ec->osr - 1];
+	}
+}
+
+/* For NTG.1: 4-fold security margin during runtime */
+#if 0
+static const unsigned short jent_rct_mem_cutoff_lookup_ntg1_runtime[] =
+	{ 168,  384,  630,  888,  1151, 1417, 1684, 1952, 2221, 2490,
+	  2759, 3029, 3298, 3568, 3838, 4108, 4378, 4648, 4917, 5187 };
+#else
+#define jent_rct_mem_cutoff_lookup_ntg1_runtime                                \
+	jent_rct_mem_cutoff_permanent_lookup_ntg1_startup
+#endif
+static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1_runtime[] =
+	{ 192,  444,  708,  976,  1245, 1514, 1784, 2054, 2324, 2594,
+	  2864, 3134, 3404, 3674, 3944, 4214, 4484, 4754, 5024, 5294 };
+
+static void jent_rct_mem_init_ntg1_runtime(struct rand_data *ec)
+{
+	if (ec->osr >= ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1_runtime)) {
+		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup_ntg1_runtime[
+			ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1_runtime) - 1];
+		ec->rct_mem_cutoff_permanent =
+			jent_rct_mem_cutoff_permanent_lookup_ntg1_runtime[
+			ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1_runtime) - 1];
+	} else {
+		ec->rct_mem_cutoff =
+			jent_rct_mem_cutoff_lookup_ntg1_runtime[ec->osr - 1];
+		ec->rct_mem_cutoff_permanent =
+			jent_rct_mem_cutoff_permanent_lookup_ntg1_runtime[ec->osr - 1];
+	}
+}
+
+static void jent_rct_mem_insert(struct rand_data *ec, int stuck)
+{
+	/* Start of a new window */
+	if (ec->gen_loop_iter == 0)
+		ec->rct_mem_count = 0;
+
+	if (stuck)
+		ec->rct_mem_count++;
+
+	if ((unsigned int)ec->rct_mem_count >= ec->rct_mem_cutoff_permanent) {
+		ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
+	} else if ((unsigned int)ec->rct_mem_count == ec->rct_mem_cutoff) {
+		ec->health_failure |= JENT_RCT_MEM_FAILURE;
+	}
+}
+
+/***************************************************************************
  * Stuck Test and its use as Repetition Count Test
  *
  * The Jitter RNG uses an enhanced version of the Repetition Count Test
@@ -451,7 +558,6 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  * the Jitter RNG output block will be calculated completely but discarded at
  * the end. The caller of the Jitter RNG is informed with an error code.
  ***************************************************************************/
-
 static void jent_rct_init(struct rand_data *ec, unsigned short safety)
 {
 	unsigned short osr = (unsigned short)ec->osr;
@@ -519,11 +625,13 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	if (!current_delta || !delta2 || !delta3) {
 		/* RCT with a stuck bit */
 		jent_rct_insert(ec, 1);
+		jent_rct_mem_insert(ec, 1);
 		return 1;
 	}
 
 	/* RCT with a non-stuck bit */
 	jent_rct_insert(ec, 0);
+	jent_rct_mem_insert(ec, 0);
 
 	return 0;
 }
@@ -534,13 +642,15 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
  * @param[in] ec Reference to entropy collector
  *
  * @return a bitmask indicating which tests failed
- * 	0 No health test failure
- * 	1 RCT failure
- * 	2 APT failure
- * 	4 Lag predictor test failure
+ *	0 No health test failure
+ *	1 RCT failure
+ *	2 APT failure
+ *	4 Lag predictor test failure
+ *	8 RCT with memory failure
  *	1<<JENT_PERMANENT_FAILURE_SHIFT RCT permanent failure
- * 	2<<JENT_PERMANENT_FAILURE_SHIFT APT permanent failure
- * 	4<<JENT_PERMANENT_FAILURE_SHIFT Lag predictor test permanent failure
+ *	2<<JENT_PERMANENT_FAILURE_SHIFT APT permanent failure
+ *	4<<JENT_PERMANENT_FAILURE_SHIFT Lag predictor test permanent failure
+ *	8<<JENT_PERMANENT_FAILURE_SHIFT RCT with memory permanent failure
  */
 unsigned int jent_health_failure(struct rand_data *ec)
 {
@@ -570,15 +680,18 @@ void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 	case jent_health_init_type_ntg1_startup:
 		jent_apt_init_ntg1_startup(ec);
 		jent_rct_init(ec, 8);
+		jent_rct_mem_init_ntg1_startup(ec);
 		break;
 	case jent_health_init_type_ntg1_runtime:
 		jent_apt_init_ntg1_runtime(ec);
 		jent_rct_init(ec, 4);
+		jent_rct_mem_init_ntg1_runtime(ec);
 		break;
 	case jent_health_init_type_common:
 	default:
 		jent_apt_init(ec);
 		jent_rct_init(ec, 0);
+		jent_rct_mem_init(ec);
 		break;
 	}
 }

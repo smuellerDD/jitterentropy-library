@@ -45,6 +45,9 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t\"version\": \"%u.%u.%u\",\n",
 			   JENT_MAJVERSION, JENT_MINVERSION, JENT_PATCHLEVEL)
 
+	if (!ec)
+		goto out;
+
 	/*
 	 * health
 	 */
@@ -62,6 +65,13 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 			   ec->health_failure & JENT_RCT_FAILURE ? "true" : "false");
 	jent_add_to_status("\t\t\t\"permanent\": %s\n",
 			   ec->health_failure & JENT_RCT_FAILURE_PERMANENT ? "true" : "false");
+	jent_add_to_status("\t\t}\n");
+
+	jent_add_to_status("\t\t\"rctMemory\": {\n");
+	jent_add_to_status("\t\t\t\"intermittent\": %s,\n",
+			   ec->health_failure & JENT_RCT_MEM_FAILURE ? "true" : "false");
+	jent_add_to_status("\t\t\t\"permanent\": %s\n",
+			   ec->health_failure & JENT_RCT_MEM_FAILURE_PERMANENT ? "true" : "false");
 	jent_add_to_status("\t\t}");
 
 #ifdef JENT_HEALTH_LAG_PREDICTOR
@@ -131,6 +141,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t\t}\n");
 	jent_add_to_status("\t}\n");
 
+out:
 	jent_add_to_status("}\n");
 
 	return 0;

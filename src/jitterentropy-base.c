@@ -238,6 +238,8 @@ static inline unsigned int jent_update_hashloop(unsigned int flags,
  *	-6	RCT permanent failure
  *	-7	APT permanent failure
  *	-8	LAG permanent failure
+ *	-9	RCT with memory failed
+ *	-10	RCT with memory permanent failure
  */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
@@ -267,10 +269,15 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 			else if (health_test_result &
 				 JENT_LAG_FAILURE_PERMANENT)
 				ret = -8;
+			else if (health_test_result &
+				 JENT_RCT_MEM_FAILURE_PERMANENT)
+				ret = -10;
 			else if (health_test_result & JENT_RCT_FAILURE)
 				ret = -2;
 			else if (health_test_result & JENT_APT_FAILURE)
 				ret = -3;
+			else if (health_test_result & JENT_RCT_MEM_FAILURE)
+				ret = -9;
 			else
 				ret = -5;
 
@@ -393,10 +400,16 @@ static int jent_health_failure_reset(
 		(*ec)->lag_prediction_success_count =
 			lag_prediction_success_count;
 #endif
+
+		/* RCT with memory re-initialization to intermittent error */
+		(*ec)->rct_mem_count = (*ec)->rct_mem_cutoff;
 	}
 
 	return 0;
 }
+
+static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
+						       unsigned int flags);
 
 /**
  * Entry function: Obtain entropy for the caller.
@@ -443,12 +456,14 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		case -6:
 		case -7:
 		case -8:
+		case -10:
 			return ret;
 
 			/* Intermittent health errors */
 		case -2:
 		case -3:
 		case -5:
+		case -9:
 			/*
 			 * Re-allocate the entropy collector with updated
 			 * OSR, hash loop count and memory size and run
@@ -457,7 +472,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			 * If we fail here, the Jitter RNG returns the error.
 			 */
 			if (jent_health_failure_reset(
-				ec, jent_entropy_collector_alloc))
+				ec, _jent_entropy_collector_alloc))
 				return ret;
 
 			/*
@@ -569,8 +584,6 @@ static struct rand_data
 		if (entropy_collector->mem == NULL)
 			goto err;
 		entropy_collector->memaccessloops = JENT_MEM_ACC_LOOP_DEFAULT;
-		entropy_collector->max_mem_set =
-			!!JENT_FLAGS_TO_MAX_MEMSIZE(flags);
 	}
 
 	/* Set the hash loop count */
@@ -645,9 +658,8 @@ err:
 	return NULL;
 }
 
-JENT_PRIVATE_STATIC
-struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
-					       unsigned int flags)
+static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
+						       unsigned int flags)
 {
 	struct rand_data *ec = jent_entropy_collector_alloc_internal(osr,
 								     flags);
@@ -699,6 +711,23 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	} while (ec->startup_state != jent_startup_completed);
 
 	jent_notime_unsettick(ec);
+
+	return ec;
+}
+
+JENT_PRIVATE_STATIC
+struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
+					       unsigned int flags)
+{
+	struct rand_data *ec = _jent_entropy_collector_alloc(osr, flags);
+
+	if (!ec)
+		return ec;
+
+	/*
+	 * Define max_mem_set only if the external caller defined such memory.
+	 */
+	ec->max_mem_set = !!JENT_FLAGS_TO_MAX_MEMSIZE(flags);
 
 	return ec;
 }

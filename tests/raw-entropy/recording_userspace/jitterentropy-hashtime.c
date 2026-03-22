@@ -93,7 +93,11 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	jent_entropy_init_common_pre();
 #endif
 
-	ec = jent_entropy_collector_alloc(osr, flags);
+	/*
+	 * Use the internal allocation to prevent checking and updating the
+	 * OSR, memory size or hash loop count.
+	 */
+	ec = jent_entropy_collector_alloc_internal(osr, flags);
 	if (!ec) {
 		ret = 1;
 		goto out;

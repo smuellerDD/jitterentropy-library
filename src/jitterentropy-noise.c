@@ -152,6 +152,8 @@ static void jent_hash_loop(struct rand_data *ec,
 				 sizeof(ec->apt_count));
 		jent_sha3_update(&ctx,(uint8_t *) &ec->apt_base,
 				 sizeof(ec->apt_base));
+		jent_sha3_update(&ctx,(uint8_t *) &ec->rct_mem_count,
+				 sizeof(ec->rct_mem_count));
 		jent_sha3_update(&ctx, (uint8_t *)&j, sizeof(uint64_t));
 		jent_sha3_final(&ctx, digest);
 	}
@@ -527,10 +529,12 @@ static void jent_random_data_one(
 			               uint64_t loop_cnt,
 				       uint64_t *ret_current_delta))
 {
-	unsigned int k = 0, safety_factor = 0;
+	unsigned int safety_factor = 0;
 
 	if (ec->fips_enabled)
 		safety_factor = ENTROPY_SAFETY_FACTOR;
+
+	ec->gen_loop_iter = 0;
 
 	while (!jent_health_failure(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
@@ -541,7 +545,8 @@ static void jent_random_data_one(
 		 * We multiply the loop value with ->osr to obtain the
 		 * oversampling rate requested by the caller
 		 */
-		if (++k >= ((DATA_SIZE_BITS + safety_factor) * ec->osr))
+		if (++ec->gen_loop_iter >=
+		    ((DATA_SIZE_BITS + safety_factor) * ec->osr))
 			break;
 	}
 }
