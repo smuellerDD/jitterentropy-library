@@ -64,21 +64,9 @@ that he uses:
 Depending on the version of the Jitter RNG, the following commands have to
 be invoked for compiling the test tool:
 
-	* Jitter RNG 1.x and older: make -f Makefile.foldtime
-
-	* Jitter RNG 2.x: make -f Makefile.lfsrtime
-
 	* Jitter RNG 3.x: make -f Makefile.hashtime
 
 The test is now invoked with the following command:
-
-	* Jitter RNG 1.x and older:
-
-		./jitterentropy-foldtime > /dev/shm/jent-raw.data
-
-	* Jitter RNG 2.x:
-
-		./jitterentropy-lfsrtime > /dev/shm/jent-raw.data
 
 	* Jitter RNG 3.x:
 
@@ -163,5 +151,4 @@ The script `invoke_testing_memloop.sh` performs the testing with all commonly
 supported memory sizes. Along with the analysis script 
 `validation-runtime/processdata_memloop.sh` the entropy rate for each memory
 block size is calculated. When now the memory sizes that are larger than the
-tested CPU's L1 data cache are considered, the entropy rate that almost entirely
-is derived from L2 is visible.
+tested CPU's L1 data cache are considered, the entropy rate that almost entirelyis derived from L2 is visible.
