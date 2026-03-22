@@ -346,6 +346,7 @@ struct rand_data
 	unsigned int fips_enabled:1;
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
 	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
+	unsigned int in_recovery:1;	/* Flag to indicate a recovery op. */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
