@@ -84,17 +84,14 @@ entropy is more than what the Jitter RNG heuristic applies.
 
 When enabling the NTG.1 operational behavior, it is possible to incur
 insufficient entropy. It is **strongly** advisable to perform the
-[assessment for insufficient entropy](#Approach to Analyze Insufficient Entropy).
+[assessment for insufficient entropy](#approach-to-analyze-insufficient-entropy).
 This is due to the fact that the health test is significantly more strict:
 
-- 8/OSR bits of entropy are heuristically expected to be available during
-start time. This value must be achieved by the hash loop and memory access loop
+- 8/OSR bits of entropy are heuristically expected to be available.
+This value must be achieved by the hash loop and memory access loop
 **independently** of each other. For details on the independent operation of
 the hash loop and memory access loop, see the design and architecture
 specification of the Jitter RNG.
-
-- 4/OSR bits of entropy are heuristically expected to be available during
-runtime.
 
 Note, when applying the analysis in the following, you have to compare the 
 data with the heuristic entropy value of 8/OSR. 
@@ -110,7 +107,7 @@ configuration values gives better entropy.
 ## Basic Requirement For Entropy Rate
 
 To be precise, the following requirements must be met - every time the following
-refers to the "OSR" value, please consider [Oversampling Rate](#Oversampling Rate): 
+refers to the "OSR" value, please consider [Oversampling Rate](#oversampling-rate): 
 
 - In all cases: The runtime and restart entropy rates given by `processdata.sh`
   must show an entropy value that is larger than 1/OSR.
