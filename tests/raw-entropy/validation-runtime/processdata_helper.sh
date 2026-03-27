@@ -36,7 +36,8 @@ BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
 # up to one byte.
 
 # List of masks usually analyzed (4 and 8 LSB) 
-MASK_LIST="0F:4 FF:8"
+MASK_LIST="FF:8"
+#MASK_LIST="0F:4 FF:8"
 
 # List used for ARM Cortext A9 and A7 processors
 #MASK_LIST="FF:4,8 7F8:4,8"
