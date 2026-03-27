@@ -79,25 +79,41 @@ initialization of the Jitter RNG.
 
 ## NIST SP800-90B Compliance
 
-If you want to comply with the NIST SP800-90B rules, the following configuration
-is needed.
+In order for the Jitter RNG to be compliant with the requirements from SP800-90B including the FIPS 140 IG D.K, the following usage constraints must be observed:
 
-Flags set in the `flags` field:
+### Compilation
 
-- `JENT_NTG1` may be set (i.e. the SP800-90B configuration and the
-   [NTG.1 configuration](#ais-2031-ntg1-compliance) can be jointly enabled)
+No special considerations.
 
-- Either `JENT_FORCE_FIPS` MUST be set or base OS is in FIPS mode (i.e. the
-  helper function `jent_fips_enabled` returns true).
+### Initialization
 
-The status information provided by `jent_status` must show:
+The following flags are to be considered:
+
+- `JENT_NTG1` may be set (i.e. the SP800-90B configuration and the [AIS 20/31 NTG.1 configuration](#ais-2031-ntg1-compliance) can be jointly enabled).
+
+- Either `JENT_FORCE_FIPS` must be set or base OS is in FIPS mode (i.e. the helper function jent_fips_enabled returns true).
+
+- `JENT_FORCE_INTERNAL_TIMER` must not be set.
+
+- All other flags may be set at the caller's discretion.
+
+### Runtime
+
+The Jitter RNG must not be used if the health test returns a permanent error.
+
+### Status
+
+The status returned by the jent_status API must show the following information among others:
 
 - FIPS mode enabled
 
+- Internal timer disabled
+
 - No health test failing
 
-The following test evidence must be provided to NIST for obtaining the ESV
-certificate:
+### Testing
+
+The following test evidence must be provided to CMVP for proving the compliance to SP800-90B:
 
 - Apply heuristic analysis mandated by NIST on common behavior - see the
   [CMUF Entropy Working Group](https://www.cmuf.org/) for the methodology. More
@@ -109,21 +125,39 @@ certificate:
 
 ## AIS 20/31 NTG.1 Compliance
 
-If you want to comply with the German AIS 20/31 rules pertaining to NTG.1, the
-following configuration is needed.
+In order for the Jitter RNG to be NTG.1 compliant, the following usage constraints must be observed.
 
-Flags set in the `flags` field:
+### Compilation
 
-- `JENT_FORCE_FIPS` may be set (i.e. the NTG.1 configuration and the
-   [SP800-90B configuration](#nist-sp800-90b-compliance) can be jointly enabled)
+The Jitter RNG must be compiled with the compile time options of:
 
-- `JENT_NTG1` MUST be set
+- `CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY` must be enabled - this option is set when using specific memory allocation functions as defined in jitterentropy-base-user.h. Note, in case this define is not set for your given environment, ensure that a memory allocation is used which implements the following properties - after this is guaranteed, the flag can be set:
 
-- Memory buffer size is at least 4 times larger than L1 cache size (typically
-  the Jitter RNG can detect the cache size during startup and can set the
-  memory buffer size automatically).
+	* The memory must not be swapped to non-volatile store upon memory pressure by the OS.
 
-The status information provided by `jent_status` must show:
+	* The memory must not be shared in any kind with another entity beyond the Jitter RNG. E.g. a it shall not be a shared memory segment.
+
+	* The memory must be actively zeroized before the memory is released.
+
+### Initialization
+
+The Jitter RNG must be initialized with the following flag settings:
+
+- `JENT_FORCE_FIPS` may be set (i.e. the NTG.1 configuration and the [SP800-90B configuration](#nist-sp800-90b-compliance) can be jointly enabled).
+
+- `JENT_NTG1` must be set.
+
+- `JENT_FORCE_INTERNAL_TIMER` must not be set.
+
+- All other flags may be set at the caller's discretion.
+
+### Runtime
+
+The Jitter RNG must not be used if the health test returns a permanent error.
+
+### Status
+
+The status returned by the jent_status API must show the following information among others:
 
 - AIS 20/31 NTG.1 mode enabled
 
@@ -133,17 +167,19 @@ The status information provided by `jent_status` must show:
 
 - Internal timer disabled
 
-The following test evidence must be provided to the German BSI for proving
-the compliance to NTG.1:
+### Testing
 
-- Measured entropy rate must show rate 8/OSR or higher (see
-  `tests/raw-entropy/README.md`):
+The following test evidence must be provided to the German BSI for proving the compliance to NTG.1:
 
-  * Hash loop
+- Measured entropy rate must show rate 8/OSR or higher (see the file tests/raw-entropy/README.md given in the source code distribution for the test approach as well as the analysis to increase the entropy rate):
 
-  * Memory access loop
+	* Hash loop
 
-  * Common behavior (SP800-90B restart + runtime tests)
+	* Memory access loop
+
+	* Common behavior (SP800-90B restart + runtime tests)
+
+- If the selected OSR after applying the methodology is larger than 20, the Jitter RNG cannot be used on the particular system.
 
 # Version Numbers
 
