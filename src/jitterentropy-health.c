@@ -550,9 +550,9 @@ static void jent_rct_init(struct rand_data *ec, unsigned short safety)
 
 	if (safety) {
 		ec->rct_cutoff = (unsigned short)
-			(ec->rct_cutoff + safety - 1) / safety;
+			((ec->rct_cutoff + safety - 1) / safety);
 		ec->rct_cutoff_permanent = (unsigned short)
-			(ec->rct_cutoff_permanent + safety - 1) / safety;
+			((ec->rct_cutoff_permanent + safety - 1) / safety);
 	}
 }
 

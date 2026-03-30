@@ -156,7 +156,7 @@ static inline void jent_memset_secure(void *s, size_t n)
 #endif
 }
 
-static inline void jent_zfree(void *ptr, unsigned int len)
+static inline void jent_zfree(void *ptr, size_t len)
 {
 #ifdef LIBGCRYPT
 	/* gcry_free automatically wipes memory allocated with
