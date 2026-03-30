@@ -54,9 +54,9 @@ int jent_notime_init(void **ctx)
 	if (ncpu < 2)
 		return -ENOENT;
 
-	thread_ctx = calloc(1, sizeof(struct jent_notime_ctx));
+	thread_ctx = jent_zalloc(sizeof(struct jent_notime_ctx));
 	if (!thread_ctx)
-		return -errno;
+		return -ENOMEM;
 
 	*ctx = thread_ctx;
 
@@ -69,7 +69,7 @@ void jent_notime_fini(void *ctx)
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
 
 	if (thread_ctx)
-		free(thread_ctx);
+		jent_zfree(thread_ctx, sizeof(struct jent_notime_ctx));
 }
 
 #else /* JENT_CONF_ENABLE_INTERNAL_TIMER */

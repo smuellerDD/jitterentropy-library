@@ -59,7 +59,7 @@ extern "C" {
  *
  * It is allowed to change this value as required for the intended environment.
  */
-#define JENT_STUCK_INIT_THRES(x) ((x*9) / 10)
+#define JENT_STUCK_INIT_THRES(x) (((x) * 9) / 10)
 #endif
 
 /***************************************************************************

@@ -33,10 +33,14 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 {
 	size_t used;
 
+	if (!buf || buflen == 0)
+		return -1;
+
 	#define jent_add_to_status(...)					\
 	{								\
 		used = strlen(buf);					\
-		snprintf(buf + used, buflen - used, __VA_ARGS__);	\
+		if (used < buflen)					\
+			snprintf(buf + used, buflen - used, __VA_ARGS__);\
 	}
 
 	/* needed as plain snprintf to make jent_add_to_status len calculation usable */
@@ -65,7 +69,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 			   ec->health_failure & JENT_RCT_FAILURE ? "true" : "false");
 	jent_add_to_status("\t\t\t\"permanent\": %s\n",
 			   ec->health_failure & JENT_RCT_FAILURE_PERMANENT ? "true" : "false");
-	jent_add_to_status("\t\t}\n");
+	jent_add_to_status("\t\t},\n");
 
 	jent_add_to_status("\t\t\"rctMemory\": {\n");
 	jent_add_to_status("\t\t\t\"intermittent\": %s,\n",
@@ -144,6 +148,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 out:
 	jent_add_to_status("}\n");
 
-	return 0;
+	used = strlen(buf);
+	return (used >= buflen - 1) ? -1 : 0;
 #undef jent_add_to_status
 }

@@ -925,6 +925,13 @@ static inline int jent_entropy_init_common_post(int ret)
 	return ret;
 }
 
+/*
+ * Note: This function and jent_entropy_init_ex() are NOT thread-safe.
+ * They modify global state (GCD, self-test flag, notime configuration).
+ * The caller must ensure that initialization is performed exactly once
+ * before any concurrent use of the library (e.g. via pthread_once or
+ * equivalent).
+ */
 JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
 {

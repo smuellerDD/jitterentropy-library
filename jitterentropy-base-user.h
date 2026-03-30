@@ -241,8 +241,10 @@ static inline void jent_get_nstime(uint64_t *out)
 	 */
 	uint64_t tmp = 0;
 	timebasestruct_t aixtime;
-	tmp = aixtime.tb_high * 1000000000UL;
-	tmp += aixtime.tb_low;
+	read_real_time(&aixtime, TIMEBASE_SZ);
+	time_base_to_time(&aixtime, TIMEBASE_SZ);
+	tmp = (uint64_t)aixtime.tb_high * 1000000000UL;
+	tmp += (uint64_t)aixtime.tb_low;
 	*out = tmp;
 # else /* __MACH__ */
 	/* we could use CLOCK_MONOTONIC(_RAW), but with CLOCK_REALTIME
@@ -333,7 +335,7 @@ static inline void jent_memset_secure(void *s, size_t n)
 #endif
 }
 
-static inline void jent_zfree(void *ptr, unsigned int len)
+static inline void jent_zfree(void *ptr, size_t len)
 {
 #ifdef LIBGCRYPT
 	/* gcry_free automatically wipes memory allocated with
