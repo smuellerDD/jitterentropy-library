@@ -549,6 +549,12 @@ static struct rand_data
 	 */
 	osr = ensure_osr_is_at_least_minimal(osr);
 
+	/*
+	 * Reject too high OSR
+	 */
+	if (osr > JENT_MAX_OSR)
+		return NULL;
+
 	/* Force the self test to be run */
 	if (!jent_selftest_run && jent_entropy_init_ex(osr, flags))
 		return NULL;
@@ -761,11 +767,6 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	uint64_t *delta_history;
 	int i, time_backwards = 0, count_stuck = 0, ret = 0;
 	unsigned int health_test_result;
-
-	/*
-	 * Ensure over sampling rate is not too low.
-	 */
-	osr = ensure_osr_is_at_least_minimal(osr);
 
 	delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT);
 	if (!delta_history)
