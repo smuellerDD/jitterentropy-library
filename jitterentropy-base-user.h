@@ -77,6 +77,10 @@
 #include <openssl/crypto.h>
 #endif
 
+#ifdef __linux__
+#include <sys/mman.h>
+#endif
+
 #ifdef __MACH__
 #include <assert.h>
 #include <CoreServices/CoreServices.h>
@@ -270,6 +274,7 @@ static inline void *jent_zalloc(size_t len)
 	#define JENT_IS_POWER_OF_2(n) (JENT_BUILD_BUG_ON((n & (n - 1)) != 0))
 
 	void *tmp = NULL;
+
 #ifdef LIBGCRYPT
 	/* Set the maximum usable locked memory to 2 MiB at fist call.
 	 *
@@ -312,11 +317,25 @@ static inline void *jent_zalloc(size_t len)
 		OPENSSL_secure_free(tmp);
 		tmp = NULL;
 	}
-#else
+
+#elif defined(__linux__)
+#define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
+	tmp = malloc(len);
+	/* prevent paging out of the memory state to swap space */
+	if (mlock(tmp, len) && errno != EPERM && errno != EAGAIN) {
+		free(tmp);
+printf("here\n");
+		return NULL;
+	}
+
+#else /* LIBGCRYPT */
+
 	/* we have no secure memory allocation! Hence
 	 * we do not set CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
 	tmp = malloc(len);
+
 #endif /* LIBGCRYPT */
+
 	if(NULL != tmp)
 		memset(tmp, 0, len);
 	return tmp;
@@ -342,13 +361,21 @@ static inline void jent_zfree(void *ptr, size_t len)
 	 * gcry_(x)malloc_secure */
 	(void) len;
 	gcry_free(ptr);
+
 #elif defined(AWSLC)
 	/* AWS-LC stores the length of allocated memory internally and automatically wipes it in OPENSSL_free */
 	(void) len;
 	OPENSSL_free(ptr);
+
 #elif defined(OPENSSL)
 	OPENSSL_cleanse(ptr, len);
 	OPENSSL_secure_free(ptr);
+
+#elif defined(__linux__)
+
+	jent_memset_secure(ptr, len);
+	free(ptr);
+
 #else
 	jent_memset_secure(ptr, len);
 	free(ptr);
