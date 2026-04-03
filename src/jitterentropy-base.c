@@ -877,7 +877,8 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 		goto out;
 	}
 
-	ret = jent_gcd_analyze(delta_history, JENT_POWERUP_TESTLOOPCOUNT, osr);
+	ret = jent_gcd_analyze(delta_history, JENT_POWERUP_TESTLOOPCOUNT,
+			       ec->osr);
 	if (ret)
 		goto out;
 
