@@ -321,10 +321,11 @@ static inline void *jent_zalloc(size_t len)
 #elif defined(__linux__)
 #define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 	tmp = malloc(len);
+	if (!tmp)
+		return NULL;
 	/* prevent paging out of the memory state to swap space */
 	if (mlock(tmp, len) && errno != EPERM && errno != EAGAIN) {
 		free(tmp);
-printf("here\n");
 		return NULL;
 	}
 
