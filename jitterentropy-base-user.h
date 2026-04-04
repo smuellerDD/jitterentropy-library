@@ -373,7 +373,11 @@ static inline void jent_zfree(void *ptr, size_t len)
 	OPENSSL_secure_free(ptr);
 
 #elif defined(__linux__)
-
+	/* while memory returned to the OS is automatically unlocked,
+	 * it is not known how long libc keeps this memory cached
+	 * internally therefore its more robust to nevertheless
+	 * unlock here. */
+	munlock(ptr, len);
 	jent_memset_secure(ptr, len);
 	free(ptr);
 
