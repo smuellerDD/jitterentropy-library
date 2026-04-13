@@ -555,7 +555,7 @@ static void jent_random_data_one(
 	ec->rct_mem_ctr = 0;
 
 	/* Obtain number of loop iterations */
-	ec->rct_mem_nosr =
+	ec->rct_mem_nosr = (unsigned short)
 		JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(ec->osr, safety_factor);
 
 	/* Safety measure against wrapping */
