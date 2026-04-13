@@ -523,30 +523,54 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	return stuck;
 }
 
+/*
+ * We multiply the loop value with ->osr to obtain the oversampling rate
+ * requested by the caller
+ */
+#define JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)                     \
+	((DATA_SIZE_BITS + (_safety_factor)) * (_osr))
+
+/*
+ * The health test RCT with memory operates on multiples of three time deltas.
+ * Therefore, round up the jitter loop counter to the nearest multiple of three.
+ */
+#define JENT_ROUNDUP_TO_THREE(x)                                               \
+	( (((x) * 3) + 2) / 3 )
+#define JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)            \
+	JENT_ROUNDUP_TO_THREE(                                                 \
+		JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor))
+
 static void jent_random_data_one(
 	struct rand_data *ec,
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 			               uint64_t loop_cnt,
 				       uint64_t *ret_current_delta))
 {
-	unsigned int safety_factor = 0;
+	unsigned int safety_factor = 0, ctr = 0;
 
 	if (ec->fips_enabled)
 		safety_factor = ENTROPY_SAFETY_FACTOR;
 
-	ec->gen_loop_iter = 0;
+	/* RCT with memory: start a new iteration loop */
+	ec->rct_mem_ctr = 0;
 
+	/* Obtain number of loop iterations */
+	ec->rct_mem_nosr =
+		JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(ec->osr, safety_factor);
+
+	/* Safety measure against wrapping */
+	if (ec->rct_mem_nosr < DATA_SIZE_BITS) {
+		ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
+		return;
+	}
+
+	/* Entropy collection loop */
 	while (!jent_health_failure(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
 		if (measure_jitter(ec, 0, NULL))
 			continue;
 
-		/*
-		 * We multiply the loop value with ->osr to obtain the
-		 * oversampling rate requested by the caller
-		 */
-		if (++ec->gen_loop_iter >=
-		    ((DATA_SIZE_BITS + safety_factor) * ec->osr))
+		if (++ctr >= ec->rct_mem_nosr)
 			break;
 	}
 }

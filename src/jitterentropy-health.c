@@ -430,12 +430,17 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  */
 #define JENT_RCT_MEM_RECOVERY_LOOP_CNT 10
 
+/*
+ * RCT with memory using tau = 3 - these values effectively disables the
+ * health test.
+ */
 static const unsigned short jent_rct_mem_cutoff_lookup[] =
-	{ 222,  488,  757,  1027, 1297, 1567, 1837, 2107, 2377, 2647,
-	  2917, 3187, 3457, 3727, 3997, 4267, 4537, 4807, 5078, 5348 };
+	{ 107,  214,  321,  428,  535,  642,  749,  856,  963, 1070,
+	  1177, 1284, 1391, 1498, 1605, 1712, 1819, 1926, 2033, 2140 };
+/* RCT with memory using tau = 3 */
 static const unsigned short jent_rct_mem_cutoff_permanent_lookup[] =
-	{ 244,  513,  783,  1053, 1323, 1594, 1864, 2134, 2404, 2674,
-	  2944, 3214, 3484, 3754, 4024, 4294, 4564, 4834, 5104, 5375 };
+	{ 108,  215,  322,  429,  536,  643,  750,  857,  964, 1071,
+	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 
 static void jent_rct_mem_init(struct rand_data *ec)
 {
@@ -452,14 +457,21 @@ static void jent_rct_mem_init(struct rand_data *ec)
 	}
 }
 
-/* For NTG.1: 8-fold security margin */
+/*
+ * For NTG.1: 8-fold security margin using tau 3 with a significance level
+ * pnorm(-3) yielding 0.0013 for first-order errors. Due to the recovery
+ * loop we can afford such higher value.
+ */
 static const unsigned short jent_rct_mem_cutoff_lookup_ntg1[] =
-	{ 161,  337,  542,  769,  1010, 1260, 1516, 1776, 2038, 2302,
-	  2567, 2834, 3101, 3368, 3636, 3905, 4173, 4442, 4711, 4980 };
+	{ 3,    41,   126,  245,  387,  547,  719,  856,  963,  1070,
+	  1177, 1284, 1391, 1498, 1605, 1712, 1819, 1926, 2033, 2140 };
+/*
+ * For NTG.1: 8-fold security margin using tau 5 with a significance level of
+ * pnorm(-5) yielding about 2^-20.
+ */
 static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1[] =
-	{ 168,  384,  630,  888,  1151, 1417, 1684, 1952, 2221, 2490,
-	  2759, 3029, 3298, 3568, 3838, 4108, 4378, 4648, 4917, 5187 };
-
+	{ 5,    50,   142,  265,  410,  572,  746,  857,  964,  1071,
+	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 static void jent_rct_mem_init_ntg1(struct rand_data *ec)
 {
 	if (ec->osr >= ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1)) {
@@ -476,17 +488,46 @@ static void jent_rct_mem_init_ntg1(struct rand_data *ec)
 	}
 }
 
-static void jent_rct_mem_insert(struct rand_data *ec, int stuck)
+static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 {
 	/* Start of a new window */
-	if (ec->gen_loop_iter == 0)
+	if (ec->rct_mem_ctr == 0)
 		ec->rct_mem_count = 0;
 
-	if (stuck)
+	/*
+	 * If we are outside of a window, do not bother any more: the health
+	 * test will not be applied any more.
+	 *
+	 * We could simply return at this point if we leave the window, but then
+	 * we have a multi-modal behavior of the noise source, because if the
+	 * window is completed, a significant part of the code is not executed.
+	 * Therefore we apply a different strategy: always apply the health
+	 * test, but only set a health error if we are within the window.
+	 */
+#define JENT_RCT_MEM_IN_WINDOW	(ec->rct_mem_ctr < ec->rct_mem_nosr)
+
+	/*
+	 * According to the specification of this health test, we only consider
+	 * every third iteration count.
+	 *
+	 * Again, we could simply return here, but that would again imply a
+	 * multi-modal behavior. Therefore, always perform the health test
+	 * and turn it into a noop.
+	 */
+#define JENT_RCT_MEM_SKIP_STUCK (ec->rct_mem_ctr % 3)
+
+	/*
+	 * We have a stuck value, count it
+	 */
+	if (stuck && JENT_RCT_MEM_IN_WINDOW && !JENT_RCT_MEM_SKIP_STUCK)
 		ec->rct_mem_count++;
 
+	/*
+	 * Apply the cut off value.
+	 */
 	if (ec->rct_mem_count >= ec->rct_mem_cutoff_permanent) {
-		ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
+		if (JENT_RCT_MEM_IN_WINDOW)
+			ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
 	} else if (ec->rct_mem_count == ec->rct_mem_cutoff) {
 		/*
 		 * This is a "recovery loop" to recover from expected false
@@ -520,9 +561,17 @@ static void jent_rct_mem_insert(struct rand_data *ec, int stuck)
 			 * either. Also, leave the rct_mem_count value as is.
 			 */
 		} else {
-			ec->health_failure |= JENT_RCT_MEM_FAILURE;
+			if (JENT_RCT_MEM_IN_WINDOW)
+				ec->health_failure |= JENT_RCT_MEM_FAILURE;
 		}
 	}
+
+	/*
+	 * Count up the seen measurements if we are in the window - this
+	 * prevents also a wrap-around.
+	 */
+	if (JENT_RCT_MEM_IN_WINDOW)
+		ec->rct_mem_ctr++;
 }
 
 /***************************************************************************
@@ -562,7 +611,7 @@ static void jent_rct_init(struct rand_data *ec, unsigned short safety)
  * @param[in] ec Reference to entropy collector
  * @param[in] stuck Indicator whether the value is stuck
  */
-static void jent_rct_insert(struct rand_data *ec, int stuck)
+static void jent_rct_insert(struct rand_data *ec, unsigned int stuck)
 {
 	if (stuck) {
 		ec->rct_count++;
@@ -597,6 +646,7 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 {
 	uint64_t delta2 = jent_delta2(ec, current_delta);
 	uint64_t delta3 = jent_delta3(ec, delta2);
+	unsigned int stuck = !current_delta || !delta2 || !delta3;
 
 	/*
 	 * Insert the result of the comparison of two back-to-back time
@@ -605,18 +655,11 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	jent_apt_insert(ec, current_delta);
 	jent_lag_insert(ec, current_delta);
 
-	if (!current_delta || !delta2 || !delta3) {
-		/* RCT with a stuck bit */
-		jent_rct_insert(ec, 1);
-		jent_rct_mem_insert(ec, 1);
-		return 1;
-	}
+	/* RCT with stuck result */
+	jent_rct_insert(ec, stuck);
+	jent_rct_mem_insert(ec, stuck);
 
-	/* RCT with a non-stuck bit */
-	jent_rct_insert(ec, 0);
-	jent_rct_mem_insert(ec, 0);
-
-	return 0;
+	return stuck;
 }
 
 /**

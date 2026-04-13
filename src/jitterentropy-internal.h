@@ -337,8 +337,9 @@ struct rand_data
 	unsigned int health_failure;	/* Permanent health failure */
 
 	/* RCT with memory */
+	unsigned short rct_mem_ctr;	/* Loop iteration for generating random bytes */
+	unsigned short rct_mem_nosr;	/* Minimum iteration count of measure jitter loop */
 	unsigned short rct_mem_count;	/* Number of stuck values */
-	unsigned short gen_loop_iter;	/* Loop iteration for generating random bytes */
 	unsigned short rct_mem_cutoff;	/* RCT intermittent cutoff */
 	unsigned short rct_mem_cutoff_permanent; /* RCT permanent cutoff */
 
