@@ -458,12 +458,12 @@ static void jent_rct_mem_init(struct rand_data *ec)
 }
 
 /*
- * For NTG.1: 8-fold security margin using tau 3 with a significance level
- * pnorm(-3) yielding 0.0013 for first-order errors. Due to the recovery
- * loop we can afford such higher value.
+ * For NTG.1: 8-fold security margin using tau 4 with a significance level
+ * pnorm(-4) yielding 3.17e-05 (roughly 2^-15) for first-order errors. Due to
+ * the recovery loop we can afford such higher value.
  */
 static const unsigned short jent_rct_mem_cutoff_lookup_ntg1[] =
-	{ 3,    41,   126,  245,  387,  547,  719,  856,  963,  1070,
+	{ 4,    46,   134,  255,  399,  560,  733,  856,  963,  1070,
 	  1177, 1284, 1391, 1498, 1605, 1712, 1819, 1926, 2033, 2140 };
 /*
  * For NTG.1: 8-fold security margin using tau 5 with a significance level of
