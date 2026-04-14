@@ -535,7 +535,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
  * Therefore, round up the jitter loop counter to the nearest multiple of three.
  */
 #define JENT_ROUNDUP_TO_THREE(x)                                               \
-	( (((x) * 3) + 2) / 3 )
+	( (((x) + 2) / 3) * 3 )
 #define JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)            \
 	JENT_ROUNDUP_TO_THREE(                                                 \
 		JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor))
