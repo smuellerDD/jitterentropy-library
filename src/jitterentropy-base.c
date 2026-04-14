@@ -411,7 +411,7 @@ static int jent_health_failure_reset(
 
 		/* RCT re-initialization to intermittent error */
 		(*ec)->rct_count =
-			(int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr));
+			(unsigned int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr));
 
 		/* LAG re-initialization */
 #ifdef JENT_HEALTH_LAG_PREDICTOR

@@ -320,7 +320,7 @@ struct rand_data
 	unsigned int hashloopcnt;	/* Hash loop count */
 
 	/* Repetition Count Test */
-	int rct_count;			/* Number of stuck values */
+	unsigned int rct_count;		/* Number of stuck values */
 	unsigned short rct_cutoff;	/* RCT intermittent cutoff */
 	unsigned short rct_cutoff_permanent; /* RCT permanent cutoff */
 

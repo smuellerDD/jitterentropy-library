@@ -616,9 +616,9 @@ static void jent_rct_insert(struct rand_data *ec, unsigned int stuck)
 	if (stuck) {
 		ec->rct_count++;
 
-		if ((unsigned int)ec->rct_count >= ec->rct_cutoff_permanent) {
+		if (ec->rct_count >= ec->rct_cutoff_permanent) {
 			ec->health_failure |= JENT_RCT_FAILURE_PERMANENT;
-		} else if ((unsigned int)ec->rct_count == ec->rct_cutoff) {
+		} else if (ec->rct_count == ec->rct_cutoff) {
 			ec->health_failure |= JENT_RCT_FAILURE;
 		}
 	} else {
