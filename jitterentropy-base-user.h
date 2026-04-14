@@ -268,6 +268,16 @@ static inline void jent_get_nstime(uint64_t *out)
 
 #endif /* (__x86_64__) || (__i386__) || (__aarch64__) */
 
+static inline void jent_memset_secure(void *s, size_t n)
+{
+#if defined(AWSLC)
+	OPENSSL_cleanse(s, n);
+#else
+	memset(s, 0, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
+#endif
+}
+
 static inline void *jent_zalloc(size_t len)
 {
 	#define JENT_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
@@ -338,21 +348,11 @@ static inline void *jent_zalloc(size_t len)
 #endif /* LIBGCRYPT */
 
 	if(NULL != tmp)
-		memset(tmp, 0, len);
+		jent_memset_secure(tmp, len);
 	return tmp;
 
 #undef JENT_IS_POWER_OF_2
 #undef JENT_BUILD_BUG_ON
-}
-
-static inline void jent_memset_secure(void *s, size_t n)
-{
-#if defined(AWSLC)
-	OPENSSL_cleanse(s, n);
-#else
-	memset(s, 0, n);
-	__asm__ __volatile__("" : : "r" (s) : "memory");
-#endif
 }
 
 static inline void jent_zfree(void *ptr, size_t len)
