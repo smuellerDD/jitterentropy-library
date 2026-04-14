@@ -348,6 +348,7 @@ static int jent_health_failure_reset(
 {
 	unsigned int osr, flags, max_mem_set, apt_observations = 0,
 		     lag_prediction_success_run, lag_prediction_success_count;
+	struct rand_data *new_ec;
 	uint64_t current_delta;
 
 	/* Remember all health test state */
@@ -382,10 +383,6 @@ static int jent_health_failure_reset(
 	/* Increment hash loop count by one */
 	flags = jent_update_hashloop(flags, 1);
 
-	/* re-allocate entropy collector with higher OSR and memory size */
-	jent_entropy_collector_free(*ec);
-	*ec = NULL;
-
 	/* Perform new health test with updated OSR */
 	while (jent_entropy_init_ex(osr, flags)) {
 		osr++;
@@ -393,9 +390,16 @@ static int jent_health_failure_reset(
 			return -1;
 	}
 
-	*ec = alloc(osr, flags);
-	if (!*ec)
+	/*
+	 * Allocate the new collector before freeing the old one, so that
+	 * the caller's *ec remains valid if allocation fails.
+	 */
+	new_ec = alloc(osr, flags);
+	if (!new_ec)
 		return -1;
+
+	jent_entropy_collector_free(*ec);
+	*ec = new_ec;
 
 	/* Remember whether caller configured memory size */
 	(*ec)->max_mem_set = !!max_mem_set;
@@ -611,14 +615,14 @@ static struct rand_data
 		flags = jent_update_memsize(flags, 0);
 		memsize = jent_memsize(flags);
 		entropy_collector->mem = (unsigned char *)jent_zalloc(memsize);
+		if (entropy_collector->mem == NULL)
+			goto err;
 
 		/*
 		 * Transform the size into a mask - it is assumed that size is
 		 * a power of 2.
 		 */
 		entropy_collector->memmask = memsize - 1;
-		if (entropy_collector->mem == NULL)
-			goto err;
 		entropy_collector->memaccessloops = JENT_MEM_ACC_LOOP_DEFAULT;
 	}
 
@@ -737,6 +741,21 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 			 */
 			if (jent_health_failure_reset(
 				&ec, jent_entropy_collector_alloc_internal)) {
+				jent_entropy_collector_free(ec);
+				return NULL;
+			}
+
+			/*
+			 * The reset replaced ec with a freshly allocated
+			 * collector. That new collector has enable_notime
+			 * set but no running timer thread (the old thread
+			 * was stopped when the old collector was freed).
+			 * Restart the timer thread before re-entering the
+			 * loop, otherwise jent_get_nstime_internal will
+			 * spin forever waiting for a counter that nobody
+			 * increments.
+			 */
+			if (jent_notime_settick(ec)) {
 				jent_entropy_collector_free(ec);
 				return NULL;
 			}
