@@ -76,9 +76,15 @@ static inline void *jent_zalloc(size_t len)
 	return tmp;
 }
 
-static inline void jent_zfree(void *ptr, unsigned int len)
+static inline void jent_memset_secure(void *s, size_t n)
 {
-	memset(ptr, 0, len);
+	memset(s, 0, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
+}
+
+static inline void jent_zfree(void *ptr, size_t len)
+{
+	jent_memset_secure(ptr, len);
 	free(ptr);
 }
 
