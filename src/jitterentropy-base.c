@@ -611,14 +611,14 @@ static struct rand_data
 		flags = jent_update_memsize(flags, 0);
 		memsize = jent_memsize(flags);
 		entropy_collector->mem = (unsigned char *)jent_zalloc(memsize);
+		if (entropy_collector->mem == NULL)
+			goto err;
 
 		/*
 		 * Transform the size into a mask - it is assumed that size is
 		 * a power of 2.
 		 */
 		entropy_collector->memmask = memsize - 1;
-		if (entropy_collector->mem == NULL)
-			goto err;
 		entropy_collector->memaccessloops = JENT_MEM_ACC_LOOP_DEFAULT;
 	}
 
@@ -737,6 +737,21 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 			 */
 			if (jent_health_failure_reset(
 				&ec, jent_entropy_collector_alloc_internal)) {
+				jent_entropy_collector_free(ec);
+				return NULL;
+			}
+
+			/*
+			 * The reset replaced ec with a freshly allocated
+			 * collector. That new collector has enable_notime
+			 * set but no running timer thread (the old thread
+			 * was stopped when the old collector was freed).
+			 * Restart the timer thread before re-entering the
+			 * loop, otherwise jent_get_nstime_internal will
+			 * spin forever waiting for a counter that nobody
+			 * increments.
+			 */
+			if (jent_notime_settick(ec)) {
 				jent_entropy_collector_free(ec);
 				return NULL;
 			}
