@@ -192,8 +192,8 @@ static inline void jent_get_nstime(uint64_t *out)
 
 	__asm__ __volatile__("stcke %0" : "=Q" (clk) : : "cc");
 
-	/* s390x is big-endian, so just perfom a byte-by-byte copy */
-	*out = *(uint64_t *)(clk + 1);
+	/* s390x is big-endian, use memcpy to avoid unaligned access UB */
+	memcpy(out, clk + 1, sizeof(*out));
 }
 
 #elif defined(__powerpc)

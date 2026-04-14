@@ -87,8 +87,8 @@ static inline void jent_get_nstime(uint64_t *out)
 
         asm volatile("stcke %0" : "=Q" (clk) : : "cc");
 
-	/* s390x is big-endian, so just perfom a byte-by-byte copy */
-	*out = *(uint64_t *)(clk + 1);
+	/* s390x is big-endian, use memcpy to avoid unaligned access UB */
+	memcpy(out, clk + 1, sizeof(*out));
 }
 
 static inline void *jent_zalloc(size_t len)
@@ -102,9 +102,15 @@ static inline void *jent_zalloc(size_t len)
 	return tmp;
 }
 
-static inline void jent_zfree(void *ptr, unsigned int len)
+static inline void jent_memset_secure(void *s, size_t n)
 {
-	memset(ptr, 0, len);
+	memset(s, 0, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
+}
+
+static inline void jent_zfree(void *ptr, size_t len)
+{
+	jent_memset_secure(ptr, len);
 	free(ptr);
 }
 
