@@ -395,7 +395,7 @@ void jent_sha3_dealloc(void *hash_state)
 
 /*********************************** XDRBG ************************************/
 
-#define JENT_XDRBG_DRNG_ENCODE_N(x) (x * 85)
+#define JENT_XDRBG_DRNG_ENCODE_N(x) ((x) * 85)
 
 /*
  * This operation implements XDRBG-256 as defined in [1].
