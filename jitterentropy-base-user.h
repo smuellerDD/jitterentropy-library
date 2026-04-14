@@ -399,10 +399,15 @@ static inline int jent_fips_enabled(void)
 #define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
 	char buf[2] = "0";
 	int fd = 0;
+	ssize_t rlen;
 
 	if ((fd = open(FIPS_MODE_SWITCH_FILE, O_RDONLY)) >= 0) {
-		while (read(fd, buf, sizeof(buf)) < 0 && errno == EINTR);
+		do {
+			rlen = read(fd, buf, sizeof(buf));
+		} while (rlen < 0 && errno == EINTR);
 		close(fd);
+		if (rlen <= 0)
+			return 0;
 	}
 	if (buf[0] == '1')
 		return 1;
@@ -458,11 +463,12 @@ static inline void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 	unsigned int i;
 	char buf[10], file[50];
 	int fd = 0;
+	ssize_t rlen;
 
 	/* Iterate over all caches */
 	for (i = 0; i < 4; i++) {
 		unsigned int shift = 0;
-		char *ext;
+		char *ext, *endptr;
 
 		/*
 		 * Check the cache type - we are only interested in Unified
@@ -474,8 +480,12 @@ static inline void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 		fd = open(file, O_RDONLY);
 		if (fd < 0)
 			continue;
-		while (read(fd, buf, sizeof(buf)) < 0 && errno == EINTR);
+		do {
+			rlen = read(fd, buf, sizeof(buf));
+		} while (rlen < 0 && errno == EINTR);
 		close(fd);
+		if (rlen <= 0)
+			continue;
 		buf[sizeof(buf) - 1] = '\0';
 
 		if (strncmp(buf, "Data", 4) && strncmp(buf, "Unified", 7))
@@ -489,8 +499,12 @@ static inline void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 		fd = open(file, O_RDONLY);
 		if (fd < 0)
 			continue;
-		while (read(fd, buf, sizeof(buf)) < 0 && errno == EINTR);
+		do {
+			rlen = read(fd, buf, sizeof(buf));
+		} while (rlen < 0 && errno == EINTR);
 		close(fd);
+		if (rlen <= 0)
+			continue;
 		buf[sizeof(buf) - 1] = '\0';
 
 		ext = strstr(buf, "K");
@@ -505,8 +519,9 @@ static inline void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 			}
 		}
 
-		val = strtol(buf, NULL, 10);
-		if (val == LONG_MAX)
+		errno = 0;
+		val = strtol(buf, &endptr, 10);
+		if (errno != 0 || endptr == buf || val <= 0 || val == LONG_MAX)
 			continue;
 		val <<= shift;
 
