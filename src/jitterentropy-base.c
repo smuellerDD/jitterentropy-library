@@ -244,12 +244,27 @@ static inline unsigned int jent_update_hashloop(unsigned int flags,
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 {
+	/*
+	 * Maximum value representable by ssize_t. Use a portable
+	 * definition in case SSIZE_MAX is not available under strict
+	 * C standard modes. It is nevertheless available on POSIX systems.
+	 */
+	static const size_t ssize_max = (size_t)(((size_t)1 << (sizeof(ssize_t) * 8 - 1)) - 1);
 	char *p = data;
-	size_t orig_len = len;
+	size_t orig_len;
 	int ret = 0;
 
-	if (NULL == ec)
+	/* check obvious misuse of API */
+	if (!ec || (data == NULL && len > 0))
 		return -1;
+
+	/*
+	 * (hypothetical) edge case: clamp to ssize_t range to prevent
+	 * negative return on cast
+	 */
+	if (len > ssize_max)
+		len = ssize_max;
+	orig_len = len;
 
 	if (jent_notime_settick(ec))
 		return -4;
@@ -437,12 +452,27 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 {
+	/*
+	 * Maximum value representable by ssize_t. Use a portable
+	 * definition in case SSIZE_MAX is not available under strict
+	 * C standard modes. It is nevertheless available on POSIX systems.
+	 */
+	static const size_t ssize_max = (size_t)(((size_t)1 << (sizeof(ssize_t) * 8 - 1)) - 1);
 	char *p = data;
-	size_t orig_len = len;
+	size_t orig_len;
 	ssize_t ret = 0;
 
-	if (!ec)
+	/* check obvious misuse of API */
+	if (!ec || (data == NULL && len > 0))
 		return -1;
+
+	/*
+	 * (hypothetical) edge case: clamp to ssize_t range to prevent
+	 * negative return on cast
+	 */
+	if (len > ssize_max)
+		len = ssize_max;
+	orig_len = len;
 
 	while (len > 0) {
 		ret = jent_read_entropy(*ec, p, len);
