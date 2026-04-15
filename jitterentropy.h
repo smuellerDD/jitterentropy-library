@@ -154,7 +154,7 @@ extern "C" {
 #endif
 #endif
 
-#if defined(__MINGW32__) || defined(__APPLE__)
+#if defined(__MINGW32__) || defined(__APPLE__) || defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__)
 #define JENT_PTHREAD
 #endif
 
