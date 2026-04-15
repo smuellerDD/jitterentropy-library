@@ -380,7 +380,7 @@ static int jent_health_failure_reset(
 
 	/*
 	 * In case of an error, leave the existing ec state untouched as a
-	 * safety measure. But it is is in error state and is of not much use.
+	 * safety measure. But it is in error state and is of not much use.
 	 */
 	if (!new_ec)
 		return -1;
