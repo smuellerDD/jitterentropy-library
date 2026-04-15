@@ -226,6 +226,22 @@ static inline uint64_t jent_delta3(struct rand_data *ec, uint64_t delta2)
 				     JENT_LAG_HISTORY(ec, 0)), delta2);
 }
 
+void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
+{
+	unsigned int i;
+
+	new_ec->lag_prediction_success_run = old_ec->lag_prediction_success_run;
+	new_ec->lag_prediction_success_count =
+		old_ec->lag_prediction_success_count;
+	new_ec->lag_best_predictor = old_ec->lag_best_predictor;
+	new_ec->lag_observations = old_ec->lag_observations;
+
+	for (i = 0; i < JENT_LAG_HISTORY_SIZE; i++) {
+		new_ec->lag_scoreboard[i] = old_ec->lag_scoreboard[i];
+		new_ec->lag_delta_history[i] = old_ec->lag_delta_history[i];
+	}
+}
+
 #else /* JENT_HEALTH_LAG_PREDICTOR */
 
 static inline void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
@@ -255,6 +271,13 @@ static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
 	(void)ec;
 	(void)osr;
 }
+
+void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
+{
+	new_ec->last_delta = old_ec->last_delta;
+	new_ec->last_delta2 = old_ec->last_delta2;
+}
+
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 
 /***************************************************************************
@@ -335,10 +358,10 @@ static void jent_apt_init_ntg1(struct rand_data *ec)
 	}
 }
 
-void jent_apt_reinit(struct rand_data *ec,
-		     uint64_t current_delta,
-		     unsigned int apt_count,
-		     unsigned int apt_observations)
+static void jent_apt_reinit(struct rand_data *ec,
+			    uint64_t current_delta,
+			    unsigned int apt_count,
+			    unsigned int apt_observations)
 {
 	ec->apt_base = current_delta;	/* APT Step 1 */
 	ec->apt_base_set = 1;		/* APT Step 2 */
@@ -354,6 +377,15 @@ void jent_apt_reinit(struct rand_data *ec,
 	else
 		ec->apt_count = ec->apt_cutoff;
 	ec->apt_observations = apt_observations;
+}
+
+void jent_apt_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
+{
+	if (old_ec->apt_observations) {
+		/* APT re-initialization to intermittent error */
+		jent_apt_reinit(new_ec, old_ec->apt_base, 0,
+				old_ec->apt_observations);
+	}
 }
 
 /**
@@ -416,8 +448,7 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  *
  * The intermittent cutoff is defined by calculating
  * round(pnorm(2^(-(safety_factor)/OSR))*321*OSR)
- * where safety_factor is 1 for common case, 8 for the NTG.1 startup and 4
- * for the NTG.1 runtime.
+ * where safety_factor is 1 for common case, 8 for the NTG.1.
  *
  * The permanent cutoff is defined by calculating
  * round(pnorm(2^(-(safety_factor / 2)/OSR))*321*OSR)
@@ -574,6 +605,11 @@ static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 		ec->rct_mem_ctr++;
 }
 
+void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
+{
+	new_ec->rct_mem_count = old_ec->rct_mem_cutoff;
+}
+
 /***************************************************************************
  * Stuck Test and its use as Repetition Count Test
  *
@@ -603,6 +639,18 @@ static void jent_rct_init(struct rand_data *ec, unsigned short safety)
 		ec->rct_cutoff_permanent = (unsigned short)
 			((ec->rct_cutoff_permanent + safety - 1) / safety);
 	}
+}
+
+void jent_rct_duplicate(struct rand_data *new_ec)
+{
+	/*
+	 * RCT re-initialization to intermittent error: As during a reset,
+	 * the OSR is updated and the OSR is at the same time the cutoff for
+	 * the RCT, we re-initialize the new RCT to the intermittent error
+	 * value based on the new OSR.
+	 */
+	new_ec->rct_count =
+		(unsigned int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(new_ec->osr));
 }
 
 /**
@@ -703,13 +751,10 @@ void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 	ec->rct_count = 0;
 	jent_lag_init(ec, ec->osr);
 	switch (inittype) {
-	case jent_health_init_type_ntg1_startup:
+	case jent_health_init_type_ntg1:
 		jent_apt_init_ntg1(ec);
 		jent_rct_init(ec, 8);
 		jent_rct_mem_init_ntg1(ec);
-		break;
-	case jent_health_init_type_ntg1_runtime:
-		/* No change of values */
 		break;
 	case jent_health_init_type_common:
 	default:

@@ -71,17 +71,16 @@ static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 /* RCT: permanent cutoff threshold for alpha = 2**-60 */
 #define JENT_HEALTH_RCT_PERMANENT_CUTOFF(x) ((x) * 60)
 
-void jent_apt_reinit(struct rand_data *ec,
-		     uint64_t current_delta,
-		     unsigned int apt_count,
-		     unsigned int apt_observations);
+void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+void jent_apt_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+void jent_rct_duplicate(struct rand_data *new_ec);
+void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
 unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
 unsigned int jent_health_failure(struct rand_data *ec);
 
 enum jent_health_init_type {
 	jent_health_init_type_common,
-	jent_health_init_type_ntg1_startup,
-	jent_health_init_type_ntg1_runtime,
+	jent_health_init_type_ntg1,
 };
 void jent_health_init(struct rand_data *ec,
 		      enum jent_health_init_type inittype);

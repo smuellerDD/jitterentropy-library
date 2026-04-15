@@ -596,7 +596,7 @@ void jent_random_data(struct rand_data *ec)
 		 * independently invoke the next noise source.
 		 */
 		jent_health_init(ec, ec->flags & JENT_NTG1 ?
-				     jent_health_init_type_ntg1_startup :
+				     jent_health_init_type_ntg1 :
 				     jent_health_init_type_common);
 
 		/* FALLTHROUGH */
@@ -609,7 +609,7 @@ void jent_random_data(struct rand_data *ec)
 		 * independently invoke the next noise source.
 		 */
 		jent_health_init(ec, ec->flags & JENT_NTG1 ?
-				     jent_health_init_type_ntg1_runtime :
+				     jent_health_init_type_ntg1 :
 				     jent_health_init_type_common);
 
 		break;

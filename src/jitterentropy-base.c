@@ -346,27 +346,14 @@ static int jent_health_failure_reset(
 	struct rand_data **ec, struct rand_data *(*alloc)(unsigned int osr,
 							  unsigned int flags))
 {
-	unsigned int osr, flags, max_mem_set, apt_observations = 0,
-		     lag_prediction_success_run, lag_prediction_success_count;
-	uint64_t current_delta;
-
-	/* Remember all health test state */
-	apt_observations = (*ec)->apt_observations;
-	current_delta = (*ec)->apt_base;
-#ifdef JENT_HEALTH_LAG_PREDICTOR
-	lag_prediction_success_run = (*ec)->lag_prediction_success_run;
-	lag_prediction_success_count = (*ec)->lag_prediction_success_count;
-#else
-	(void)lag_prediction_success_run;
-	(void)lag_prediction_success_count;
-#endif
+	struct rand_data *new_ec;
+	unsigned int osr, flags;
 
 	/* Increment OSR */
 	osr = (*ec)->osr + 1;
 
 	/* Remember flags value */
 	flags = (*ec)->flags;
-	max_mem_set = (*ec)->max_mem_set;
 
 	/* generic arbitrary cutoff to prevent running "forever" */
 	if (osr > JENT_MAX_OSR)
@@ -376,15 +363,11 @@ static int jent_health_failure_reset(
 	 * If the caller did not set any specific maximum value let the Jitter
 	 * RNG increase the maximum memory by one step.
 	 */
-	if (!max_mem_set)
+	if (!(*ec)->max_mem_set)
 		flags = jent_update_memsize(flags, 1);
 
 	/* Increment hash loop count by one */
 	flags = jent_update_hashloop(flags, 1);
-
-	/* re-allocate entropy collector with higher OSR and memory size */
-	jent_entropy_collector_free(*ec);
-	*ec = NULL;
 
 	/* Perform new health test with updated OSR */
 	while (jent_entropy_init_ex(osr, flags)) {
@@ -393,32 +376,29 @@ static int jent_health_failure_reset(
 			return -1;
 	}
 
-	*ec = alloc(osr, flags);
-	if (!*ec)
+	new_ec = alloc(osr, flags);
+
+	/*
+	 * In case of an error, leave the existing ec state untouched as a
+	 * safety measure. But it is is in error state and is of not much use.
+	 */
+	if (!new_ec)
 		return -1;
 
 	/* Remember whether caller configured memory size */
-	(*ec)->max_mem_set = !!max_mem_set;
+	new_ec->max_mem_set = !!(*ec)->max_mem_set;
 
-	/* Set the health test state in case of intermittent failures. */
-	if (apt_observations) {
-		/* APT re-initialization to intermittent error */
-		jent_apt_reinit(*ec, current_delta, 0, apt_observations);
+	/*
+	 * Duplicate the state of the health test to ensure the newly allocated
+	 * state will continue from the current health state.
+	 */
+	jent_apt_duplicate(new_ec, *ec);
+	jent_rct_duplicate(new_ec);
+	jent_lag_duplicate(new_ec, *ec);
+	jent_rct_mem_duplicate(new_ec, *ec);
 
-		/* RCT re-initialization to intermittent error */
-		(*ec)->rct_count =
-			(unsigned int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr));
-
-		/* LAG re-initialization */
-#ifdef JENT_HEALTH_LAG_PREDICTOR
-		(*ec)->lag_prediction_success_run = lag_prediction_success_run;
-		(*ec)->lag_prediction_success_count =
-			lag_prediction_success_count;
-#endif
-
-		/* RCT with memory re-initialization to intermittent error */
-		(*ec)->rct_mem_count = (*ec)->rct_mem_cutoff;
-	}
+	jent_entropy_collector_free(*ec);
+	*ec = new_ec;
 
 	return 0;
 }
@@ -665,7 +645,7 @@ static struct rand_data
 
 	/* Initialize the health tests */
 	jent_health_init(entropy_collector, flags & JENT_NTG1 ?
-					    jent_health_init_type_ntg1_startup :
+					    jent_health_init_type_ntg1 :
 					    jent_health_init_type_common);
 
 	/* Was jent_entropy_init run (establishing the common GCD)? */
