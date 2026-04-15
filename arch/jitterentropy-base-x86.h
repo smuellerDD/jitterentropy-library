@@ -78,6 +78,12 @@ static inline void *jent_zalloc(size_t len)
 	return tmp;
 }
 
+static inline void jent_memset_secure(void *s, size_t n)
+{
+	memset(s, 0, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
+}
+
 static inline void jent_zfree(void *ptr, size_t len)
 {
 	jent_memset_secure(ptr, len);
@@ -87,12 +93,6 @@ static inline void jent_zfree(void *ptr, size_t len)
 static inline int jent_fips_enabled(void)
 {
         return 0;
-}
-
-static inline void jent_memset_secure(void *s, size_t n)
-{
-	memset(s, 0, n);
-	__asm__ __volatile__("" : : "r" (s) : "memory");
 }
 
 static inline long jent_ncpu(void)
