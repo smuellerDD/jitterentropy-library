@@ -335,7 +335,11 @@ static inline void *jent_zalloc(size_t len)
 	tmp = malloc(len);
 	if (!tmp)
 		return NULL;
-	/* prevent paging out of the memory state to swap space */
+	/*
+	 * prevent paging out of the memory state to swap space
+	 * if this fails, check the current memory lock limits
+	 * and capabilities (e.g. RLIMIT_MEMLOCK and CAP_IPC_LOCK)
+	 */
 	if (mlock(tmp, len)) {
 		free(tmp);
 		return NULL;
