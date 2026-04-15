@@ -131,23 +131,23 @@ static inline void jent_get_nstime(uint64_t *out)
 
 static inline void jent_get_nstime(uint64_t *out)
 {
-        uint64_t ctr_val;
+	uint64_t ctr_val;
 #if !defined(__MACH__)
-        /*
-         * Use the system counter for aarch64 (64 bit ARM)...
-         */
-        __asm__ __volatile__("mrs %0, " AARCH64_NSTIME_REGISTER : "=r" (ctr_val));
+	/*
+	 * Use the system counter for aarch64 (64 bit ARM)...
+	 */
+	__asm__ __volatile__("mrs %0, " AARCH64_NSTIME_REGISTER : "=r" (ctr_val));
 #else
-        /*
-         * Except on modern Apple platforms. Especially on M1 generation Arm64
-         * CPUs, the system counter is too coarse. Instead, use
-         * clock_gettime_nsec_np(CLOCK_UPTIME_RAW), that is equivalent to
-         * march_absolute_time(), but scaled to nanoseconds. See e.g.
-         * https://www.manpagez.com/man/3/clock_gettime_nsec_np/.
-         */
-        ctr_val = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+	/*
+	 * Except on modern Apple platforms. Especially on M1 generation Arm64
+	 * CPUs, the system counter is too coarse. Instead, use
+	 * clock_gettime_nsec_np(CLOCK_UPTIME_RAW), that is equivalent to
+	 * march_absolute_time(), but scaled to nanoseconds. See e.g.
+	 * https://www.manpagez.com/man/3/clock_gettime_nsec_np/.
+	 */
+	ctr_val = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 #endif
-        *out = ctr_val;
+	*out = ctr_val;
 }
 
 #elif defined(__s390x__)
@@ -215,12 +215,12 @@ static inline void jent_get_nstime(uint64_t *out)
 	unsigned long newhigh;
 	uint64_t result;
 #ifdef POWER_PC_USE_NEW_INSTRUCTIONS /* Newer PPC CPUs do not support mftbu/mftb */
-    __asm__ __volatile__(
-        "Lcpucycles:mfspr %0, 269;mfspr %1, 268;mfspr %2, 269;cmpw %0,%2;bne Lcpucycles"
+	__asm__ __volatile__(
+		"Lcpucycles:mfspr %0, 269;mfspr %1, 268;mfspr %2, 269;cmpw %0,%2;bne Lcpucycles"
 		: "=r" (high), "=r" (low), "=r" (newhigh)
 		);
 #else
-    __asm__ __volatile__(
+	__asm__ __volatile__(
 		"Lcpucycles:mftbu %0;mftb %1;mftbu %2;cmpw %0,%2;bne Lcpucycles"
 		: "=r" (high), "=r" (low), "=r" (newhigh)
 		);
@@ -235,12 +235,15 @@ static inline void jent_get_nstime(uint64_t *out)
 
 static inline void jent_get_nstime(uint64_t *out)
 {
-	/* OSX does not have clock_gettime -- taken from
-	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html */
+	/*
+	 * OSX does not have clock_gettime -- taken from
+	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html
+	 */
 # ifdef __MACH__
 	*out = mach_absolute_time();
 # elif _AIX
-	/* clock_gettime() on AIX returns a timer value that increments in
+	/*
+	 * clock_gettime() on AIX returns a timer value that increments in
 	 * steps of 1000
 	 */
 	uint64_t tmp = 0;
@@ -257,8 +260,7 @@ static inline void jent_get_nstime(uint64_t *out)
 	 * extra little entropy */
 	uint64_t tmp = 0;
 	struct timespec time;
-	if (clock_gettime(CLOCK_REALTIME, &time) == 0)
-	{
+	if (clock_gettime(CLOCK_REALTIME, &time) == 0) {
 		tmp = ((uint64_t)time.tv_sec & 0xFFFFFFFF) * 1000000000UL;
 		tmp = tmp + (uint64_t)time.tv_nsec;
 	}
@@ -270,7 +272,7 @@ static inline void jent_get_nstime(uint64_t *out)
 
 static inline void jent_memset_secure(void *s, size_t n)
 {
-#if defined(AWSLC)
+#if (defined(AWSLC) || defined(OPENSSL))
 	OPENSSL_cleanse(s, n);
 #else
 	memset(s, 0, n);
