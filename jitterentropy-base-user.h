@@ -77,7 +77,7 @@
 #include <openssl/crypto.h>
 #endif
 
-#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
 #include <sys/mman.h>
 #endif
 
@@ -330,7 +330,7 @@ static inline void *jent_zalloc(size_t len)
 		tmp = NULL;
 	}
 
-#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
 	tmp = malloc(len);
 	if (!tmp)
 		return NULL;
@@ -386,7 +386,7 @@ static inline void jent_zfree(void *ptr, size_t len)
 	OPENSSL_cleanse(ptr, len);
 	OPENSSL_secure_free(ptr);
 
-#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
 	/* while memory returned to the OS is automatically unlocked,
 	 * it is not known how long libc keeps this memory cached
 	 * internally therefore its more robust to nevertheless
