@@ -506,6 +506,12 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 				return ret;
 
 			/*
+			 * Start filling the buffer again with new settings.
+			 */
+			p = data;
+			len = orig_len;
+
+			/*
 			 * We are not returning the intermittent errors here.
 			 * If a caller wants them, he should register a callback
 			 * with jent_set_fips_failure_callback.
