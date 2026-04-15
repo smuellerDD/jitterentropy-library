@@ -125,6 +125,10 @@ static void jent_notime_stop(void *ctx)
 {
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
 
+	/* defensive check */
+	if (ctx == NULL)
+		return;
+
 #ifdef JENT_PTHREAD
 	pthread_join(thread_ctx->notime_thread_id, NULL);
 	pthread_attr_destroy(&thread_ctx->notime_pthread_attr);

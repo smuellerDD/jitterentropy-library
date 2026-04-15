@@ -380,7 +380,7 @@ static int jent_health_failure_reset(
 
 	/*
 	 * In case of an error, leave the existing ec state untouched as a
-	 * safety measure. But it is is in error state and is of not much use.
+	 * safety measure. But it is in error state and is of not much use.
 	 */
 	if (!new_ec)
 		return -1;
@@ -389,7 +389,7 @@ static int jent_health_failure_reset(
 	new_ec->max_mem_set = !!(*ec)->max_mem_set;
 
 	/*
-	 * Duplicate the state of the health test to ensure the newly allocated
+	 * Duplicate the state of the health tests to ensure the newly allocated
 	 * state will continue from the current health state.
 	 */
 	jent_apt_duplicate(new_ec, *ec);

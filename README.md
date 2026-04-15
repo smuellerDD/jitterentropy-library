@@ -34,6 +34,10 @@ make
 ```
 CMake may also be used on platforms like Windows or MacOS to ease compilation.
 
+On Linux you may omit the `EXTERNAL_CRYPTO` setting, as the default
+memory handling implementation already implements secure erase and swap
+prevention.
+
 # Operational Considerations
 
 Please keep the following aspects regarding jitterentropy's usage in mind:
