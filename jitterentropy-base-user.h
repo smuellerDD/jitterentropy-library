@@ -336,7 +336,7 @@ static inline void *jent_zalloc(size_t len)
 	if (!tmp)
 		return NULL;
 	/* prevent paging out of the memory state to swap space */
-	if (mlock(tmp, len) && errno != EPERM && errno != EAGAIN) {
+	if (mlock(tmp, len)) {
 		free(tmp);
 		return NULL;
 	}
