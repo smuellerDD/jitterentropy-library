@@ -331,7 +331,6 @@ static inline void *jent_zalloc(size_t len)
 	}
 
 #elif defined(__linux__)
-#define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 	tmp = malloc(len);
 	if (!tmp)
 		return NULL;
@@ -340,7 +339,16 @@ static inline void *jent_zalloc(size_t len)
 	 * if this fails, check the current memory lock limits
 	 * and capabilities (e.g. RLIMIT_MEMLOCK and CAP_IPC_LOCK)
 	 */
+#ifndef JENT_CONF_RELAX_MLOCK
+#define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
 	if (mlock(tmp, len)) {
+#else
+	/*
+	 * use this only for CI or restricted containers if not possible
+	 * otherwise
+	 */
+	if (mlock(tmp, len) && errno != EPERM && errno != EAGAIN) {
+#endif
 		free(tmp);
 		return NULL;
 	}
