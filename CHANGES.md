@@ -1,5 +1,5 @@
 3.7.0
- * Add secure memory implementation for Linux
+ * Add secure memory implementation for Linux and {Net,Open,Free}BSD
  * Update supported CMake version to 3.10
  * doc: use Doxygen-style comments
  * NTG.1 compliance: Modify startup such that the memory access and SHA-3 loop are treated as independent noise sources which are sampled to collect at least 240 bits each before first block of random numbers is released
