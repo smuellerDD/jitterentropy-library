@@ -93,8 +93,17 @@ static inline void jent_get_nstime(uint64_t *out)
 #endif
 }
 
+static inline size_t jent_round_up_to_pagesize(size_t size) {
+	SYSTEM_INFO si;
+	GetSystemInfo(&si);
+	size_t page_size = si.dwPageSize;
+
+	return (size + page_size - 1) & ~(page_size - 1);
+}
+
 static inline void *jent_zalloc(size_t len)
 {
+#define JENT_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 	void *tmp = NULL;
 #ifdef LIBGCRYPT
 	/* Set the maximum usable locked memory to 2 MiB at fist call.
@@ -138,13 +147,38 @@ static inline void *jent_zalloc(size_t len)
 		tmp = NULL;
 	}
 #else
-	/* we have no secure memory allocation! Hence
-	 * we do not set CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY */
+#ifndef JENT_CONF_RELAX_MLOCK
+#define CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
+	size_t minWS, maxWS;
+	JENT_BUILD_BUG_ON(JENT_SECURE_MEMORY_SIZE_MAX / 2 == 0);
+	GetProcessWorkingSetSize(GetCurrentProcess(), &minWS, &maxWS);
+	if (maxWS < JENT_SECURE_MEMORY_SIZE_MAX && !SetProcessWorkingSetSizeEx(
+		GetCurrentProcess(),
+		JENT_SECURE_MEMORY_SIZE_MAX / 2, JENT_SECURE_MEMORY_SIZE_MAX,
+		QUOTA_LIMITS_HARDWS_MIN_ENABLE
+	)) {
+		goto out;
+	}
+	len = jent_round_up_to_pagesize(len);
+	tmp = VirtualAlloc(NULL, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	if (!tmp) {
+		goto out;
+	}
+	if (!VirtualLock(tmp, len)) {
+		free(tmp);
+		tmp = NULL;
+		goto out;
+	}
+#else
 	tmp = malloc(len);
+#endif
 #endif /* LIBGCRYPT */
 	if(NULL != tmp)
 		SecureZeroMemory(tmp, len);
+out:
 	return tmp;
+
+#undef JENT_BUILD_BUG_ON
 }
 
 static inline void jent_memset_secure(void *s, size_t n)
@@ -172,7 +206,13 @@ static inline void jent_zfree(void *ptr, size_t len)
 	OPENSSL_secure_free(ptr);
 #else
 	SecureZeroMemory(ptr, len);
+#ifndef JENT_CONF_RELAX_MLOCK
+	len = jent_round_up_to_pagesize(len);
+	VirtualUnlock(ptr, len);
+	VirtualFree(ptr, 0, MEM_RELEASE);
+#else
 	free(ptr);
+#endif
 #endif /* LIBGCRYPT */
 }
 
