@@ -59,8 +59,6 @@ that he uses:
 
 	* jitterentropy.h
 
-	* jitterentropy-base-user.h
-
 Depending on the version of the Jitter RNG, the following commands have to
 be invoked for compiling the test tool:
 
