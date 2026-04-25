@@ -421,11 +421,11 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
  * is not safe to be used on the current system.
  *
  * @param[in] ec Reference to entropy collector - this is a double pointer as
- *	    The entropy collector may be freed and reallocated.
+ *	    	 The entropy collector may be freed and reallocated.
  * @param[out] data pointer to buffer for storing random data -- buffer must
- *	       already exist
- * @param[in] len size of the buffer, specifying also the requested number of random
- *	     in bytes
+ *	      	    already exist
+ * @param[in] len size of the buffer, specifying also the requested number of
+ *		  random in bytes
  *
  * @return see jent_read_entropy()
  */
