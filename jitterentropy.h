@@ -42,11 +42,51 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
+/*
+ * Set the following defines as needed for your environment
+ * Compilation for AWS-LC     #define AWSLC
+ * Compilation for libgcrypt  #define LIBGCRYPT
+ * Compilation for OpenSSL    #define OPENSSL
+ */
+
+#include <limits.h>
+#include <time.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
 #if defined(_MSC_VER) || defined(__MINGW32__)
-#include "arch/jitterentropy-base-windows.h"
+# include <windows.h>
+typedef int64_t ssize_t;
 #else
-#include "jitterentropy-base-user.h"
+# include <sys/types.h>
+# include <sys/stat.h>
+# include <fcntl.h>
+# include <unistd.h>
 #endif
+
+#ifdef __MACH__
+# include <assert.h>
+# include <CoreServices/CoreServices.h>
+# include <mach/mach.h>
+# include <mach/mach_time.h>
+# include <unistd.h>
+#endif
+
+/*
+ * Architecture- and OS-specific helpers (timestamp, secure memory, cache
+ * size discovery, online CPU count, FIPS mode detection, scheduler yield)
+ * live in dedicated shared headers that internally select the right
+ * implementation via #ifdefs.
+ */
+#include "arch/jitterentropy-arch-timer.h"
+#include "arch/jitterentropy-arch-memory.h"
+#include "arch/jitterentropy-arch-cache.h"
+#include "arch/jitterentropy-arch-ncpu.h"
+#include "arch/jitterentropy-arch-fips.h"
+#include "arch/jitterentropy-arch-sched.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -200,7 +240,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen);
 
 /* return secure memory support, must be done
  * in jitterentropy itself, as users may not define
- * a crypto library and so the define in jitterentropy-base-user.h
+ * a crypto library and so the define in arch/jitterentropy-arch-memory.h
  * is not set for them. */
 JENT_PRIVATE_STATIC
 int jent_secure_memory_supported(void);

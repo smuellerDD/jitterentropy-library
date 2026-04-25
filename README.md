@@ -62,8 +62,9 @@ arch/android/Android.mk	-- NDK make file template that can be used to directly
 
 ## Direct CPU instructions
 
-If the function in jent_get_nstime is not available, you can replace the
-jitterentropy-base-user.h with examples from the arch/ directory.
+If the high-resolution timer needed by jent_get_nstime is not available
+on your target, add a new branch to arch/jitterentropy-arch-timer.h
+guarded by the appropriate architecture macros.
 
 # Testing and Entropy Rate Validation
 
