@@ -13,7 +13,9 @@ NUM_RESTART=1000
 NONIID_RESTART_DATA="jent-raw-noise-restart"
 NONIID_DATA="jent-raw-noise"
 NONIID_HASH_DATA="jent-raw-noise_hashloop"
+NONIID_HASH_RESTART_DATA="jent-raw-noise-hashloop-restart"
 NONIID_MEMLOOP_DATA="jent-raw-noise_memaccloop"
+NONIID_MEMLOOP_RESTART_DATA="jent-raw-noise-memaccloop-restart"
 IID_DATA="jent-conditioned.data"
 
 JENT_HASHTIME=${JENT_HASHTIME:-"./jitterentropy-hashtime"}
@@ -117,6 +119,24 @@ raw_entropy_ntg1_hash()
 	make -s -f Makefile.hashtime clean
 }
 
+raw_entropy_ntg1_hash_restart()
+{
+	echo "Obtaining $NUM_RESTART raw entropy measurement with $NUM_EVENTS_RESTART restarts from Jitter RNG"
+
+	make -s -f Makefile.hashtime
+
+	local cmdopts="--max-mem $MAX_MEMORY_SIZE --hashloop $@"
+
+	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
+	then
+		cmdopts="$cmdopts --disable-internal-timer"
+	fi
+
+	$JENT_HASHTIME $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_HASH_RESTART_DATA $cmdopts
+
+	make -s -f Makefile.hashtime clean
+}
+
 raw_entropy_ntg1_memacc()
 {
 	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
@@ -131,6 +151,24 @@ raw_entropy_ntg1_memacc()
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/$NONIID_MEMLOOP_DATA $cmdopts
+
+	make -s -f Makefile.hashtime clean
+}
+
+raw_entropy_ntg1_memacc_restart()
+{
+	echo "Obtaining $NUM_RESTART raw entropy measurement with $NUM_EVENTS_RESTART restarts from Jitter RNG"
+
+	make -s -f Makefile.hashtime
+
+	local cmdopts="--max-mem $MAX_MEMORY_SIZE --memaccess $@"
+
+	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
+	then
+		cmdopts="$cmdopts --disable-internal-timer"
+	fi
+
+	$JENT_HASHTIME $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_MEMLOOP_RESTART_DATA $cmdopts
 
 	make -s -f Makefile.hashtime clean
 }

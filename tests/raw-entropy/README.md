@@ -60,20 +60,24 @@ at the bottom data like the following:
 ```
 H_r: 0.545707
 H_c: 1.363697
-H_I: 0.333000
-
-Validation Test Passed...
-
-min(H_r, H_c, H_I): 0.333000
 ```
 
-The last value gives you the entropy estimate per time delta for the restart
-tests. That means for one time delta the given number of entropy in bits
-collected on average.
+The `H_r` provides the entropy rate for the row-wise calculation, `H_c` for
+the column-wise calculation - Ignore `H_I` in this output. To get to the actual
+entropy rate, you have to obtain the heuristic entropy rate `H_I` applying 1/OSR
+(common case) and 8/OSR (NTG.1).
+
+Now, to get to the final entropy rate, calculate:
+
+```
+min(H_r, H_c, H_I)
+```
+
+to obtain the entropy rate for the restart tests.
 
 Per default, the Jitter RNG heuristic applies 1/3 bit of entropy per
-time delta. This implies that the measurement must show that 1/3 bit
-of entropy is present. Unlike with the runtime tests, the restart tests
+time delta (common case). This implies that the measurement must show that 1/3
+bit of entropy is present. Unlike with the runtime tests, the restart tests
 results compares the data against the Jitter RNG's H_I value of 1/3 bits.
 Thus, the value must show 1/3 bits to show that sufficient entropy is
 provided. In the example above, the measurement shows that

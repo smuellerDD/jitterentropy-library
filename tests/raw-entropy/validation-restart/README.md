@@ -17,13 +17,26 @@ To execute the testing, you need:
 
 	* Configure processdata.sh with proper parameter values
 
+### Executation
 
-### Parameters of processdata.sh
+Use one of the following tools:
 
-ENTROPYDATA_DIR: Location of the sample data files (with .data extension)
+* Common case: `processdata.sh` obtains the entropy rate for the restart test
+  data obtained with `invoke_testing.sh` or `invoke_testing_fips.sh`.
+  
+* NTG.1 case: `processdata_ntg.sh` obtains the entropy rate for the restart
+  test data obtained with `invoke_testing_ntg1.sh`.
 
-RESULTS_DIR: Location for the interim data bit streams (var and single),
-and results.
+## Conclusion
+
+The conclusion you have to draw is the following: To generate a 256 bit block,
+the Jitter RNG obtains 256 time deltas (one time delta per bit at least, unless
+the Jitter RNG performs oversampling). So, if you obtain a result that the
+minimum entropy is more than 1/OSR (common case) or 8/OSR (NTG.1 case) bits
+of entropy (per time delta), the one Jitter RNG output data block is believed
+to have (close to) full entropy. Otherwise it will have relatively less entropy.
+
+### Parameters of processdata_helper.sh
 
 LOGFILE: Name of the log file. The default is $RESULTS_DIR/processdata.log.
 
@@ -44,25 +57,11 @@ ROUNDS define macro). Notice that the minimum value suggested by SP800-90B is
 1000000, so you'll have to increase the default value (notice that this
 severely impacts in the performance and memory requirements of the python tool).
 
-## Conclusion
+### Parameters of processdata.sh
 
-The conclusion you have to draw is the following: To generate a 256 bit block,
-the Jitter RNG obtains 256 time deltas (one time delta per bit at least, unless
-the Jitter RNG performs oversampling). So, if you obtain a result that the
-minimum entropy is more than 1 bit of entropy (per time delta), the one block
-of 64 data bits is believed to have (close to) 64 bits of entropy. Otherwise it
-will have relatively less entropy.
+ENTROPYDATA_DIR: Location of the sample data files (with .data extension)
 
-Please note that the minimum collision entropy value for 8 bits may be smaller
-than the 4 bit values due to the inclusion of leading zeros. This, however is
-a data processing problem that should be considered when drawing conclusions.
-One can see the effect of these leading zeros by compressing the 4 bit and
-8 bit data streams. Whereas the 4 bit data stream may not be compressable,
-the 8 bit data stream may be compressed
-
-This may also occur when the least significant bits in the time delta do not
-change.  You need to refine the extraction method to reach to the right
-calculation.
-
+RESULTS_DIR: Location for the interim data bit streams (var and single),
+and results.
 
 [1] https://github.com/usnistgov/SP800-90B_EntropyAssessment
