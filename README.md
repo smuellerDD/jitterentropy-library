@@ -133,15 +133,7 @@ In order for the Jitter RNG to be NTG.1 compliant, the following usage constrain
 
 ### Compilation
 
-The Jitter RNG must be compiled with the compile time options of:
-
-- `CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY` must be enabled - this option is set when using specific memory allocation functions as defined in jitterentropy-base-user.h. Note, in case this define is not set for your given environment, ensure that a memory allocation is used which implements the following properties - after this is guaranteed, the flag can be set:
-
-	* The memory must not be swapped to non-volatile store upon memory pressure by the OS.
-
-	* The memory must not be shared in any kind with another entity beyond the Jitter RNG. E.g. a it shall not be a shared memory segment.
-
-	* The memory must be actively zeroized before the memory is released.
+No special considerations.
 
 ### Initialization
 
@@ -152,6 +144,8 @@ The Jitter RNG must be initialized with the following flag settings:
 - `JENT_NTG1` must be set.
 
 - `JENT_FORCE_INTERNAL_TIMER` must not be set.
+
+- `JENT_DISABLE_MEMORY_ACCESS` must not be set.
 
 - All other flags may be set at the caller's discretion.
 
@@ -167,8 +161,6 @@ The status returned by the jent_status API must show the following information a
 
 - Memory Block Size equal or larger than four times L1 cache
 
-- Secure Memory enabled
-
 - Internal timer disabled
 
 ### Testing
@@ -177,9 +169,9 @@ The following test evidence must be provided to the German BSI for proving the c
 
 - Measured entropy rate must show rate 8/OSR or higher (see the file tests/raw-entropy/README.md given in the source code distribution for the test approach as well as the analysis to increase the entropy rate):
 
-	* Hash loop
+	* Hash loop (SP800-90B restart + runtime tests)
 
-	* Memory access loop
+	* Memory access loop (SP800-90B restart + runtime tests)
 
 	* Common behavior (SP800-90B restart + runtime tests)
 
