@@ -104,9 +104,10 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
  * 			     execution time jitter
  *
  * @param[in] ec entropy collector struct
+ * @param[in] intermediary intermediary to be filled with the hash loop result
+ *			   whose structure is defined above.
  * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
- *		  number of loops to perform the hash operation
- * @param[in] stuck Is the time delta identified as stuck?
+ *		       number of loops to perform the hash operation
  */
 static void jent_hash_loop(struct rand_data *ec,
 			   uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY],
@@ -189,7 +190,11 @@ static inline uint32_t xoshiro128starstar(uint32_t *s)
  *
  * @param[in] ec entropy collector struct
  * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
- *		  number of loops to perform the hash operation
+ *		       number of loops to perform the memory access operation
+ * @param[in] current_delta If non-NULL, return the execution duration of the
+ *			    the memory access operation. This is used during
+ *			    the NTG.1 startup process where the memory access
+ *			    and hash loop are handled separately.
  */
 static void jent_memaccess_pseudorandom(struct rand_data *ec, uint64_t loop_cnt,
 					uint64_t *current_delta)
@@ -277,11 +282,15 @@ static void jent_memaccess_pseudorandom(struct rand_data *ec, uint64_t loop_cnt,
  * to reliably access either L3 or memory, the ec->mem memory must be quite
  * large which is usually not desirable.
  *
- * @param[in] ec Reference to the entropy collector with the memory access data -- if
- *	    the reference to the memory block to be accessed is NULL, this noise
- *	    source is disabled
+ * @param[in] ec Reference to the entropy collector with the memory access data.
+ *		 If the reference to the memory block to be accessed is NULL,
+ *		 this noise source is disabled
  * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
- *		  number of loops to perform the hash operation
+ *		       number of loops to perform the memory access operation
+ * @param[in] current_delta If non-NULL, return the execution duration of the
+ *			    the memory access operation. This is used during
+ *			    the NTG.1 startup process where the memory access
+ *			    and hash loop are handled separately.
  */
 static void jent_memaccess_deterministic(struct rand_data *ec,
 					 uint64_t loop_cnt,
