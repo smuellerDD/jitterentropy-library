@@ -1,3 +1,5 @@
+3.7.1-prerelease
+
 3.7.0
  * Add secure memory implementation for Linux and {Net,Open,Free}BSD, MacOS and Windows
  * Update supported CMake version to 3.10
