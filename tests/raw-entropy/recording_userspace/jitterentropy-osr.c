@@ -58,6 +58,12 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
+		if (osr > JENT_MAX_OSR) {
+			fprintf(stderr,
+				"The initialization failed with error code %d due to selected OSR %u too high (max %u)\n",
+				ret, osr, JENT_MAX_OSR);
+			return 1;
+		}
 		fprintf(stderr, "The initialization failed with error code %d\n", ret);
 		return 1;
 	}
