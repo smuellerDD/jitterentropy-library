@@ -98,7 +98,7 @@
  * which hides it. The libc-agnostic signature below matches both glibc
  * and musl and avoids polluting the wider compile with _GNU_SOURCE.
  */
-extern long syscall(long number, ...);
+extern long syscall(long number, ...) __THROW;
 #  ifndef __GLIBC__
 #   include <fcntl.h>
 #   include <stdlib.h>
