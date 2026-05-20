@@ -45,9 +45,9 @@
  * Provides jent_ncpu() returning the number of online logical CPUs, or
  * a negative errno on failure. The dispatch is:
  *   - Windows                        -> GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)
- *   - Linux (glibc)                  -> sched_getaffinity(2) raw syscall, with
+ *   - Linux (glibc)                  -> sched_getaffinity(2), with
  *                                       sysconf(_SC_NPROCESSORS_ONLN) as fallback
- *   - Linux (musl / non-glibc)       -> sched_getaffinity(2) raw syscall, with
+ *   - Linux (musl / non-glibc)       -> sched_getaffinity(2), with
  *                                       /sys/devices/system/cpu/online and
  *                                       sysconf(_SC_NPROCESSORS_ONLN) as
  *                                       fallbacks
@@ -62,9 +62,7 @@
  *
  * On Linux, the sched_getaffinity(2) syscall is preferred over sysconf()
  * because the count it reports also reflects taskset/cgroup cpuset
- * restrictions imposed on the calling process. The raw syscall is used so
- * the code works identically against glibc and musl without pulling in
- * _GNU_SOURCE.
+ * restrictions imposed on the calling process.
  *
  * On non-glibc Linux libcs (musl, bionic, ...) the syscall fallback path
  * additionally parses /sys/devices/system/cpu/online directly. Their
@@ -90,15 +88,8 @@
 # include <unistd.h>
 # define JENT_ARCH_NCPU_POSIX
 # ifdef __linux__
-#  include <sys/syscall.h>
+#  include <sched.h>
 #  define JENT_ARCH_NCPU_LINUX_AFFINITY
-/*
- * syscall(3) is declared in <unistd.h> only when a feature-test macro
- * such as _DEFAULT_SOURCE is set; the project builds with -std=c11
- * which hides it. The libc-agnostic signature below matches both glibc
- * and musl and avoids polluting the wider compile with _GNU_SOURCE.
- */
-extern long syscall(long number, ...) __THROW;
 #  ifndef __GLIBC__
 #   include <fcntl.h>
 #   include <stdlib.h>
@@ -175,24 +166,24 @@ static inline long jent_ncpu(void)
 #elif defined(JENT_ARCH_NCPU_POSIX)
 # ifdef JENT_ARCH_NCPU_LINUX_AFFINITY
 	{
-		/*
-		 * Room for 8192 logical CPUs - far beyond anything the
-		 * Linux kernel currently supports - so the kernel's
-		 * affinity mask always fits and we never have to grow.
-		 */
-		unsigned long mask[128] = { 0 };
-		long rc = (long)syscall(SYS_sched_getaffinity, (long)0,
-					sizeof(mask), mask);
+		size_t cpu_set_alloc_size = CPU_ALLOC_SIZE(CPU_SETSIZE);
+		cpu_set_t *cpu_set = CPU_ALLOC(CPU_SETSIZE);
+		long count = 0;
 
-		if (rc > 0) {
-			long count = 0;
-			size_t words = (size_t)rc / sizeof(unsigned long);
-			size_t i;
+		/* only get affinity if allocation was successful */
+		if (cpu_set &&
+		    sched_getaffinity(0,
+				      cpu_set_alloc_size,
+				      cpu_set) == 0) {
+			count = CPU_COUNT_S(cpu_set_alloc_size, cpu_set);
+		}
 
-			for (i = 0; i < words; i++)
-				count += __builtin_popcountl(mask[i]);
-			if (count > 0)
-				return count;
+		if (cpu_set) {
+			CPU_FREE(cpu_set);
+		}
+
+		if (count > 0) {
+			return count;
 		}
 		/* fall through to sysfs / sysconf */
 	}

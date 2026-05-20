@@ -17,6 +17,10 @@
  * DAMAGE.
  */
 
+#ifdef __linux__
+#define _GNU_SOURCE
+#endif
+
 #include <inttypes.h>
 #include <stdlib.h>
 #include <limits.h>
