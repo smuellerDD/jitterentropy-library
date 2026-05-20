@@ -17,11 +17,11 @@
  * DAMAGE.
  */
 
-#include <stdio.h>
-
 #include "jitterentropy.h"
 #include "jitterentropy-base.h"
 #include "jitterentropy-internal.h"
+
+#include <stdio.h>
 
 /*
  * Always validate the output with something like "jq -e .", when doing changes here.

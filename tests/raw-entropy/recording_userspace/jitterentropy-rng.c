@@ -17,12 +17,12 @@
  * DAMAGE.
  */
 
+#include "jitterentropy.h"
+
 #include <stdlib.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
-
-#include "jitterentropy.h"
 
 int main(int argc, char * argv[])
 {

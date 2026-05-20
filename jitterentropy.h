@@ -49,6 +49,11 @@
  * Compilation for OpenSSL    #define OPENSSL
  */
 
+/* used for sched_getaffinity and CPU_* macros */
+#ifdef __linux__
+	#define _GNU_SOURCE
+#endif
+
 #include <limits.h>
 #include <time.h>
 #include <stdint.h>
