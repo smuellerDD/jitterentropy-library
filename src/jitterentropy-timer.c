@@ -20,26 +20,22 @@
 
 #include "jitterentropy-base.h"
 #include "jitterentropy-timer.h"
+#include "arch/jitterentropy-arch-thread.h"
 
 /* Timer-less entropy source */
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
-#ifdef JENT_PTHREAD
-#include <pthread.h>
-struct jent_notime_ctx {
-	pthread_attr_t notime_pthread_attr;     /* pthreads library */
-	pthread_t notime_thread_id;             /* pthreads thread ID */
-};
-#else
-#include <threads.h>
-struct jent_notime_ctx {
-	thrd_t notime_thread_id;                /* thread ID */
-};
-#endif
-
 /***************************************************************************
  * Thread handler
  ***************************************************************************/
+
+/*
+ * CPU the counting thread pins itself to. When the caller has not set one
+ * via jent_notime_set_cpu(), jent_notime_init() defaults to the
+ * highest-numbered online CPU.
+ */
+static int jent_notime_cpu_configured = 0;
+static unsigned long jent_notime_cpu = 0;
 
 JENT_PRIVATE_STATIC
 int jent_notime_init(void **ctx)
@@ -57,6 +53,18 @@ int jent_notime_init(void **ctx)
 	thread_ctx = jent_zalloc(sizeof(struct jent_notime_ctx));
 	if (!thread_ctx)
 		return -ENOMEM;
+
+	/*
+	 * Pin the counting thread to a dedicated CPU - the caller-configured
+	 * one, or by default the highest-numbered online CPU. The consumer
+	 * thread is left unpinned, so on the >= 2 CPUs guaranteed above the
+	 * scheduler keeps the two on separate cores and the counter keeps
+	 * ticking while the consumer busy-waits.
+	 */
+	if (jent_notime_cpu_configured)
+		thread_ctx->notime_cpu = jent_notime_cpu;
+	else
+		thread_ctx->notime_cpu = (unsigned long)(ncpu - 1);
 
 	*ctx = thread_ctx;
 
@@ -82,43 +90,15 @@ void jent_notime_fini(void *ctx) { (void)ctx; }
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
 static int jent_notime_start(void *ctx,
-#ifdef JENT_PTHREAD
-			    void *(*start_routine) (void *),
-#else
-			    int (*start_routine) (void *),
-#endif
+			    jent_notime_start_routine start_routine,
 			    void *arg)
 {
 	struct jent_notime_ctx *thread_ctx = (struct jent_notime_ctx *)ctx;
-#ifdef JENT_PTHREAD
-	int ret;
-#endif
 
 	if (!thread_ctx)
 		return -EINVAL;
 
-#ifdef JENT_PTHREAD
-	ret = -pthread_attr_init(&thread_ctx->notime_pthread_attr);
-	if (ret)
-		return ret;
-	return -pthread_create(&thread_ctx->notime_thread_id,
-			       &thread_ctx->notime_pthread_attr,
-			       start_routine, arg);
-#else
-	switch (thrd_create(&thread_ctx->notime_thread_id, start_routine, arg)) {
-	case thrd_success:
-		return 0;
-	case thrd_nomem:
-		return -ENOMEM;
-	case thrd_timedout:
-		return -ETIMEDOUT;
-	case thrd_busy:
-		return -EBUSY;
-	case thrd_error:
-	default:
-		return -EINVAL;
-	}
-#endif
+	return jent_notime_thread_create(thread_ctx, start_routine, arg);
 }
 
 static void jent_notime_stop(void *ctx)
@@ -129,12 +109,7 @@ static void jent_notime_stop(void *ctx)
 	if (ctx == NULL)
 		return;
 
-#ifdef JENT_PTHREAD
-	pthread_join(thread_ctx->notime_thread_id, NULL);
-	pthread_attr_destroy(&thread_ctx->notime_pthread_attr);
-#else
-	thrd_join(thread_ctx->notime_thread_id, NULL);
-#endif
+	jent_notime_thread_join(thread_ctx);
 }
 
 static struct jent_notime_thread jent_notime_thread_builtin = {
@@ -160,6 +135,17 @@ void jent_notime_block_switch(void)
 	jent_notime_switch_blocked = 1;
 }
 
+int jent_notime_set_cpu(unsigned long cpu)
+{
+	/* Configuration is only allowed before the library is initialized. */
+	if (jent_notime_switch_blocked)
+		return -EAGAIN;
+
+	jent_notime_cpu = cpu;
+	jent_notime_cpu_configured = 1;
+	return 0;
+}
+
 static struct jent_notime_thread *notime_thread = &jent_notime_thread_builtin;
 
 /**
@@ -176,6 +162,15 @@ static int jent_notime_sample_timer(void *arg)
 #endif
 {
 	struct rand_data *ec = (struct rand_data *)arg;
+	struct jent_notime_ctx *thread_ctx =
+		(struct jent_notime_ctx *)ec->notime_thread_ctx;
+
+	/*
+	 * Best-effort pin to a dedicated CPU; a failure here is ignored as
+	 * the counter still ticks on whatever CPU the scheduler picks.
+	 */
+	if (thread_ctx)
+		(void)jent_thread_pin_to_cpu(thread_ctx->notime_cpu);
 
 	ec->notime_timer = 0;
 

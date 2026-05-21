@@ -30,6 +30,7 @@ extern "C"
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
 void jent_notime_block_switch(void);
+int jent_notime_set_cpu(unsigned long cpu);
 int jent_notime_settick(struct rand_data *ec);
 void jent_notime_unsettick(struct rand_data *ec);
 void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out);
@@ -42,6 +43,12 @@ int jent_notime_forced(void);
 #else /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 static inline void jent_notime_block_switch(void) { }
+
+static inline int jent_notime_set_cpu(unsigned long cpu)
+{
+	(void)cpu;
+	return -1;
+}
 
 static inline int jent_notime_settick(struct rand_data *ec)
 {

@@ -302,6 +302,20 @@ struct jent_notime_thread {
 /* Set a different thread handling logic for the notimer support */
 JENT_PRIVATE_STATIC
 int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread);
+
+/*
+ * Pin the timer-less counting thread to the given logical CPU index.
+ *
+ * This must be called before the library is initialized (i.e. before
+ * jent_entropy_init*); afterwards it returns -EAGAIN and has no effect.
+ * When unset, the counting thread defaults to the highest-numbered online
+ * CPU. Pinning itself is best-effort: an out-of-range index or a platform
+ * without affinity support does not stop the internal timer from working.
+ *
+ * Returns 0 on success or a negative errno on failure.
+ */
+JENT_PRIVATE_STATIC
+int jent_entropy_set_notime_cpu(unsigned long cpu);
 /* -- END of Main interface functions -- */
 
 /* -- BEGIN timer-less threading support functions to prevent code dupes -- */

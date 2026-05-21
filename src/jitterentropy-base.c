@@ -1011,6 +1011,12 @@ int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread)
 }
 
 JENT_PRIVATE_STATIC
+int jent_entropy_set_notime_cpu(unsigned long cpu)
+{
+	return jent_notime_set_cpu(cpu);
+}
+
+JENT_PRIVATE_STATIC
 int jent_set_fips_failure_callback(jent_fips_failure_cb cb)
 {
 	return jent_set_fips_failure_callback_internal(cb);
