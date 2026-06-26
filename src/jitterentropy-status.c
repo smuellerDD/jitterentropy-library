@@ -21,7 +21,9 @@
 #include "jitterentropy-base.h"
 #include "jitterentropy-internal.h"
 
+#ifndef LINUX_KERNEL
 #include <stdio.h>
+#endif
 
 /*
  * Always validate the output with something like "jq -e .", when doing changes here.
@@ -126,7 +128,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 
 	jent_add_to_status("\t\t\"secureMemory\": %s,\n", jent_secure_memory_supported() ? "true" : "false");
 	jent_add_to_status("\t\t\"internalTimer\": %s,\n", ec->enable_notime ? "true" : "false");
-	jent_add_to_status("\t\t\"fipsMode\": %s,\n", ec->fips_enabled ? "true" : "false");
+	jent_add_to_status("\t\t\"fipsMode\": %s,\n", ec->is_fips_enabled ? "true" : "false");
 	jent_add_to_status("\t\t\"ntg1Mode\": %s,\n", !!(ec->flags & JENT_NTG1) ? "true" : "false");
 
 	jent_add_to_status("\t\t\"flags\": {\n");

@@ -42,6 +42,12 @@
 #ifndef _JITTERENTROPY_H
 #define _JITTERENTROPY_H
 
+#ifdef LINUX_KERNEL
+
+#include <linux/module.h>
+
+#else /* LINUX_KERNEL */
+
 /*
  * Set the following defines as needed for your environment
  * Compilation for AWS-LC     #define AWSLC
@@ -80,18 +86,7 @@ typedef int64_t ssize_t;
 # include <unistd.h>
 #endif
 
-/*
- * Architecture- and OS-specific helpers (timestamp, secure memory, cache
- * size discovery, online CPU count, FIPS mode detection, scheduler yield)
- * live in dedicated shared headers that internally select the right
- * implementation via #ifdefs.
- */
-#include "arch/jitterentropy-arch-timer.h"
-#include "arch/jitterentropy-arch-memory.h"
-#include "arch/jitterentropy-arch-cache.h"
-#include "arch/jitterentropy-arch-ncpu.h"
-#include "arch/jitterentropy-arch-fips.h"
-#include "arch/jitterentropy-arch-sched.h"
+#endif /* LINUX_KERNEL */
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,6 +135,10 @@ extern "C" {
 				 automatically determine the memory size for the
 				 memory access? By default it is only the L1
 				 cache size. */
+
+#ifdef LINUX_KERNEL
+#define UINT32_C(c)	c ## U
+#endif
 
 /* Flags field limiting the amount of memory to be used for memory access */
 #define JENT_FLAGS_TO_MEMSIZE_SHIFT	27
@@ -191,6 +190,8 @@ extern "C" {
 
 #ifdef JENT_PRIVATE_COMPILE
 # define JENT_PRIVATE_STATIC static
+#elif defined(LINUX_KERNEL)
+# define JENT_PRIVATE_STATIC
 #else /* JENT_PRIVATE_COMPILE */
 #if defined(_MSC_VER)
 #define JENT_PRIVATE_STATIC __declspec(dllexport)

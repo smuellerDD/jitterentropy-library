@@ -54,10 +54,12 @@ static inline void le64_to_ptr(uint8_t *p, const uint64_t value)
 	le32_to_ptr(p,     (uint32_t)(value));
 }
 
-static inline uint64_t rol64(uint64_t x, int n)
+#ifndef LINUX_KERNEL
+static inline uint64_t rol64(uint64_t x, unsigned int n)
 {
 	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
 }
+#endif
 
 /*********************************** Keccak ***********************************/
 /* state[x + y*5] */

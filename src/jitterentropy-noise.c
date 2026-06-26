@@ -557,7 +557,7 @@ static void jent_random_data_one(
 {
 	unsigned int safety_factor = 0, ctr = 0;
 
-	if (ec->fips_enabled)
+	if (ec->is_fips_enabled)
 		safety_factor = ENTROPY_SAFETY_FACTOR;
 
 	/* RCT with memory: start a new iteration loop */
@@ -608,7 +608,7 @@ void jent_random_data(struct rand_data *ec)
 				     jent_health_init_type_ntg1 :
 				     jent_health_init_type_common);
 
-		/* FALLTHROUGH */
+		fallthrough;
 	case jent_startup_sha3:
 		jent_random_data_one(ec, jent_measure_jitter_ntg1_sha3);
 		ec->startup_state--;

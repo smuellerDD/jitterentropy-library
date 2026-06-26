@@ -44,13 +44,45 @@
 
 #include "jitterentropy.h"
 
+/*
+ * Architecture- and OS-specific helpers (timestamp, secure memory, cache
+ * size discovery, online CPU count, FIPS mode detection, scheduler yield)
+ * live in dedicated shared headers that internally select the right
+ * implementation via #ifdefs.
+ */
+#include "arch/jitterentropy-arch-timer.h"
+#include "arch/jitterentropy-arch-memory.h"
+#include "arch/jitterentropy-arch-cache.h"
+#include "arch/jitterentropy-arch-ncpu.h"
+#include "arch/jitterentropy-arch-fips.h"
+#include "arch/jitterentropy-arch-sched.h"
+
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#ifdef LINUX_KERNEL
+
+#define UINT32_MAX	(4294967295U)
+#if __LP64__
+# define UINT64_C(c)   c ## UL
+#else
+# define UINT64_C(c)   c ## ULL
+#endif
+
+#else /* LINUX_KERNEL */
+
+#if __has_attribute(__fallthrough__)
+# define fallthrough	__attribute__((__fallthrough__))
+#else
+# define fallthrough	do {} while (0)
 #endif
 
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+#endif /* LINUX_KERNEL */
 
 #ifndef JENT_STUCK_INIT_THRES
 /*
@@ -344,7 +376,7 @@ struct rand_data
 	unsigned short rct_mem_cutoff_permanent; /* RCT permanent cutoff */
 
 	unsigned int apt_base_set:1;	/* APT base reference set? */
-	unsigned int fips_enabled:1;
+	unsigned int is_fips_enabled:1;
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
 	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
 	unsigned int in_recovery:1;	/* Flag to indicate a recovery op. */

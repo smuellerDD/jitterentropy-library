@@ -81,7 +81,7 @@ static const unsigned int jent_lag_local_cutoff_lookup[20] =
 	{  38,  75, 111, 146, 181, 215, 250, 284, 318, 351,
 	  385, 419, 452, 485, 518, 551, 584, 617, 650, 683 };
 
-void jent_lag_init(struct rand_data *ec, unsigned int osr)
+static void jent_lag_init(struct rand_data *ec, unsigned int osr)
 {
 	/*
 	 * Establish the lag global and local cutoffs based on the presumed
@@ -729,7 +729,7 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 unsigned int jent_health_failure(struct rand_data *ec)
 {
 	/* Test is only enabled in FIPS mode */
-	if (!ec->fips_enabled)
+	if (!ec->is_fips_enabled)
 		return 0;
 
 	if (fips_cb && ec->health_failure) {

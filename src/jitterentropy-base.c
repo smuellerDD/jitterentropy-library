@@ -590,7 +590,8 @@ static struct rand_data
 	if (!(flags & JENT_DISABLE_MEMORY_ACCESS)) {
 		flags = jent_update_memsize(flags, 0);
 		memsize = jent_memsize(flags);
-		entropy_collector->mem = (unsigned char *)jent_zalloc(memsize);
+		entropy_collector->mem =
+			(unsigned char *)jent_zalloc_large(memsize);
 		if (entropy_collector->mem == NULL)
 			goto err;
 
@@ -621,7 +622,7 @@ static struct rand_data
 		 * for the NTG.1 compliance.
 		 */
 		entropy_collector->startup_state = jent_startup_memory;
-		entropy_collector->fips_enabled = 1;
+		entropy_collector->is_fips_enabled = 1;
 	}
 
 	/* Set the oversampling rate */
@@ -640,7 +641,7 @@ static struct rand_data
 	 */
 	if (flags & JENT_NTG1) {
 		entropy_collector->startup_state = jent_startup_memory;
-		entropy_collector->fips_enabled = 1;
+		entropy_collector->is_fips_enabled = 1;
 	}
 
 	/* Initialize the health tests */
@@ -778,8 +779,9 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 		}
 
 		if (entropy_collector->mem != NULL) {
-			jent_zfree(entropy_collector->mem,
-				   jent_memsize(entropy_collector->flags));
+			jent_zfree_large(
+				entropy_collector->mem,
+				jent_memsize(entropy_collector->flags));
 			entropy_collector->mem = NULL;
 		}
 		jent_zfree(entropy_collector, sizeof(struct rand_data));
