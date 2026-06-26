@@ -1,0 +1,96 @@
+# Linux Kernel Support
+
+The Jitter RNG is intended to be used in any kind of execution environment
+provided that it has a high-resolution timer. This applies also to the Linux
+kernel.
+
+The vanilla Linux kernel already contains a copy of the Jitter RNG. But it is
+an older version since the update of the Linux kernel is a very lengthy and
+tedious effort, including politics.
+
+That said, the Jitter RNG code distribution offers the means to compile the
+Linux kernel support. This compilation uses the unchanged current Jitter RNG
+code base and compiles it for the Linux kernel. There are several ways how
+to compile it as outlined in the following sections. Select the compile option
+that fits your purpose.
+
+All of the following discussions assume you are in the directory `linux_kernel`.
+
+For each compilation, the file `Kbuild.config` contains configuration options
+that can be set accordingly.
+
+## Build as Standalone Kernel Module
+
+This option compiles a standalone kernel module that can be insmod'ed and
+used out of the box. It registers with the kernel crypto API under the name
+`jitter_rng`.
+
+Pro:
+
+* No changes to the vanilla kernel.
+
+* Can be compiled separately from the kernel.
+
+Con:
+
+* The used kernel crypto API name is unknown to vanilla kernel users (e.g. the
+DRBG). Therefore, it would not be immediately used.
+
+Compilation:
+
+1. Check `Kbuild.config` that `CONFIG_EXTERNAL_JITTERENTROPY` is set to `m` and
+   `CONFIG_BUILTIN_JITTERENTROPY` is commented out.
+   
+2. Call `make`
+
+3. Insert the compiled Linux kernel `jitter_rng.ko`
+
+## Build in Tree
+
+When the use of the Jitter RNG as a kernel module is insufficient, e.g. when its
+services is required during boot time such as for early boot-time entropy, it
+can be compiled statically into the kernel binary. To do that, the following
+steps have to be taken:
+
+1. copy the entire the Jitter RNG tree into the Linux kernel source tree:
+
+	`cp -av jitterentropy-library-<version> linux-<version>/crypto/jitterentropy-library`
+	
+2. tell the Linux kernel build system to build the just copied code instead of
+   the version that ships with the kernel by editing
+   the file `crypto/Makefile` and replace the following:
+   
+	`obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy_rng.o`
+
+   with
+   
+	`obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy-library/linux_kernel/`
+	
+3. Configure the Linux kernel as usual and ensure that the Jitter RNG is
+   selected as needed.
+	
+4. tell the Jitter RNG to be compiled statically into the kernel by editing the 
+   file `crypto/jitterentropy-library/linux_kernel/Kbuild.config` and modify the
+   option `CONFIG_EXTERNAL_JITTERENTROPY` to `y` as well as enable the
+   option `CONFIG_BUILTIN_JITTERENTROPY`.
+   
+At this point, the Jitter RNG will now be built statically into the Linux kernel
+when compiling it. Naturally, all Linux kernel options can be set as
+the Jitter RNG does not depend on specific kernel options.
+
+# Linux Kernel Jitter RNG Testing
+
+WARNING: The test code discussed in the following IS NOT MEANT for PRODUCTION
+systems. You MUST NOT ENABLE it for PRODUCTION Linux kernels. The reason is that
+it provides an interface that extracts entropy and thus can starve the Linux
+kernel Jitter RNG of entropy for production uses.
+
+The Jitter RNG instance discussed before can be tested similar as the user space
+instance. For doing that, the option
+`CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE` found in the `Kbuild.config` must
+be enabled. This enables the test code and the interfaces to utilize the
+testing.
+
+## Test Execution
+
+See `tests/raw-entropy/recording_runtime_kernelspace/README.md`.

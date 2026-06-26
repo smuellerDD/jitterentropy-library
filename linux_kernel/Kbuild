@@ -1,0 +1,4 @@
+# Linux kernel build system: central build definition
+
+include $(src)/Kbuild.config
+include $(src)/Kbuild.source

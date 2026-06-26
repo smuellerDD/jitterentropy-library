@@ -1,0 +1,51 @@
+# Linux kernel build system: source code compilation
+
+############################## Auto-Configuration ##############################
+#
+
+# The option JENT_CONF_ENABLE_INTERNAL_TIMER must not be set as there is no
+# in-kernel support for a timer thread
+jitter_rng_c_args = -O0 -DLINUX_KERNEL -I. -I../ -I../src		       \
+		    -Icrypto/jitterentropy-library			       \
+		    -Icrypto/jitterentropy-library/src			       \
+		    -Icrypto/jitterentropy-library/linux_kernel
+
+ifdef CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
+jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
+endif
+
+ifdef CONFIG_BUILTIN_JITTERENTROPY
+jitter_rng_c_args += -DCONFIG_BUILTIN_JITTERENTROPY
+endif
+
+################################# Compilation ##################################
+
+obj-$(CONFIG_EXTERNAL_JITTERENTROPY)  := jitter_rng.o
+
+jitter_rng-y += ../src/jitterentropy-base.o				       \
+		../src/jitterentropy-gcd.o				       \
+		../src/jitterentropy-health.o				       \
+		../src/jitterentropy-noise.o				       \
+		../src/jitterentropy-sha3.o				       \
+		../src/jitterentropy-status.o				       \
+		../src/jitterentropy-timer.o				       \
+		jitterentropy_kcapi.o
+
+jitter_rng_c_args_zero = -O0 $(jitter_rng_c_args)
+
+CFLAGS_../src/jitterentropy-base.o = $(jitter_rng_c_args_zero)
+CFLAGS_../src/jitterentropy-gcd.o = $(jitter_rng_c_args_zero)
+CFLAGS_../src/jitterentropy-health.o = $(jitter_rng_c_args_zero)
+CFLAGS_../src/jitterentropy-noise.o = $(jitter_rng_c_args_zero)
+CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_c_args)
+CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
+CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
+CFLAGS_jitterentropy_kcapi.o = $(jitter_rng_c_args)
+CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
+
+############################ Test Code Compilation #############################
+
+jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE)		       \
+	+= jitterentropy_testing.o
+
+CFLAGS_jitterentropy_testing.o = $(jitter_rng_c_args)
