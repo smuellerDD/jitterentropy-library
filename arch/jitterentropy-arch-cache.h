@@ -53,11 +53,19 @@
  *   - {Open,Free,Net}BSD x86 -> CPUID leaf 4 (deterministic cache parameters)
  *   - {Open,Free,Net}BSD aarch64 / riscv -> zero stub (no EL0-readable source)
  *   - AIX              -> _system_configuration (dcache_size / L2_cache_size)
+ *   - Linux Kernel     -> return 0
  *   - other            -> return 0
  */
 
 #ifndef _JITTERENTROPY_ARCH_CACHE_H
 #define _JITTERENTROPY_ARCH_CACHE_H
+
+#ifdef LINUX_KERNEL
+
+#include <linux/cacheinfo.h>
+# define JENT_ARCH_CACHE_LINUX_KERNEL
+
+#else /* LINUX_KERNEL */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -89,6 +97,8 @@
 # include <sys/systemcfg.h>
 # define JENT_ARCH_CACHE_AIX
 #endif
+
+#endif /* LINUX_KERNEL */
 
 static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
 						 int all_caches)
@@ -485,6 +495,14 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 	cache_size++;
 
 	return cache_size;
+}
+
+#elif defined(JENT_ARCH_CACHE_LINUX_KERNEL)
+
+static inline uint32_t jent_cache_size_roundup(int all_caches)
+{
+	(void)all_caches;
+	return 0;
 }
 
 #else /* no cache discovery available */

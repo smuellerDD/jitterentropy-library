@@ -54,6 +54,7 @@
  *   - hosted Unix-like (BSDs, Apple, -> sysconf(_SC_NPROCESSORS_ONLN)
  *     AIX, Solaris/illumos, Haiku,
  *     Cygwin)
+ *   - Linux Kernel                   -> 1 (we do not need a timer thread)
  *   - other (e.g. baremetal)         -> 1 (timer thread will be disabled)
  *
  * The Unix-like detection uses macros that are pre-defined by the compiler
@@ -78,6 +79,12 @@
 #ifndef _JITTERENTROPY_ARCH_NCPU_H
 #define _JITTERENTROPY_ARCH_NCPU_H
 
+#ifdef LINUX_KERNEL
+
+#define JENT_ARCH_NCPU_LINUX_KERNEL
+
+#else /* LINUX_KERNEL */
+
 #include <errno.h>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
@@ -97,6 +104,8 @@
 #  endif
 # endif
 #endif
+
+#endif /* LINUX_KERNEL */
 
 #ifdef JENT_ARCH_NCPU_LINUX_SYSFS
 /*
@@ -208,6 +217,13 @@ static inline long jent_ncpu(void)
 
 		return ncpu;
 	}
+
+#elif defined(JENT_ARCH_NCPU_LINUX_KERNEL)
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+#error "Linux kernel does not support internal timer"
+#endif
+	return 1;
+
 #else
 	/*
 	 * TODO: return number of available CPUs -

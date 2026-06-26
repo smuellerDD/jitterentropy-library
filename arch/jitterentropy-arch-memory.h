@@ -59,6 +59,7 @@
  *                      JENT_CONF_RELAX_MLOCK)
  *   - Linux/BSD/Mac -> malloc + mlock (or plain malloc with
  *                      JENT_CONF_RELAX_MLOCK)
+ *   - Linux Kernel  -> kmalloc + jent_memset_secure / kvzalloc
  *   - other         -> plain malloc
  *
  * When the active path provides locked / wiped memory, the macro
@@ -69,6 +70,14 @@
 
 #ifndef _JITTERENTROPY_ARCH_MEMORY_H
 #define _JITTERENTROPY_ARCH_MEMORY_H
+
+#ifdef LINUX_KERNEL
+
+#include <linux/slab.h>
+
+# define JENT_ARCH_MEM_LINUX_KERNEL
+
+#else /* LINUX_KERNEL */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -97,6 +106,8 @@
 # include <errno.h>
 # define JENT_ARCH_MEM_POSIX_MLOCK
 #endif
+
+#endif /* LINUX_KERNEL */
 
 /* Override this if you want to allocate more than 2 MB of secure memory */
 #ifndef JENT_SECURE_MEMORY_SIZE_MAX
@@ -237,6 +248,10 @@ static inline void *jent_zalloc(size_t len)
 		return NULL;
 	}
 
+#elif defined(JENT_ARCH_MEM_LINUX_KERNEL)
+
+	tmp = kmalloc(len, GFP_KERNEL);
+
 #else /* no secure memory mechanism available */
 
 	tmp = malloc(len);
@@ -246,6 +261,15 @@ static inline void *jent_zalloc(size_t len)
 	if (tmp != NULL)
 		jent_memset_secure(tmp, len);
 	return tmp;
+}
+
+static inline void *jent_zalloc_large(size_t len)
+{
+#ifdef JENT_ARCH_MEM_LINUX_KERNEL
+	return kvzalloc(len, GFP_KERNEL);
+#else
+	return jent_zalloc(len);
+#endif
 }
 
 static inline void jent_zfree(void *ptr, size_t len)
@@ -295,11 +319,25 @@ static inline void jent_zfree(void *ptr, size_t len)
 	jent_memset_secure(ptr, len);
 	free(ptr);
 
+#elif defined(JENT_ARCH_MEM_LINUX_KERNEL)
+
+	(void)len;
+	kfree_sensitive(ptr);
+
 #else
 
 	jent_memset_secure(ptr, len);
 	free(ptr);
 
+#endif
+}
+
+static inline void jent_zfree_large(void *ptr, size_t len)
+{
+#ifdef JENT_ARCH_MEM_LINUX_KERNEL
+	kvfree_sensitive(ptr, len);
+#else
+	jent_zfree(ptr, len);
 #endif
 }
 

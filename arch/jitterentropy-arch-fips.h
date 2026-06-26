@@ -50,6 +50,7 @@
  *   - Windows    -> 0 (no kernel switch to query)
  *   - POSIX      -> read /proc/sys/crypto/fips_enabled (Linux); on systems
  *                   that lack the file the open() fails and we report 0.
+ *   - Linux Kernel -> fips_enabled flag
  *
  * The crypto-library branches expect the consumer to have included the
  * relevant headers before this one (gcrypt.h / openssl/evp.h).
@@ -57,6 +58,17 @@
 
 #ifndef _JITTERENTROPY_ARCH_FIPS_H
 #define _JITTERENTROPY_ARCH_FIPS_H
+
+#ifdef LINUX_KERNEL
+
+#include <linux/fips.h>
+
+static inline int jent_fips_enabled(void)
+{
+	return fips_enabled;
+}
+
+#else /* LINUX_KERNEL */
 
 #if !defined(LIBGCRYPT) && !defined(AWSLC) && !defined(OPENSSL) && \
     !defined(_MSC_VER) && !defined(__MINGW32__)
@@ -97,5 +109,7 @@ static inline int jent_fips_enabled(void)
 #undef FIPS_MODE_SWITCH_FILE
 #endif
 }
+
+#endif /* LINUX_KERNEL */
 
 #endif /* _JITTERENTROPY_ARCH_FIPS_H */

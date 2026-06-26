@@ -51,6 +51,7 @@
  *   - aarch64                -> 'yield' instruction
  *   - arm (ARMv7+)           -> 'yield' instruction
  *   - powerpc                -> 'or 27,27,27' (low-priority hint)
+ *   - Linux kernel           -> schedule()
  *   - other (s390x, riscv,   -> no hint
  *     unknown)
  *
@@ -69,6 +70,13 @@
 
 #ifndef _JITTERENTROPY_ARCH_SCHED_H
 #define _JITTERENTROPY_ARCH_SCHED_H
+
+#ifdef LINUX_KERNEL
+
+#include <linux/sched.h>
+# define JENT_ARCH_SCHED_LINUX_KERNEL
+
+#else /* LINUX_KERNEL */
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 # include <windows.h>
@@ -94,6 +102,8 @@
 # define JENT_ARCH_SCHED_PAUSE_POWERPC
 #endif
 
+#endif /* LINUX_KERNEL */
+
 static inline void jent_yield(void)
 {
 #if defined(JENT_ARCH_SCHED_PAUSE_X86)
@@ -108,6 +118,8 @@ static inline void jent_yield(void)
 	SwitchToThread();
 #elif defined(JENT_ARCH_SCHED_OS_POSIX)
 	(void)sched_yield();
+#elif defined(JENT_ARCH_SCHED_LINUX_KERNEL)
+	schedule();
 #endif
 }
 

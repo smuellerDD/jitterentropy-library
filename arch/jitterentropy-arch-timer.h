@@ -54,6 +54,7 @@
  *   - powerpc            -> __builtin_ppc_get_timebase()
  *   - riscv              -> rdtime (RV64), or rdtimeh/rdtime retry pair (RV32);
  *                           override via RISCV_NSTIME_INSN[_HI] to use rdcycle
+ *   - Linux kernel       -> random_get_entropy and ktime_get_ns as fallback
  *   - generic fallback   -> mach_absolute_time() on Mach,
  *                           read_real_time() on AIX,
  *                           clock_gettime(CLOCK_REALTIME) elsewhere
@@ -66,6 +67,14 @@
 
 #ifndef _JITTERENTROPY_ARCH_TIMER_H
 #define _JITTERENTROPY_ARCH_TIMER_H
+
+#ifdef LINUX_KERNEL
+
+#include <linux/time.h>
+#include "jitterentropy_testing.h"
+# define JENT_ARCH_TIMER_LINUX_KERNEL
+
+#else /* LINUX_KERNEL */
 
 #include <stdint.h>
 
@@ -129,6 +138,8 @@
 #  include <mach/mach_time.h>
 # endif
 #endif
+
+#endif /* LINUX_KERNEL */
 
 static inline void jent_get_nstime(uint64_t *out)
 {
@@ -197,6 +208,23 @@ static inline void jent_get_nstime(uint64_t *out)
 		: "=&r" (hi), "=&r" (lo), "=&r" (hi2));
 	*out = ((uint64_t)hi << 32) | (uint64_t)lo;
 # endif
+
+#elif defined (JENT_ARCH_TIMER_LINUX_KERNEL)
+
+	__u64 tmp = 0;
+
+	tmp = random_get_entropy();
+
+	/*
+	 * If random_get_entropy does not return a value, i.e. it is not
+	 * implemented for a given architecture, use a clock source.
+	 * hoping that there are timers we can work with.
+	 */
+	if (tmp == 0)
+		tmp = ktime_get_ns();
+
+	*out = tmp;
+	jent_raw_hires_entropy_store(tmp);
 
 #else /* JENT_ARCH_TIMER_GENERIC */
 
