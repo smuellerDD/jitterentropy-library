@@ -137,7 +137,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	}
 
 	/* Enable full SP800-90B health test handling */
-	ec->fips_enabled = 1;
+	ec->is_fips_enabled = 1;
 
 	printf("Processing %s\n", pathname);
 
