@@ -40,6 +40,7 @@
 #ifdef JENT_ARCH_MEM_POSIX_MLOCK
 # include <sys/mman.h>
 # include <errno.h>
+# include <unistd.h>	/* sysconf() */
 #endif
 
 #endif /* JENT_ARCH_MEM_LINUX_KERNEL */
@@ -83,15 +84,28 @@ void jent_memset_secure(void *s, size_t n)
 }
 
 #ifdef JENT_ARCH_MEM_WINDOWS
-static size_t jent_round_up_to_pagesize(size_t size)
+static size_t jent_pagesize(void)
 {
 	SYSTEM_INFO si;
-	GetSystemInfo(&si);
-	size_t page_size = si.dwPageSize;
 
-	return (size + page_size - 1) & ~(page_size - 1);
+	GetSystemInfo(&si);
+	return si.dwPageSize;
 }
 #endif /* JENT_ARCH_MEM_WINDOWS */
+
+#ifdef JENT_ARCH_MEM_POSIX_MLOCK
+/* Some BSDs / macOS only provide the older MAP_ANON spelling. */
+# ifndef MAP_ANONYMOUS
+#  define MAP_ANONYMOUS MAP_ANON
+# endif
+
+static size_t jent_pagesize(void)
+{
+	long page_size = sysconf(_SC_PAGESIZE);
+
+	return (page_size <= 0) ? 4096 : (size_t)page_size;
+}
+#endif /* JENT_ARCH_MEM_POSIX_MLOCK */
 
 #ifdef JENT_ARCH_MEM_LINUX_KERNEL
 
@@ -139,7 +153,13 @@ void *jent_zalloc(size_t len)
 	 * runtime, it is their decision and we thus try not to overrule that
 	 * decision for less memory protection.
 	 */
-	tmp = gcry_xmalloc_secure(len);
+	/*
+	 * gcry_malloc_secure(), not gcry_xmalloc_secure(): the x-variant
+	 * invokes libgcrypt's fatal out-of-core handler when the secmem pool
+	 * is exhausted, terminating the host process from inside the library.
+	 * The NULL return is handled by all callers.
+	 */
+	tmp = gcry_malloc_secure(len);
 
 #elif defined(AWSLC)
 
@@ -175,7 +195,13 @@ void *jent_zalloc(size_t len)
 		size_t minWS, maxWS;
 
 		JENT_BUILD_BUG_ON(JENT_SECURE_MEMORY_SIZE_MAX / 2 == 0);
-		GetProcessWorkingSetSize(GetCurrentProcess(), &minWS, &maxWS);
+		/*
+		 * On query failure assume a zero working set so the raise
+		 * below always runs; the outputs are uninitialized otherwise.
+		 */
+		if (!GetProcessWorkingSetSize(GetCurrentProcess(), &minWS,
+					      &maxWS))
+			minWS = maxWS = 0;
 		if (maxWS < JENT_SECURE_MEMORY_SIZE_MAX &&
 		    !SetProcessWorkingSetSizeEx(
 			GetCurrentProcess(),
@@ -184,14 +210,41 @@ void *jent_zalloc(size_t len)
 			QUOTA_LIMITS_HARDWS_MIN_ENABLE))
 			return NULL;
 
-		len = jent_round_up_to_pagesize(len);
-		tmp = VirtualAlloc(NULL, len, MEM_COMMIT | MEM_RESERVE,
-				   PAGE_READWRITE);
-		if (!tmp)
-			return NULL;
-		if (!VirtualLock(tmp, len)) {
-			VirtualFree(tmp, 0, MEM_RELEASE);
-			return NULL;
+		{
+			/*
+			 * Guard-page layout as on the POSIX path: commit the
+			 * whole region inaccessible and enable only the
+			 * payload, leaving a PAGE_NOACCESS guard page on each
+			 * side that faults on any accidental access beyond
+			 * the state.
+			 */
+			size_t page_size = jent_pagesize();
+			size_t payload, total;
+			uint8_t *base;
+			DWORD oldprot;
+
+			if (len > (size_t)-1 - 3 * page_size)
+				return NULL;
+			payload = (len + page_size - 1) & ~(page_size - 1);
+			total = payload + 2 * page_size;
+
+			base = VirtualAlloc(NULL, total,
+					    MEM_COMMIT | MEM_RESERVE,
+					    PAGE_NOACCESS);
+			if (!base)
+				return NULL;
+			if (!VirtualProtect(base + page_size, payload,
+					    PAGE_READWRITE, &oldprot)) {
+				VirtualFree(base, 0, MEM_RELEASE);
+				return NULL;
+			}
+
+			tmp = base + page_size;
+
+			if (!VirtualLock(tmp, payload)) {
+				VirtualFree(base, 0, MEM_RELEASE);
+				return NULL;
+			}
 		}
 	}
 # else
@@ -200,25 +253,69 @@ void *jent_zalloc(size_t len)
 
 #elif defined(JENT_ARCH_MEM_POSIX_MLOCK)
 
-	tmp = malloc(len);
-	if (!tmp)
-		return NULL;
-	/*
-	 * Prevent paging out of the memory state to swap space. If this
-	 * fails, check the current memory lock limits and capabilities
-	 * (e.g. RLIMIT_MEMLOCK and CAP_IPC_LOCK).
-	 */
-# ifndef JENT_CONF_RELAX_MLOCK
-	if (mlock(tmp, len)) {
-# else
-	/*
-	 * Use this only for CI or restricted containers if not possible
-	 * otherwise.
-	 */
-	if (mlock(tmp, len) && errno != EPERM && errno != EAGAIN) {
+	{
+		/*
+		 * Layout: [guard page | payload (page-rounded) | guard page]
+		 *
+		 * The whole region is mapped PROT_NONE first and only the
+		 * payload is made accessible, leaving one inaccessible guard
+		 * page on each side: any accidental access beyond the state
+		 * faults immediately instead of silently reading or
+		 * corrupting adjacent data. The page-aligned payload is also
+		 * what allows the madvise() dump exclusion below.
+		 */
+		size_t page_size = jent_pagesize();
+		size_t payload, total;
+		uint8_t *base;
+
+		if (len > SIZE_MAX - 3 * page_size)
+			return NULL;
+		payload = (len + page_size - 1) & ~(page_size - 1);
+		total = payload + 2 * page_size;
+
+		base = mmap(NULL, total, PROT_NONE,
+			    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (base == MAP_FAILED)
+			return NULL;
+
+		if (mprotect(base + page_size, payload,
+			     PROT_READ | PROT_WRITE)) {
+			munmap(base, total);
+			return NULL;
+		}
+
+		tmp = base + page_size;
+
+		/*
+		 * Exclude the secret state from core dumps. Best effort: the
+		 * advice is a hardening measure, so its absence or failure
+		 * (e.g. old kernels) does not fail the allocation. No revert
+		 * is needed on free: munmap() destroys the mapping including
+		 * its madvise state.
+		 */
+# if defined(MADV_DONTDUMP)
+		madvise(tmp, len, MADV_DONTDUMP);	/* Linux */
+# elif defined(MADV_NOCORE)
+		madvise(tmp, len, MADV_NOCORE);		/* FreeBSD */
 # endif
-		free(tmp);
-		return NULL;
+
+		/*
+		 * Prevent paging out of the memory state to swap space. If
+		 * this fails, check the current memory lock limits and
+		 * capabilities (e.g. RLIMIT_MEMLOCK and CAP_IPC_LOCK).
+		 */
+# ifndef JENT_CONF_RELAX_MLOCK
+		if (mlock(tmp, len)) {
+# else
+		/*
+		 * Use this only for CI or restricted containers if not
+		 * possible otherwise.
+		 */
+		if (mlock(tmp, len) && errno != EPERM && errno != EAGAIN) {
+# endif
+			munmap(base, total);
+			return NULL;
+		}
 	}
 
 #else /* no secure memory mechanism available */
@@ -234,6 +331,15 @@ void *jent_zalloc(size_t len)
 
 void *jent_zalloc_large(size_t len)
 {
+	/*
+	 * The large memory-access noise buffer goes through the same secure
+	 * backends as the state allocations. Note their capacity limits: the
+	 * crypto-library secure heaps are sized by JENT_SECURE_MEMORY_SIZE_MAX
+	 * (2 MiB by default) and mlock() is bounded by RLIMIT_MEMLOCK. Callers
+	 * requesting a larger memory size (JENT_MAX_MEMSIZE_*, JENT_CACHE_ALL)
+	 * must raise JENT_SECURE_MEMORY_SIZE_MAX (and/or the memlock limit)
+	 * accordingly, otherwise the collector allocation fails.
+	 */
 	return jent_zalloc(len);
 }
 
@@ -266,23 +372,44 @@ void jent_zfree(void *ptr, size_t len)
 
 	SecureZeroMemory(ptr, len);
 # ifndef JENT_CONF_RELAX_MLOCK
-	len = jent_round_up_to_pagesize(len);
-	VirtualUnlock(ptr, len);
-	VirtualFree(ptr, 0, MEM_RELEASE);
+	{
+		/*
+		 * Mirror the guard-page layout of jent_zalloc(): the region
+		 * starts one page before the returned pointer.
+		 */
+		size_t page_size = jent_pagesize();
+		size_t payload = (len + page_size - 1) & ~(page_size - 1);
+		uint8_t *base = (uint8_t *)ptr - page_size;
+
+		VirtualUnlock(ptr, payload);
+		VirtualFree(base, 0, MEM_RELEASE);
+	}
 # else
 	free(ptr);
 # endif
 
 #elif defined(JENT_ARCH_MEM_POSIX_MLOCK)
 
-	/*
-	 * While memory returned to the OS is automatically unlocked, it is
-	 * not known how long libc keeps this memory cached internally;
-	 * therefore it is more robust to unlock here.
-	 */
-	munlock(ptr, len);
-	jent_memset_secure(ptr, len);
-	free(ptr);
+	{
+		/*
+		 * Mirror the guard-page layout of jent_zalloc(): the mapping
+		 * starts one page before the returned pointer and covers the
+		 * page-rounded payload plus the two guard pages.
+		 */
+		size_t page_size = jent_pagesize();
+		size_t payload = (len + page_size - 1) & ~(page_size - 1);
+		uint8_t *base = (uint8_t *)ptr - page_size;
+
+		jent_memset_secure(ptr, len);
+
+		/*
+		 * munmap() unlocks the pages and drops the madvise state with
+		 * the mapping; the memory does not travel through a heap
+		 * allocator, so nothing can be handed out again unwiped or
+		 * with stale dump exclusion.
+		 */
+		munmap(base, payload + 2 * page_size);
+	}
 
 #else
 
