@@ -397,6 +397,14 @@ static int jent_health_failure_reset(
 	jent_lag_duplicate(new_ec, *ec);
 	jent_rct_mem_duplicate(new_ec, *ec);
 
+	/*
+	 * Carry the instance identifier over so the reallocated collector keeps
+	 * the same UUID (empty during the startup-time reset, when it has not
+	 * been assigned yet), and count this reinitialization.
+	 */
+	memcpy(new_ec->uuid, (*ec)->uuid, sizeof(new_ec->uuid));
+	new_ec->reinit_count = (*ec)->reinit_count + 1;
+
 	jent_entropy_collector_free(*ec);
 	*ec = new_ec;
 
@@ -743,6 +751,13 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 	} while (ec->startup_state != jent_startup_completed);
 
 	jent_notime_unsettick(ec);
+
+	/*
+	 * Assign the stable per-instance identifier. This is done once, after a
+	 * successful startup; jent_health_failure_reset() carries it over to the
+	 * replacement collector so the identity survives a reallocation.
+	 */
+	jent_uuid_generate(ec->uuid);
 
 	return ec;
 }

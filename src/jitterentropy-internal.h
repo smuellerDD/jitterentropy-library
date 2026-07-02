@@ -56,6 +56,7 @@
 #include "arch/jitterentropy-arch-ncpu.h"
 #include "arch/jitterentropy-arch-fips.h"
 #include "arch/jitterentropy-arch-sched.h"
+#include "arch/jitterentropy-arch-uuid.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -331,6 +332,16 @@ struct rand_data
 
 	unsigned int flags;		/* Flags used to initialize */
 	unsigned int osr;		/* Oversampling rate */
+
+	/* RFC 4122 version 4 identifier, stable for the collector's lifetime. */
+	char uuid[JENT_UUID_STRLEN];
+
+	/*
+	 * Number of times this instance has been reinitialized (reallocated on
+	 * health-test recovery). Carried over, incremented, across the identity-
+	 * preserving reallocation in jent_health_failure_reset().
+	 */
+	unsigned int reinit_count;
 
 	/* Initialization state supporting AIS 20/31 NTG.1 */
 	enum jent_startup_state startup_state;

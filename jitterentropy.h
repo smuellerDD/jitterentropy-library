@@ -256,6 +256,18 @@ unsigned int jent_version(void);
 JENT_PRIVATE_STATIC
 int jent_status(const struct rand_data *ec, char *buf, size_t buflen);
 
+/* Length of the canonical UUID string "8-4-4-4-12" including the NUL. */
+#ifndef JENT_UUID_STRLEN
+# define JENT_UUID_STRLEN 37
+#endif
+
+/*
+ * Copy the instance UUID string (RFC 4122 version 4, JENT_UUID_STRLEN bytes
+ * including the terminating NUL) into buf. Returns 0 on success, -1 on error.
+ */
+JENT_PRIVATE_STATIC
+int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen);
+
 /* return secure memory support, must be done
  * in jitterentropy itself, as users may not define
  * a crypto library and so the define in arch/jitterentropy-arch-memory.h
