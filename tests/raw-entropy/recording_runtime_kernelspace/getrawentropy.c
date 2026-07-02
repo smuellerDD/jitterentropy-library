@@ -41,8 +41,8 @@
 #include "jitterentropy.h"
 
 #define RAWENTROPY_SAMPLES	1001
-#define DEBUGFS_INTERFACE	"/sys/kernel/debug/jitterentropy_testing/jent_raw_hires"
-#define SYSFS_PARAM_DIR		"/sys/module/jitterentropy_rng/parameters"
+#define DEBUGFS_INTERFACE	"/sys/kernel/debug/jitter_rng/jent_raw_hires"
+#define SYSFS_PARAM_DIR		"/sys/module/jitter_rng/parameters"
 
 #define JENT_TEST_COMMON (1<<14)
 #define JENT_TEST_HASHLOOP (1<<15)
@@ -112,7 +112,11 @@ out:
 static int getrawentropy(const struct opts *opts)
 {
 #define BUFFER_SIZE		(RAWENTROPY_SAMPLES * DATASIZE)
-	uint32_t requested = (opts->samples + 1) * DATASIZE;
+	/*
+	 * Use size_t to avoid truncating the byte count for large --samples
+	 * values (the previous uint32_t wrapped, e.g. silently yielding 0).
+	 */
+	size_t requested = (opts->samples + 1) * DATASIZE;
 	lrngval_t leftover;
 	uint8_t leftover_present = 0;
 	uint8_t *buffer_p, buffer[BUFFER_SIZE];
@@ -140,6 +144,18 @@ static int getrawentropy(const struct opts *opts)
 		ret = read(fd, buffer_p, gather);
 		if (ret < 0) {
 			ret = -errno;
+			goto out;
+		}
+		if (ret == 0) {
+			/*
+			 * Unexpected EOF (e.g. --debugfs-file points at an
+			 * empty/short regular file). Without this the outer
+			 * loop would spin forever as 'requested' never reaches
+			 * zero.
+			 */
+			fprintf(stderr, "Unexpected EOF reading %s\n",
+				opts->debugfs_file);
+			ret = -EIO;
 			goto out;
 		}
 
@@ -226,7 +242,11 @@ int main(int argc, char * argv[])
 			}
 
 			val = strtoul(argv[1], NULL, 10);
-			if (val >= UINT_MAX)
+			/*
+			 * Bound the sample count so that the byte total
+			 * (samples + 1) * DATASIZE cannot overflow size_t.
+			 */
+			if (val >= UINT_MAX || val + 1 > SIZE_MAX / DATASIZE)
 				return 1;
 			opts.samples = (size_t)val;
 		} else if (!strncmp(argv[1], "--debugfs-file", 14) ||

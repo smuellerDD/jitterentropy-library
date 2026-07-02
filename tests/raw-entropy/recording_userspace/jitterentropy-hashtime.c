@@ -112,7 +112,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	 * compare config of measurements with runtime
 	 */
 	if (status) {
-		char status_str[1000];
+		char status_str[4096];
 
 		ret = jent_status(ec, status_str, sizeof(status_str));
 		if (ret) {
@@ -278,9 +278,9 @@ int main(int argc, char * argv[])
 		else if (!strncmp(argv[1], "--all-caches", 12))
 			flags |= JENT_CACHE_ALL;
 		else if (!strncmp(argv[1], "--hashloop", 10))
-			jent_es |= jent_hashloop;
+			jent_es = jent_hashloop;
 		else if (!strncmp(argv[1], "--memaccess", 11))
-			jent_es |= jent_memaccess_loop;
+			jent_es = jent_memaccess_loop;
 		else if (!strncmp(argv[1], "--osr", 5)) {
 			unsigned long val;
 
