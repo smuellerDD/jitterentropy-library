@@ -48,14 +48,20 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	/* needed as plain snprintf to make jent_add_to_status len calculation usable */
 	snprintf(buf, buflen, "{\n");
 
-	jent_add_to_status("\t\"version\": \"%u.%u.%u\",\n",
+	jent_add_to_status("\t\"version\": \"%u.%u.%u\"",
 			   JENT_MAJVERSION, JENT_MINVERSION, JENT_PATCHLEVEL)
 
-	if (!ec)
+	if (!ec) {
+		/*
+		 * Terminate the version line without the field separator: a
+		 * trailing comma before the closing brace is invalid JSON.
+		 */
+		jent_add_to_status("\n")
 		goto out;
+	}
 
 	/* stable per-instance identifier */
-	jent_add_to_status("\t\"uuid\": \"%s\",\n", ec->uuid);
+	jent_add_to_status(",\n\t\"uuid\": \"%s\",\n", ec->uuid);
 
 	/* number of reinitializations (reallocations on health-test recovery) */
 	jent_add_to_status("\t\"reinitializations\": %u,\n", ec->reinit_count);
