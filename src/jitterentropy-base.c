@@ -794,9 +794,17 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 		}
 
 		if (entropy_collector->mem != NULL) {
+			/*
+			 * Use memmask (== memsize - 1, set whenever mem was
+			 * allocated) rather than recomputing the size from
+			 * ->flags. On the allocation-failure cleanup path ->flags
+			 * may not have been assigned yet, in which case
+			 * jent_memsize(->flags) would return the default size and
+			 * mis-size the free (heap overflow or partial zeroization).
+			 */
 			jent_zfree_large(
 				entropy_collector->mem,
-				jent_memsize(entropy_collector->flags));
+				(size_t)entropy_collector->memmask + 1);
 			entropy_collector->mem = NULL;
 		}
 		jent_zfree(entropy_collector, sizeof(struct rand_data));
