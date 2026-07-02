@@ -16,11 +16,18 @@
 #include <crypto/internal/rng.h>
 
 #include "jitterentropy.h"
+#include "jitterentropy_chardev.h"
+#include "jitterentropy_hwrng.h"
 #include "jitterentropy_testing.h"
 
-/* Kernel module options */
-static unsigned int osr = 0;
-static int flags = 0;
+/*
+ * Kernel module options.
+ *
+ * osr and flags are non-static as they are shared with the (optional)
+ * character device interface in jitterentropy_chardev.c.
+ */
+unsigned int osr = 0;
+int flags = 0;
 static unsigned int verbose = 0;
 
 module_param(osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
@@ -210,11 +217,34 @@ static int __init jent_mod_init(void)
 		pr_info("jitterentropy: Initialization failed with host not compliant with requirements: %d\n", ret);
 		return -EFAULT;
 	}
-	return crypto_register_rng(&jent_alg);
+
+	ret = crypto_register_rng(&jent_alg);
+	if (ret)
+		goto err;
+
+	ret = jent_chardev_init();
+	if (ret)
+		goto err_crypto;
+
+	ret = jent_hwrng_init();
+	if (ret)
+		goto err_chardev;
+
+	return 0;
+
+err_chardev:
+	jent_chardev_exit();
+err_crypto:
+	crypto_unregister_rng(&jent_alg);
+err:
+	jent_testing_exit();
+	return ret;
 }
 
 static void __exit jent_mod_exit(void)
 {
+	jent_hwrng_exit();
+	jent_chardev_exit();
 	jent_testing_exit();
 	crypto_unregister_rng(&jent_alg);
 }

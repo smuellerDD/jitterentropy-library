@@ -14,6 +14,14 @@ ifdef CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
 endif
 
+ifdef CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV
+jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_CHARDEV
+endif
+
+ifdef CONFIG_EXTERNAL_JITTERENTROPY_HWRNG
+jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_HWRNG
+endif
+
 ifdef CONFIG_BUILTIN_JITTERENTROPY
 jitter_rng_c_args += -DCONFIG_BUILTIN_JITTERENTROPY
 endif
@@ -42,6 +50,20 @@ CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
 CFLAGS_jitterentropy_kcapi.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
+
+######################### Character Device Compilation #########################
+
+jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV)			       \
+	+= jitterentropy_chardev.o
+
+CFLAGS_jitterentropy_chardev.o = $(jitter_rng_c_args)
+
+############################# HW RNG Compilation ##############################
+
+jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG)			       \
+	+= jitterentropy_hwrng.o
+
+CFLAGS_jitterentropy_hwrng.o = $(jitter_rng_c_args)
 
 ############################ Test Code Compilation #############################
 
