@@ -71,6 +71,21 @@ extern "C" {
 # define UINT64_C(c)   c ## ULL
 #endif
 
+/*
+ * jitterentropy.h intentionally does not pull in <linux/module.h> (and thus not
+ * <linux/kernel.h>) to keep the -O0 core free of headers that do not compile at
+ * -O0 on modern kernels. Provide ARRAY_SIZE()/BUILD_BUG_ON() here for the core.
+ * The guards matter on older kernels where the arch headers included above
+ * still drag in <linux/kernel.h> transitively (e.g. via <linux/timex.h>), which
+ * defines these macros; there the kernel's definitions are used unchanged.
+ */
+#ifndef BUILD_BUG_ON
+# define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+#endif
+#ifndef ARRAY_SIZE
+# define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+
 #else /* LINUX_KERNEL */
 
 #if __has_attribute(__fallthrough__)
