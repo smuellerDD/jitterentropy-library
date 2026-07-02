@@ -17,7 +17,10 @@
 
 #include "jitterentropy.h"
 #include "jitterentropy_chardev.h"
+#include "jitterentropy_compat.h"
+#include "jitterentropy_error.h"
 #include "jitterentropy_hwrng.h"
+#include "jitterentropy_proc.h"
 #include "jitterentropy_testing.h"
 
 /*
@@ -67,7 +70,7 @@ static int jent_kcapi_log(struct jitterentropy *rng)
 	if (!verbose || !rng->entropy_collector)
 		return 0;
 
-#define JENT_STATUS_BUF_SIZE 1000
+#define JENT_STATUS_BUF_SIZE 4096
 	buf = kzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
@@ -133,33 +136,13 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 		 * success, so map any non-negative result accordingly.
 		 */
 		ret = 0;
-	} else switch (ret) {
-	case -6:
-	case -7:
-	case -8:
-	case -10:
-		/* Handle permanent health test error */
+	} else {
 		/*
-		 * If the kernel was booted with fips=1, it implies that
-		 * the entire kernel acts as a FIPS 140 module. In this case
-		 * an SP800-90B permanent health test error is treated as
-		 * a FIPS module error.
+		 * Map the error (panicking under FIPS on an unrecoverable
+		 * health-test failure). Shared with the hwrng and character
+		 * device interfaces, see jitterentropy_error.h.
 		 */
-		if (fips_enabled)
-			panic("Jitter RNG permanent health test failure\n");
-
-		pr_err("Jitter RNG permanent health test failure\n");
-		ret = -EFAULT;
-		break;
-	case -1:
-	case -4:
-		/* Handle generic errors */
-		ret = -EINVAL;
-		break;
-	default:
-		/* Handle unexpected errors */
-		ret = -EFAULT;
-		break;
+		ret = jent_map_read_error(ret);
 	}
 
 	mutex_unlock(&rng->jent_lock);
@@ -225,6 +208,8 @@ static int __init jent_mod_init(void)
 		return -EFAULT;
 	}
 
+	jent_proc_init();
+
 	ret = crypto_register_rng(&jent_alg);
 	if (ret)
 		goto err;
@@ -244,6 +229,7 @@ err_chardev:
 err_crypto:
 	crypto_unregister_rng(&jent_alg);
 err:
+	jent_proc_exit();
 	jent_testing_exit();
 	return ret;
 }
@@ -252,6 +238,7 @@ static void __exit jent_mod_exit(void)
 {
 	jent_hwrng_exit();
 	jent_chardev_exit();
+	jent_proc_exit();
 	jent_testing_exit();
 	crypto_unregister_rng(&jent_alg);
 }
@@ -262,4 +249,13 @@ module_exit(jent_mod_exit);
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Stephan Mueller <smueller@chronox.de>");
 MODULE_DESCRIPTION("Non-physical True Random Number Generator based on CPU Jitter");
+/*
+ * The crypto API name depends on the build mode (see jent_alg.base.cra_name
+ * above). Alias the matching name so the algorithm can be auto-loaded on
+ * request via the kernel crypto API.
+ */
+#ifdef CONFIG_BUILTIN_JITTERENTROPY
 MODULE_ALIAS_CRYPTO("jitterentropy_rng");
+#else
+MODULE_ALIAS_CRYPTO("jitter_rng");
+#endif
