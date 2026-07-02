@@ -274,6 +274,19 @@ int jent_notime_switch(struct jent_notime_thread *new_thread)
 {
 	if (jent_notime_switch_blocked)
 		return -EAGAIN;
+
+	/*
+	 * Reject incomplete handlers: a NULL thread would let
+	 * jent_notime_settick() succeed without ever starting a counting
+	 * thread, and the first timer read would then spin forever waiting
+	 * for a counter that nobody increments; a NULL callback would crash
+	 * on first use.
+	 */
+	if (!new_thread || !new_thread->jent_notime_init ||
+	    !new_thread->jent_notime_fini || !new_thread->jent_notime_start ||
+	    !new_thread->jent_notime_stop)
+		return -EINVAL;
+
 	notime_thread = new_thread;
 	return 0;
 }
