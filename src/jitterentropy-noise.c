@@ -206,13 +206,13 @@ static void jent_memaccess_pseudorandom(struct rand_data *ec, uint64_t loop_cnt,
 	} prngState = { .u = {0x8e93eec0, 0xce65608a, 0xa8d46b46, 0xe83cef69} };
 	uint32_t addressMask;
 
-	/*
-	 * allow caller to set the counter
-	 */
-	uint64_t mem_loop_cnt = loop_cnt ? loop_cnt : ec->memaccessloops;
+	uint64_t mem_loop_cnt;
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
+
+	/* allow caller to set the counter */
+	mem_loop_cnt = loop_cnt ? loop_cnt : ec->memaccessloops;
 	addressMask = ec->memmask;
 
 	/*
@@ -300,13 +300,13 @@ static void jent_memaccess_deterministic(struct rand_data *ec,
 	unsigned int wrap = 0;
 	uint64_t i = 0;
 
-	/*
-	 * allow caller to set the counter
-	 */
-	uint64_t mem_loop_cnt = loop_cnt ? loop_cnt : ec->memaccessloops;
+	uint64_t mem_loop_cnt;
 
 	if (NULL == ec || NULL == ec->mem)
 		return;
+
+	/* allow caller to set the counter */
+	mem_loop_cnt = loop_cnt ? loop_cnt : ec->memaccessloops;
 	wrap = ec->memmask + 1;
 
         if (current_delta)
