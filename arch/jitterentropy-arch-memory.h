@@ -45,20 +45,27 @@
  * Provides (defined in arch/jitterentropy-arch-memory.c):
  *   - jent_zalloc(len): allocate zeroed memory, locked into RAM where the
  *     platform supports it (mlock, VirtualLock, libgcrypt secmem, OpenSSL
- *     secure heap, ...). jent_zalloc_large() is the same for larger buffers.
+ *     secure heap, ...). jent_zalloc_large() is the same for larger buffers;
+ *     raise JENT_SECURE_MEMORY_SIZE_MAX (and the memlock limits) when
+ *     requesting memory sizes beyond the default secure-arena capacity.
  *   - jent_zfree(ptr, len): zero and release memory previously allocated
  *     with jent_zalloc() or jent_zalloc_large().
  *   - jent_memset_secure(s, n): wipe a buffer in a way the compiler may
  *     not optimize away.
  *
  * The dispatch order is:
- *   - LIBGCRYPT     -> gcry_xmalloc_secure / gcry_free
+ *   - LIBGCRYPT     -> gcry_malloc_secure / gcry_free
  *   - AWSLC         -> OPENSSL_malloc / OPENSSL_free (auto-wipe)
  *   - OPENSSL       -> OPENSSL_secure_malloc / OPENSSL_secure_free
- *   - Windows       -> VirtualAlloc + VirtualLock (or plain malloc with
+ *   - Windows       -> VirtualAlloc + VirtualLock with PAGE_NOACCESS guard
+ *                      pages around the payload (or plain malloc with
  *                      JENT_CONF_RELAX_MLOCK)
- *   - Linux/BSD/Mac -> malloc + mlock (or plain malloc with
- *                      JENT_CONF_RELAX_MLOCK)
+ *   - Linux/BSD/Mac -> mmap + mlock with PROT_NONE guard pages around the
+ *                      payload; additionally excluded from core dumps via
+ *                      madvise(MADV_DONTDUMP) on Linux and
+ *                      madvise(MADV_NOCORE) on FreeBSD, best effort. With
+ *                      JENT_CONF_RELAX_MLOCK only the mlock failure is
+ *                      tolerated; the layout is unchanged.
  *   - Linux Kernel  -> kvmalloc + jent_memset_secure
  *   - other         -> plain malloc
  *
