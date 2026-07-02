@@ -44,7 +44,19 @@
 
 #ifdef LINUX_KERNEL
 
-#include <linux/module.h>
+/*
+ * Deliberately avoid <linux/module.h> here: it transitively pulls in almost the
+ * entire kernel header tree (sched.h, slab.h, rwsem.h, ...), and this header is
+ * included by the entropy-collection core which must be compiled with -O0 (see
+ * the __OPTIMIZE__ guard in src/jitterentropy-base.c). Several of those headers
+ * (e.g. the asm_inline in <linux/rwsem.h>) do not compile at -O0 on modern
+ * kernels. Only the lightweight, -O0-safe headers providing the types and
+ * helpers used by the core are pulled in. The kernel interface glue
+ * (jitterentropy_kcapi.c and friends) includes <linux/module.h> itself.
+ */
+#include <linux/limits.h>
+#include <linux/minmax.h>	/* min()/max()/min_t()/max_t() */
+#include <linux/types.h>	/* uintN_t, size_t, ssize_t, bool, NULL */
 
 #else /* LINUX_KERNEL */
 
