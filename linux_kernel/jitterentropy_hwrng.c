@@ -21,10 +21,14 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
 
 #include "jitterentropy.h"
+#include "jitterentropy_error.h"
 #include "jitterentropy_hwrng.h"
+#include "jitterentropy_proc.h"
 
 /*
  * The OSR and flags used to allocate the Jitter RNG instance are shared with
@@ -76,7 +80,7 @@ static int jent_hwrng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 	mutex_unlock(&ctx->lock);
 
 	if (ret < 0)
-		return -EFAULT;
+		return jent_map_read_error(ret);
 
 	return (int)ret;
 }
@@ -85,6 +89,50 @@ static struct hwrng jent_hwrng = {
 	.name	= "jitterentropy",
 	.read	= jent_hwrng_read,
 };
+
+/*
+ * Status of the global hwrng Jitter RNG instance, exported read-only as
+ * /proc/jitter_rng/hwrng_status. Reading it emits the JSON status string
+ * produced by jent_status() (version, health-test state, runtime environment
+ * and configuration) for the single instance backing /dev/hwrng.
+ */
+#define JENT_HWRNG_PROC_NAME	"hwrng_status"
+#define JENT_HWRNG_STATUS_BUF_SIZE 4096
+
+static struct proc_dir_entry *jent_hwrng_proc;
+
+static int jent_hwrng_proc_status_show(struct seq_file *m, void *v)
+{
+	struct jent_hwrng_ctx *ctx = &jent_hwrng_ctx;
+	char *buf;
+	int ret;
+
+	buf = kzalloc(JENT_HWRNG_STATUS_BUF_SIZE, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	/*
+	 * The status is derived from the collector state; hold the same lock as
+	 * the read path, which may reallocate the collector on health-test
+	 * recovery, so it cannot be freed underneath jent_status().
+	 */
+	mutex_lock(&ctx->lock);
+	if (ctx->entropy_collector)
+		ret = jent_status(ctx->entropy_collector, buf,
+				  JENT_HWRNG_STATUS_BUF_SIZE);
+	else
+		ret = -1;
+	mutex_unlock(&ctx->lock);
+
+	if (ret) {
+		kfree(buf);
+		return -EIO;
+	}
+
+	seq_puts(m, buf);
+	kfree(buf);
+	return 0;
+}
 
 int jent_hwrng_init(void)
 {
@@ -115,11 +163,33 @@ int jent_hwrng_init(void)
 	pr_info("jitterentropy: hwrng device '%s' registered\n",
 		jent_hwrng.name);
 
+	/*
+	 * Non-fatal: the hwrng device is fully functional without the status
+	 * export, so a failure here (or a kernel built without CONFIG_PROC_FS,
+	 * where jent_proc_dir is NULL) must not abort registration.
+	 */
+	if (jent_proc_dir) {
+		jent_hwrng_proc = proc_create_single(JENT_HWRNG_PROC_NAME, 0444,
+						     jent_proc_dir,
+						     jent_hwrng_proc_status_show);
+		if (!jent_hwrng_proc)
+			pr_warn("jitterentropy: failed to create /proc/%s/%s\n",
+				JENT_PROC_DIRNAME, JENT_HWRNG_PROC_NAME);
+	}
+
 	return 0;
 }
 
 void jent_hwrng_exit(void)
 {
+	/*
+	 * Remove the status export first: proc_remove() waits for any in-flight
+	 * reader to leave jent_hwrng_proc_status_show() before returning, so the
+	 * collector can subsequently be freed without racing a reader.
+	 */
+	proc_remove(jent_hwrng_proc);
+	jent_hwrng_proc = NULL;
+
 	hwrng_unregister(&jent_hwrng);
 
 	if (jent_hwrng_ctx.entropy_collector) {

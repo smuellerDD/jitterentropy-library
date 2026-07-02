@@ -8,10 +8,19 @@
 #include <crypto/rng.h>
 #include <linux/debugfs.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/uaccess.h>
 
 #include "jitterentropy-noise.h"
 #include "jitterentropy.h"
+
+/*
+ * Serialize the whole extract session (enable recording -> collect -> drain ->
+ * disable recording). The ring buffer spinlock only protects individual word
+ * operations; without this lock two concurrent debugfs readers would interleave
+ * jent_testing_data_init()/jent_testing_fini() and corrupt each other's data.
+ */
+static DEFINE_MUTEX(jent_testing_read_lock);
 
 #define JENT_TEST_RINGBUFFER_SIZE	(1<<10)
 #define JENT_TEST_RINGBUFFER_MASK	(JENT_TEST_RINGBUFFER_SIZE - 1)
@@ -134,8 +143,15 @@ static bool jent_testing_store(struct jent_testing *data, u64 value,
 			      JENT_TEST_RINGBUFFER_MASK] = value;
 	atomic_inc(&data->rb_writer);
 
-	/* If writer starts to overtake reader, push the reader */
-	if ((u32)atomic_read(&data->rb_writer) == data->rb_reader)
+	/*
+	 * If the writer wraps around and catches up with the reader, push the
+	 * reader. The free-running counters must be compared masked, matching
+	 * jent_testing_have_data(); an unmasked comparison is essentially never
+	 * true once the writer has advanced, so a full ring would go undetected
+	 * and unread samples would be silently overwritten.
+	 */
+	if ((((u32)atomic_read(&data->rb_writer)) & JENT_TEST_RINGBUFFER_MASK) ==
+	    (data->rb_reader & JENT_TEST_RINGBUFFER_MASK))
 		data->rb_reader++;
 
 	spin_unlock_irqrestore(&data->lock, lock_flags);
@@ -229,7 +245,7 @@ static int jent_testing_log(struct rand_data *ec)
 	logged_osr = testing_osr;
 	logged_flags = testing_flags;
 
-#define JENT_STATUS_BUF_SIZE 1000
+#define JENT_STATUS_BUF_SIZE 4096
 	buf = kzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
@@ -270,6 +286,10 @@ static ssize_t jent_testing_extract_user(
 	if (!nbytes)
 		return 0;
 
+	/* Only one extract session may use the shared ring buffer at a time. */
+	if (mutex_lock_interruptible(&jent_testing_read_lock))
+		return -ERESTARTSYS;
+
 	ec = jent_entropy_collector_alloc(testing_osr, testing_flags);
 	if (!ec) {
 		ret = -ENOMEM;
@@ -298,7 +318,13 @@ static ssize_t jent_testing_extract_user(
 	while (nbytes) {
 		loff_t ppos = 0;
 		ssize_t count;
-		u32 i;
+		/*
+		 * Signed: reader() returns an int that can be negative
+		 * (-ERESTARTSYS). A u32 here would make the i <= 0 / i < 0
+		 * error checks below dead, letting a negative return be treated
+		 * as a huge length and overflow the user buffer.
+		 */
+		int i;
 
 		if (large_request && need_resched()) {
 			if (signal_pending(current)) {
@@ -309,7 +335,19 @@ static ssize_t jent_testing_extract_user(
 			schedule();
 		}
 
-		i = min_t(u32, nbytes, JENT_TESTING_READ_BUF_SIZE);
+		i = (int)min_t(size_t, nbytes, JENT_TESTING_READ_BUF_SIZE);
+
+		/*
+		 * Prime the common measurement (initialize ec->prev_time)
+		 * before recording is enabled so the throw-away delta computed
+		 * from the unprimed previous time stamp is not stored into the
+		 * ring buffer. The NTG.1 hash-loop and memory-access variants
+		 * prime themselves and need no separate priming.
+		 */
+		if ((testing_flags & (JENT_TEST_COMMON | JENT_TEST_HASHLOOP |
+				      JENT_TEST_MEMACCLOOP)) &&
+		    measure_jitter == jent_measure_jitter)
+			jent_measure_jitter(ec, 0, NULL);
 
 		/* Enable recording of data */
 		jent_testing_data_init(data, *boot);
@@ -322,9 +360,6 @@ static ssize_t jent_testing_extract_user(
 				     JENT_TEST_MEMACCLOOP )) {
 			unsigned int ctr;
 
-			/* Prime */
-			if (measure_jitter == jent_measure_jitter)
-				jent_measure_jitter(ec, 0, NULL);
 			for (ctr = 0; ctr < i / sizeof(u64); ctr++) {
 				/* Disregard stuck indicator */
 				measure_jitter(ec, 0, NULL);
@@ -371,6 +406,7 @@ out:
 		jent_entropy_collector_free(ec);
 	if (tmp)
 		kfree_sensitive(tmp);
+	mutex_unlock(&jent_testing_read_lock);
 	return ret;
 }
 
