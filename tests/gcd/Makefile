@@ -99,7 +99,7 @@ endif
 # Define files to be compiled
 #
 ###############################################################################
-C_SRCS := $(wildcard *.c) ../../src/jitterentropy-gcd.c
+C_SRCS := $(wildcard *.c) ../../src/jitterentropy-gcd.c ../../arch/jitterentropy-arch-memory.c
 C_OBJS := ${C_SRCS:.c=.o}
 C_GCOV := ${C_SRCS:.c=.gcda}
 C_GCOV += ${C_SRCS:.c=.gcno}
