@@ -194,7 +194,8 @@ static int jent_testing_reader(struct jent_testing *data, u32 *boot,
 			goto out;
 		}
 
-		memcpy(outbuf, &data->jent_testing_rb[data->rb_reader],
+		memcpy(outbuf, &data->jent_testing_rb[data->rb_reader &
+						      JENT_TEST_RINGBUFFER_MASK],
 		       sizeof(u64));
 
 		data->rb_reader++;
