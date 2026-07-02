@@ -10,6 +10,7 @@
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 
 #include "jitterentropy-noise.h"
@@ -128,7 +129,12 @@ static bool jent_testing_store(struct jent_testing *data, u64 value,
 	 * is filled.
 	 */
 	if (*boot) {
-		if (((u32)atomic_read(&data->rb_writer)) >
+		/*
+		 * >=: the counter holds the number of samples already stored,
+		 * so stop before storing sample RINGBUFFER_SIZE + 1, which
+		 * would wrap around and overwrite the first boot sample.
+		 */
+		if (((u32)atomic_read(&data->rb_writer)) >=
 		     JENT_TEST_RINGBUFFER_SIZE) {
 			*boot = 2;
 			pr_warn_once("One time data collection test disabled\n");
@@ -306,8 +312,14 @@ static ssize_t jent_testing_extract_user(
 	 * 8000 bytes of memory. Instead, we allocate space for only 125
 	 * samples, which will allow the user to collect all 1000 samples using
 	 * 8 calls to this interface.
+	 *
+	 * The allocation carries one extra u64 of alignment slack for
+	 * PTR_ALIGN(); only JENT_TESTING_DATA_SIZE bytes are guaranteed to be
+	 * available behind the aligned pointer, so all read lengths must be
+	 * bounded by the data size, not the allocation size.
 	 */
-#define JENT_TESTING_READ_BUF_SIZE (125 * sizeof(u64) + sizeof(u64))
+#define JENT_TESTING_DATA_SIZE     (125 * sizeof(u64))
+#define JENT_TESTING_READ_BUF_SIZE (JENT_TESTING_DATA_SIZE + sizeof(u64))
 	tmp = kvmalloc(JENT_TESTING_READ_BUF_SIZE, GFP_KERNEL);
 	if (!tmp) {
 		ret = -ENOMEM;
@@ -317,7 +329,8 @@ static ssize_t jent_testing_extract_user(
 	tmp_aligned = PTR_ALIGN(tmp, sizeof(u64));
 
 	while (nbytes) {
-		loff_t ppos = 0;
+		/* Local offset into tmp_aligned; unrelated to the file *ppos. */
+		loff_t tmp_ppos = 0;
 		ssize_t count;
 		/*
 		 * Signed: reader() returns an int that can be negative
@@ -336,7 +349,7 @@ static ssize_t jent_testing_extract_user(
 			schedule();
 		}
 
-		i = (int)min_t(size_t, nbytes, JENT_TESTING_READ_BUF_SIZE);
+		i = (int)min_t(size_t, nbytes, JENT_TESTING_DATA_SIZE);
 
 		/*
 		 * Prime the common measurement (initialize ec->prev_time)
@@ -368,6 +381,14 @@ static ssize_t jent_testing_extract_user(
 
 		} else {
 			int rc = jent_read_entropy(ec, random, sizeof(random));
+
+			/*
+			 * The generated random data itself is discarded (only
+			 * the raw timing samples are of interest); do not
+			 * leave it on the stack.
+			 */
+			memzero_explicit(random, sizeof(random));
+
 			if (rc < 0) {
 				jent_testing_fini(data, *boot);
 				ret = -EFAULT;
@@ -387,16 +408,26 @@ static ssize_t jent_testing_extract_user(
 			break;
 		}
 
-		count = simple_read_from_buffer(buf, i, &ppos, tmp_aligned,
-						JENT_TESTING_READ_BUF_SIZE);
+		count = simple_read_from_buffer(buf, i, &tmp_ppos, tmp_aligned,
+						JENT_TESTING_DATA_SIZE);
 		if (count < 0) {
-			ret = count;
+			if (ret == 0)
+				ret = count;
 			goto out;
 		}
 
-		nbytes -= i;
-		buf += i;
-		ret += i;
+		/* Advance by what was actually copied out. */
+		nbytes -= count;
+		buf += count;
+		ret += count;
+
+		/*
+		 * A short copy means copy_to_user() faulted part-way into the
+		 * user buffer; return the short read instead of retrying (and
+		 * over-reporting the data actually delivered).
+		 */
+		if (count != i)
+			break;
 	}
 
 	if (ret > 0)

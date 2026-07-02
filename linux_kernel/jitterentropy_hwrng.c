@@ -70,7 +70,18 @@ static int jent_hwrng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 	if (!max)
 		return 0;
 
-	mutex_lock(&ctx->lock);
+	/*
+	 * Jitter entropy collection is CPU-bound and slow, and the mutex may be
+	 * held by another reader for a long time. A non-blocking caller
+	 * (wait == false) must not sleep on it; report "no data available"
+	 * instead so the hwrng core can fall back or retry.
+	 */
+	if (!wait) {
+		if (!mutex_trylock(&ctx->lock))
+			return 0;
+	} else {
+		mutex_lock(&ctx->lock);
+	}
 	/*
 	 * jent_read_entropy_safe() reallocates the collector on intermittent
 	 * health-test failures, hence the indirection. It returns the number
@@ -148,6 +159,9 @@ int jent_hwrng_init(void)
 		return -ENOMEM;
 	}
 
+	if (hwrng_quality > 1024)
+		pr_warn("jitterentropy: hwrng_quality %u out of range, clamping to 1024\n",
+			hwrng_quality);
 	jent_hwrng.quality = (unsigned short)min_t(unsigned int, hwrng_quality,
 						   1024);
 
