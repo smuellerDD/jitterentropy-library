@@ -10,6 +10,7 @@
 #include <crypto/sha3.h>
 #include <linux/fips.h>
 #include <linux/kernel.h>
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/time.h>
@@ -71,7 +72,7 @@ static int jent_kcapi_log(struct jitterentropy *rng)
 		return 0;
 
 #define JENT_STATUS_BUF_SIZE 4096
-	buf = kzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
@@ -84,7 +85,7 @@ static int jent_kcapi_log(struct jitterentropy *rng)
 	pr_notice_ratelimited("%s\n", buf);
 
 err:
-	kfree(buf);
+	kvfree(buf);
 	return ret;
 }
 
