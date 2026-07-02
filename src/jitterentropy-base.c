@@ -250,6 +250,9 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		len = ssize_max;
 	orig_len = len;
 
+	/* Account for this generation call (see struct rand_data). */
+	ec->read_invocations++;
+
 	if (jent_notime_settick(ec))
 		return -4;
 
@@ -322,6 +325,11 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 
 err:
 	jent_notime_unsettick(ec);
+
+	/* Count only the bytes actually delivered to the caller. */
+	if (!ret)
+		ec->bytes_output += orig_len;
+
 	return ret ? ret : (ssize_t)orig_len;
 }
 
@@ -387,6 +395,10 @@ static int jent_health_failure_reset(
 	 */
 	memcpy(new_ec->uuid, (*ec)->uuid, sizeof(new_ec->uuid));
 	new_ec->reinit_count = (*ec)->reinit_count + 1;
+
+	/* Preserve the lifetime output accounting across the reallocation. */
+	new_ec->read_invocations = (*ec)->read_invocations;
+	new_ec->bytes_output = (*ec)->bytes_output;
 
 	jent_entropy_collector_free(*ec);
 	*ec = new_ec;
@@ -475,6 +487,17 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			if (jent_health_failure_reset(
 				ec, _jent_entropy_collector_alloc))
 				return ret;
+
+			/*
+			 * The failed jent_read_entropy() call above already
+			 * counted an invocation, and the retry below will count
+			 * another. Undo the failed attempt so that a single
+			 * caller request maps to exactly one invocation
+			 * regardless of how many reinitializations the retry
+			 * loop performs. The counter was carried over into the
+			 * reallocated collector and is >= 1 here.
+			 */
+			(*ec)->read_invocations--;
 
 			/*
 			 * We are not returning the intermittent errors here.

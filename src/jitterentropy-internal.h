@@ -358,6 +358,21 @@ struct rand_data
 	 */
 	unsigned int reinit_count;
 
+	/*
+	 * Per-instance output accounting, reported by jent_status(). Both are
+	 * carried over across the identity-preserving reallocation in
+	 * jent_health_failure_reset() so the totals span the instance's whole
+	 * lifetime.
+	 *
+	 * read_invocations counts caller read requests: every jent_read_entropy()
+	 * call increments it, and jent_read_entropy_safe() decrements it once per
+	 * health-test reinitialization so that a single request still maps to one
+	 * invocation regardless of how many internal retries it takes.
+	 * bytes_output counts the random bytes actually delivered to callers.
+	 */
+	uint64_t read_invocations;
+	uint64_t bytes_output;
+
 	/* Initialization state supporting AIS 20/31 NTG.1 */
 	enum jent_startup_state startup_state;
 
