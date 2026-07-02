@@ -102,14 +102,14 @@
             machine.succeed("test -c /dev/jitterentropy")
 
             # procfs exports, including the per-instance status directory.
-            print(machine.succeed("cat /proc/jitter_rng/statistics"))
-            print(machine.succeed("cat /proc/jitter_rng/hwrng_status"))
+            print(machine.succeed("cat /proc/jitterentropy/statistics"))
+            print(machine.succeed("cat /proc/jitterentropy/hwrng_status"))
 
             # Reading opens an instance; its UUID-named status file appears.
             machine.succeed(
                 "exec 3</dev/jitterentropy; "
-                "test \"$(ls /proc/jitter_rng/instances | wc -l)\" -ge 1; "
-                "head -c 32 /proc/jitter_rng/instances/* >/dev/null; "
+                "test \"$(ls /proc/jitterentropy/instances | wc -l)\" -ge 1; "
+                "head -c 32 /proc/jitterentropy/instances/* >/dev/null; "
                 "exec 3<&-"
             )
             machine.succeed("test \"$(head -c 32 /dev/jitterentropy | wc -c)\" = 32")

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause */
 /*
- * Shared /proc/jitter_rng directory for the Jitter RNG kernel interfaces.
+ * Shared /proc/jitterentropy directory for the Jitter RNG kernel interfaces.
  *
- * The core module owns the /proc/jitter_rng directory and a statistics file
+ * The core module owns the /proc/jitterentropy directory and a statistics file
  * below it. Optional interfaces (e.g. the hwrng status) place their own files
  * under the exported @jent_proc_dir parent.
  *
@@ -15,7 +15,7 @@
 #include <linux/proc_fs.h>
 
 /* Name of the shared /proc directory. */
-#define JENT_PROC_DIRNAME "jitter_rng"
+#define JENT_PROC_DIRNAME "jitterentropy"
 
 /*
  * Parent directory for all Jitter RNG proc files. NULL if procfs is not
@@ -24,13 +24,13 @@
  */
 extern struct proc_dir_entry *jent_proc_dir;
 
-/* Create/remove /proc/jitter_rng and the statistics file. Both are non-fatal. */
+/* Create/remove /proc/jitterentropy and the statistics file. Both are non-fatal. */
 void jent_proc_init(void);
 void jent_proc_exit(void);
 
 /*
  * Account for character-device instances (one Jitter RNG entropy collector per
- * open file description). Reflected in /proc/jitter_rng/statistics.
+ * open file description). Reflected in /proc/jitterentropy/statistics.
  */
 void jent_proc_instance_inc(void);
 void jent_proc_instance_dec(void);
