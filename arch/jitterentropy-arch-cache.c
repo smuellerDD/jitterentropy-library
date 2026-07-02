@@ -276,7 +276,7 @@ static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 #define JENT_SYSFS_CACHE_DIR "/sys/devices/system/cpu/cpu0/cache"
 	long val;
 	unsigned int i;
-	char buf[10], file[50];
+	char buf[32], file[50];
 	int fd = 0;
 	ssize_t rlen;
 
@@ -319,6 +319,13 @@ static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 		} while (rlen < 0 && errno == EINTR);
 		close(fd);
 		if (rlen <= 0)
+			continue;
+		/*
+		 * A read filling the entire buffer may have truncated the
+		 * K/M suffix; parsing the bare number would undercount the
+		 * cache size 1024-fold. Skip this cache instead.
+		 */
+		if ((size_t)rlen == sizeof(buf))
 			continue;
 		buf[sizeof(buf) - 1] = '\0';
 
