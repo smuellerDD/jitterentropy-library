@@ -808,9 +808,8 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 			 * jent_memsize(->flags) would return the default size and
 			 * mis-size the free (heap overflow or partial zeroization).
 			 */
-			jent_zfree_large(
-				entropy_collector->mem,
-				(size_t)entropy_collector->memmask + 1);
+			jent_zfree(entropy_collector->mem,
+				   (size_t)entropy_collector->memmask + 1);
 			entropy_collector->mem = NULL;
 		}
 		jent_zfree(entropy_collector, sizeof(struct rand_data));
