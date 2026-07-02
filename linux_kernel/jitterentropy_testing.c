@@ -231,7 +231,7 @@ static int jent_testing_log(struct rand_data *ec)
 #define JENT_STATUS_BUF_SIZE 1000
 	buf = kzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
 	if (!buf)
-		return PTR_ERR(buf);
+		return -ENOMEM;
 
 	ret = jent_status(ec, buf, JENT_STATUS_BUF_SIZE);
 	if (ret < 0)
@@ -287,8 +287,10 @@ static ssize_t jent_testing_extract_user(
 	 */
 #define JENT_TESTING_READ_BUF_SIZE (125 * sizeof(u64) + sizeof(u64))
 	tmp = kmalloc(JENT_TESTING_READ_BUF_SIZE, GFP_KERNEL);
-	if (!tmp)
-		return -ENOMEM;
+	if (!tmp) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	tmp_aligned = PTR_ALIGN(tmp, sizeof(u64));
 
