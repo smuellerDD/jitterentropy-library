@@ -144,6 +144,7 @@ struct jent_notime_ctx {
 	pthread_attr_t notime_pthread_attr;	/* pthreads library */
 	pthread_t notime_thread_id;		/* pthreads thread ID */
 	unsigned long notime_cpu;		/* CPU the thread pins to */
+	int notime_thread_started;		/* thread successfully created? */
 };
 
 typedef void *(*jent_notime_start_routine)(void *);
@@ -152,6 +153,7 @@ typedef void *(*jent_notime_start_routine)(void *);
 struct jent_notime_ctx {
 	thrd_t notime_thread_id;		/* thread ID */
 	unsigned long notime_cpu;		/* CPU the thread pins to */
+	int notime_thread_started;		/* thread successfully created? */
 };
 
 typedef int (*jent_notime_start_routine)(void *);
@@ -264,11 +266,23 @@ static inline int jent_notime_thread_create(struct jent_notime_ctx *ctx,
 
 	if (ret)
 		return ret;
-	return -pthread_create(&ctx->notime_thread_id,
-			       &ctx->notime_pthread_attr, routine, arg);
+	ret = -pthread_create(&ctx->notime_thread_id,
+			      &ctx->notime_pthread_attr, routine, arg);
+	if (ret) {
+		/*
+		 * The thread was not created: destroy the attr (otherwise it
+		 * leaks) and leave notime_thread_started clear so the matching
+		 * join does not operate on an uninitialized thread ID.
+		 */
+		pthread_attr_destroy(&ctx->notime_pthread_attr);
+		return ret;
+	}
+	ctx->notime_thread_started = 1;
+	return 0;
 #else
 	switch (thrd_create(&ctx->notime_thread_id, routine, arg)) {
 	case thrd_success:
+		ctx->notime_thread_started = 1;
 		return 0;
 	case thrd_nomem:
 		return -ENOMEM;
@@ -286,12 +300,21 @@ static inline int jent_notime_thread_create(struct jent_notime_ctx *ctx,
 /* Wait for the counting thread to terminate and release its resources. */
 static inline void jent_notime_thread_join(struct jent_notime_ctx *ctx)
 {
+	/*
+	 * Nothing to do if the thread was never created. Joining a zeroed/
+	 * uninitialized thread ID is undefined behavior (e.g. a crash or
+	 * ESRCH) and would be reached on every thread-creation failure.
+	 */
+	if (!ctx->notime_thread_started)
+		return;
+
 #ifdef JENT_PTHREAD
 	pthread_join(ctx->notime_thread_id, NULL);
 	pthread_attr_destroy(&ctx->notime_pthread_attr);
 #else
 	thrd_join(ctx->notime_thread_id, NULL);
 #endif
+	ctx->notime_thread_started = 0;
 }
 
 #else /* freestanding: LINUX_KERNEL / FREEBSD_KERNEL / BAREMETAL */
