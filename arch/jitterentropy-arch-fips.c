@@ -3,9 +3,9 @@
  * Architecture / OS-specific FIPS mode detection.
  *
  * Definition of jent_fips_enabled() (declared in
- * arch/jitterentropy-arch-fips.h). The crypto-library branches expect the
- * relevant headers (gcrypt.h / openssl/evp.h) to have been included by the
- * consumer; jitterentropy-internal.h pulls them in via the memory backend.
+ * arch/jitterentropy-arch-fips.h). The crypto-library branches include the
+ * relevant headers (gcrypt.h / openssl) themselves; only .c files include
+ * these headers (the arch headers intentionally include nothing).
  *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
  */
@@ -23,6 +23,16 @@ int jent_fips_enabled(void)
 }
 
 #else /* LINUX_KERNEL */
+
+#ifdef LIBGCRYPT
+# include <gcrypt.h>
+#endif
+#ifdef AWSLC
+# include <openssl/crypto.h>
+#endif
+#ifdef OPENSSL
+# include <openssl/evp.h>
+#endif
 
 #if !defined(LIBGCRYPT) && !defined(AWSLC) && !defined(OPENSSL) && \
     !defined(_MSC_VER) && !defined(__MINGW32__)
