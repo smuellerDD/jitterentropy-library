@@ -90,6 +90,7 @@
             environment.shellAliases = {
               "jitter_hwrng" = "echo jitterentropy > /sys/class/misc/hw_random/rng_current";
               "show_hwrng" = "cat /sys/class/misc/hw_random/rng_current";
+              "kcapi_read" = "kcapi-rng -n jitter_rng -b 32 --hex";
             };
           };
 
