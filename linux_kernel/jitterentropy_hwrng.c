@@ -19,6 +19,7 @@
 
 #include <linux/hw_random.h>
 #include <linux/kernel.h>
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/proc_fs.h>
@@ -107,7 +108,7 @@ static int jent_hwrng_proc_status_show(struct seq_file *m, void *v)
 	char *buf;
 	int ret;
 
-	buf = kzalloc(JENT_HWRNG_STATUS_BUF_SIZE, GFP_KERNEL);
+	buf = kvzalloc(JENT_HWRNG_STATUS_BUF_SIZE, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
@@ -125,12 +126,12 @@ static int jent_hwrng_proc_status_show(struct seq_file *m, void *v)
 	mutex_unlock(&ctx->lock);
 
 	if (ret) {
-		kfree(buf);
+		kvfree(buf);
 		return -EIO;
 	}
 
 	seq_puts(m, buf);
-	kfree(buf);
+	kvfree(buf);
 	return 0;
 }
 

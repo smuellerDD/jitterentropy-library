@@ -21,11 +21,11 @@ that can be set accordingly.
 
 ## Supported Kernel Versions
 
-The kernel support builds against Linux 5.10 and every newer release. 5.10 is
-the baseline because it is the first kernel providing `kfree_sensitive()` (used
-by the character-device and test interfaces) under its current name. Building
-against an older kernel is rejected at compile time with an explicit error (see
-`jitterentropy_compat.h`).
+The kernel support builds against Linux 5.10 and every newer release. 5.10 is a
+conservative baseline; all kernel APIs used by these interfaces (including
+`kvfree_sensitive()`, available since 5.7, used by the character-device and test
+interfaces) predate it. Building against an older kernel is rejected at compile
+time with an explicit error (see `jitterentropy_compat.h`).
 
 ## Build as Standalone Kernel Module
 

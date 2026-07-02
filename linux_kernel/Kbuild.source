@@ -43,8 +43,13 @@ jitter_rng-y += ../src/jitterentropy-base.o				       \
 		../src/jitterentropy-sha3.o				       \
 		../src/jitterentropy-status.o				       \
 		../src/jitterentropy-timer.o				       \
+		../arch/jitterentropy-arch-memory.o			       \
+		../arch/jitterentropy-arch-sched.o			       \
+		../arch/jitterentropy-arch-cache.o			       \
+		../arch/jitterentropy-arch-fips.o			       \
+		../arch/jitterentropy-arch-ncpu.o			       \
+		../arch/jitterentropy-arch-uuid.o			       \
 		jitterentropy_kcapi.o					       \
-		jitterentropy_mem.o					       \
 		jitterentropy_proc.o
 
 jitter_rng_c_args_zero = -O0 $(jitter_rng_c_args)
@@ -56,8 +61,13 @@ CFLAGS_../src/jitterentropy-noise.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_c_args)
 CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
+CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-ncpu.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-uuid.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_kcapi.o = $(jitter_rng_c_args)
-CFLAGS_jitterentropy_mem.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
 
 ######################### Character Device Compilation #########################

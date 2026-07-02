@@ -17,6 +17,7 @@
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/proc_fs.h>
@@ -68,7 +69,7 @@ static int jent_chardev_instance_status_show(struct seq_file *m, void *v)
 	char *buf;
 	int ret;
 
-	buf = kzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
@@ -81,12 +82,12 @@ static int jent_chardev_instance_status_show(struct seq_file *m, void *v)
 	mutex_unlock(&ctx->lock);
 
 	if (ret) {
-		kfree(buf);
+		kvfree(buf);
 		return -EIO;
 	}
 
 	seq_puts(m, buf);
-	kfree(buf);
+	kvfree(buf);
 	return 0;
 }
 
@@ -117,7 +118,7 @@ static int jent_chardev_open(struct inode *inode, struct file *file)
 {
 	struct jent_chardev_ctx *ctx;
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	ctx = kvzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 
@@ -126,7 +127,7 @@ static int jent_chardev_open(struct inode *inode, struct file *file)
 	ctx->entropy_collector = jent_entropy_collector_alloc(osr, flags);
 	if (!ctx->entropy_collector) {
 		mutex_destroy(&ctx->lock);
-		kfree(ctx);
+		kvfree(ctx);
 		return -ENOMEM;
 	}
 
@@ -159,7 +160,7 @@ static int jent_chardev_release(struct inode *inode, struct file *file)
 	if (ctx->entropy_collector)
 		jent_entropy_collector_free(ctx->entropy_collector);
 	mutex_destroy(&ctx->lock);
-	kfree(ctx);
+	kvfree(ctx);
 	file->private_data = NULL;
 
 	jent_proc_instance_dec();
@@ -180,7 +181,7 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 	if (!nbytes)
 		return 0;
 
-	tmp = kmalloc(JENT_CHARDEV_READ_BUF_SIZE, GFP_KERNEL);
+	tmp = kvmalloc(JENT_CHARDEV_READ_BUF_SIZE, GFP_KERNEL);
 	if (!tmp)
 		return -ENOMEM;
 
@@ -236,7 +237,7 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 	mutex_unlock(&ctx->lock);
 
 out:
-	kfree_sensitive(tmp);
+	kvfree_sensitive(tmp, JENT_CHARDEV_READ_BUF_SIZE);
 	return ret;
 }
 
@@ -260,7 +261,7 @@ static long jent_chardev_ioctl_status(struct jent_chardev_ctx *ctx,
 	if (copy_from_user(&status, arg, sizeof(status)))
 		return -EFAULT;
 
-	buf = kzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
@@ -304,7 +305,7 @@ static long jent_chardev_ioctl_status(struct jent_chardev_ctx *ctx,
 	ret = 0;
 
 out:
-	kfree(buf);
+	kvfree(buf);
 	return ret;
 }
 

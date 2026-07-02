@@ -7,6 +7,7 @@
 
 #include <crypto/rng.h>
 #include <linux/debugfs.h>
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/uaccess.h>
@@ -246,7 +247,7 @@ static int jent_testing_log(struct rand_data *ec)
 	logged_flags = testing_flags;
 
 #define JENT_STATUS_BUF_SIZE 4096
-	buf = kzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
@@ -257,7 +258,7 @@ static int jent_testing_log(struct rand_data *ec)
 	pr_notice_ratelimited("%s\n", buf);
 
 err:
-	kfree(buf);
+	kvfree(buf);
 	return ret;
 }
 
@@ -307,7 +308,7 @@ static ssize_t jent_testing_extract_user(
 	 * 8 calls to this interface.
 	 */
 #define JENT_TESTING_READ_BUF_SIZE (125 * sizeof(u64) + sizeof(u64))
-	tmp = kmalloc(JENT_TESTING_READ_BUF_SIZE, GFP_KERNEL);
+	tmp = kvmalloc(JENT_TESTING_READ_BUF_SIZE, GFP_KERNEL);
 	if (!tmp) {
 		ret = -ENOMEM;
 		goto out;
@@ -405,7 +406,7 @@ out:
 	if (ec)
 		jent_entropy_collector_free(ec);
 	if (tmp)
-		kfree_sensitive(tmp);
+		kvfree_sensitive(tmp, JENT_TESTING_READ_BUF_SIZE);
 	mutex_unlock(&jent_testing_read_lock);
 	return ret;
 }
