@@ -177,6 +177,17 @@ configuration):
 
 	cat /proc/jitter_rng/hwrng_status | jq .
 
+Note on the `output` counters in this status: they count the bytes *generated*
+by the Jitter RNG instance, which is more than the bytes read from
+`/dev/hwrng`. The hw_random core always pulls a full kernel buffer
+(`rng_buffer_size()`, typically 64 bytes) from the driver and serves user
+reads from that cache, so e.g. a single 32-byte read shows up as 64 generated
+bytes. The divergence is bounded by one buffer size; additionally, the
+in-kernel hwrng entropy thread consumes bytes when the effective quality is
+non-zero. The character-device instance counters
+(`/proc/jitter_rng/instances/`) have no such intermediary and match the bytes
+delivered to the reader exactly.
+
 # Linux Kernel Jitter RNG procfs Interface
 
 When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
