@@ -89,22 +89,6 @@ unsigned int jent_version(void)
 	return JENT_VERSION;
 }
 
-/*
- * jent_secure_memory_supported() - Return if secure memory is used
- *
- * Secure memory uses guard pages, swap protection and zeroize on
- * free.
- */
-JENT_PRIVATE_STATIC
-int jent_secure_memory_supported(void)
-{
-#ifdef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
-	return 1;
-#else
-	return 0;
-#endif
-}
-
 /***************************************************************************
  * Helper
  ***************************************************************************/
@@ -333,9 +317,8 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	 * pros and cons considering that the SHA3 operation is not that
 	 * expensive.
 	 */
-#ifndef CONFIG_CRYPTO_CPU_JITTERENTROPY_SECURE_MEMORY
-	jent_read_random_block(ec, NULL, 0);
-#endif
+	if (!jent_secure_memory_supported())
+		jent_read_random_block(ec, NULL, 0);
 
 err:
 	jent_notime_unsettick(ec);
