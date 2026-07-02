@@ -61,6 +61,7 @@ static void jent_kcapi_cleanup(struct crypto_tfm *tfm)
 	rng->entropy_collector = NULL;
 
 	mutex_unlock(&rng->jent_lock);
+	mutex_destroy(&rng->jent_lock);
 }
 
 static int jent_kcapi_log(struct jitterentropy *rng)
@@ -92,29 +93,22 @@ err:
 static int jent_kcapi_init(struct crypto_tfm *tfm)
 {
 	struct jitterentropy *rng = crypto_tfm_ctx(tfm);
-	int ret = 0;
 
 	mutex_init(&rng->jent_lock);
 
 	rng->entropy_collector = jent_entropy_collector_alloc(osr, flags);
-
 	if (!rng->entropy_collector) {
-		ret = -ENOMEM;
-		goto err;
+		mutex_destroy(&rng->jent_lock);
+		return -ENOMEM;
 	}
 
-	ret = jent_kcapi_log(rng);
-	if (ret)
-		goto err;
+	/*
+	 * Best-effort verbose logging: a failure to allocate the status buffer
+	 * must not fail the tfm initialization.
+	 */
+	jent_kcapi_log(rng);
 
 	return 0;
-
-err:
-	if (rng->entropy_collector) {
-		jent_entropy_collector_free(rng->entropy_collector);
-		rng->entropy_collector = NULL;
-	}
-	return ret;
 }
 
 static int jent_kcapi_random(struct crypto_rng *tfm,
@@ -123,12 +117,19 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 {
 	struct jitterentropy *rng = crypto_rng_ctx(tfm);
 	struct rand_data *ec;
+	bool reallocated;
 	int ret = 0;
 
 	mutex_lock(&rng->jent_lock);
 
 	ec = rng->entropy_collector;
 	ret = jent_read_entropy_safe(&rng->entropy_collector, rdata, dlen);
+
+	/*
+	 * Detect a collector reallocation on health-test recovery while still
+	 * holding the lock; rng->entropy_collector must not be read unlocked.
+	 */
+	reallocated = (ec != rng->entropy_collector);
 
 	if (ret >= 0) {
 		/*
@@ -148,7 +149,7 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 
 	mutex_unlock(&rng->jent_lock);
 
-	if (verbose && ec != rng->entropy_collector) {
+	if (verbose && reallocated) {
 		/*
 		 * The entropy collector was reallocated
 		 *

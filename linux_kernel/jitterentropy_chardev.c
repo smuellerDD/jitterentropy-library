@@ -270,7 +270,15 @@ static long jent_chardev_ioctl_status(struct jent_chardev_ctx *ctx,
 		goto out;
 	}
 
-	ret = jent_status(ctx->entropy_collector, buf, JENT_STATUS_MAX_LEN);
+	/*
+	 * Without a collector, jent_status() would emit a version-only JSON
+	 * stub; report an error instead, matching the per-instance proc file.
+	 */
+	if (ctx->entropy_collector)
+		ret = jent_status(ctx->entropy_collector, buf,
+				  JENT_STATUS_MAX_LEN);
+	else
+		ret = -1;
 	mutex_unlock(&ctx->lock);
 
 	if (ret) {
