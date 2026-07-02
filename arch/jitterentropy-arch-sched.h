@@ -71,67 +71,11 @@
 #ifndef _JITTERENTROPY_ARCH_SCHED_H
 #define _JITTERENTROPY_ARCH_SCHED_H
 
-#ifdef LINUX_KERNEL
-
 /*
- * jent_yield() is provided out-of-line (implemented in
- * linux_kernel/jitterentropy_mem.c) so <linux/sched.h> is not pulled into the
- * -O0 entropy-collection core, which cannot compile modern kernel headers at
- * -O0 (see arch/jitterentropy-arch-memory.h and linux_kernel/Kbuild.source).
+ * Combine a CPU-level pause hint (to ease SMT and power contention while the
+ * caller is busy-waiting) with an OS-level scheduler yield. Defined in
+ * arch/jitterentropy-arch-sched.c.
  */
-# define JENT_ARCH_SCHED_LINUX_KERNEL
-
-#else /* LINUX_KERNEL */
-
-#if defined(_MSC_VER) || defined(__MINGW32__)
-# include <windows.h>
-# define JENT_ARCH_SCHED_OS_WINDOWS
-#elif defined(__unix__) || defined(__APPLE__) || defined(_AIX) || \
-      defined(__sun)    || defined(__HAIKU__) || defined(__CYGWIN__)
-# include <sched.h>
-# define JENT_ARCH_SCHED_OS_POSIX
-#endif
-
-#if defined(__x86_64__) || defined(__i386__) || \
-    defined(_M_X64)     || defined(_M_IX86)
-# if defined(_MSC_VER)
-#  include <intrin.h>
-# else
-#  include <x86intrin.h>
-# endif
-# define JENT_ARCH_SCHED_PAUSE_X86
-#elif defined(__aarch64__) || \
-      (defined(__arm__) && defined(__ARM_ARCH) && __ARM_ARCH >= 7)
-# define JENT_ARCH_SCHED_PAUSE_ARM
-#elif defined(__powerpc) || defined(__powerpc__)
-# define JENT_ARCH_SCHED_PAUSE_POWERPC
-#endif
-
-#endif /* LINUX_KERNEL */
-
-#ifdef JENT_ARCH_SCHED_LINUX_KERNEL
-
 void jent_yield(void);
-
-#else /* !JENT_ARCH_SCHED_LINUX_KERNEL */
-
-static inline void jent_yield(void)
-{
-#if defined(JENT_ARCH_SCHED_PAUSE_X86)
-	_mm_pause();
-#elif defined(JENT_ARCH_SCHED_PAUSE_ARM)
-	__asm__ __volatile__("yield" ::: "memory");
-#elif defined(JENT_ARCH_SCHED_PAUSE_POWERPC)
-	__asm__ __volatile__("or 27,27,27" ::: "memory");
-#endif
-
-#if defined(JENT_ARCH_SCHED_OS_WINDOWS)
-	SwitchToThread();
-#elif defined(JENT_ARCH_SCHED_OS_POSIX)
-	(void)sched_yield();
-#endif
-}
-
-#endif /* JENT_ARCH_SCHED_LINUX_KERNEL */
 
 #endif /* _JITTERENTROPY_ARCH_SCHED_H */
