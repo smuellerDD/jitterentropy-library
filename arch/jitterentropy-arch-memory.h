@@ -45,11 +45,11 @@
  * Provides (defined in arch/jitterentropy-arch-memory.c):
  *   - jent_zalloc(len): allocate zeroed memory, locked into RAM where the
  *     platform supports it (mlock, VirtualLock, libgcrypt secmem, OpenSSL
- *     secure heap, ...). jent_zalloc_large() is the same for larger buffers;
- *     raise JENT_SECURE_MEMORY_SIZE_MAX (and the memlock limits) when
+ *     secure heap, ...).
+ *   - raise JENT_SECURE_MEMORY_SIZE_MAX (and the memlock limits) when
  *     requesting memory sizes beyond the default secure-arena capacity.
  *   - jent_zfree(ptr, len): zero and release memory previously allocated
- *     with jent_zalloc() or jent_zalloc_large().
+ *     with jent_zalloc().
  *   - jent_memset_secure(s, n): wipe a buffer in a way the compiler may
  *     not optimize away.
  *
@@ -77,22 +77,6 @@
 #ifndef _JITTERENTROPY_ARCH_MEMORY_H
 #define _JITTERENTROPY_ARCH_MEMORY_H
 
-/*
- * Platform detection. Only the selector macros are set here; the corresponding
- * headers are included by arch/jitterentropy-arch-memory.c, so consumers of
- * this header pull in nothing beyond the declarations below.
- */
-#ifdef LINUX_KERNEL
-# define JENT_ARCH_MEM_LINUX_KERNEL
-#else
-# if defined(_MSC_VER) || defined(__MINGW32__)
-#  define JENT_ARCH_MEM_WINDOWS
-# elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
-       defined(__NetBSD__) || defined(__APPLE__)
-#  define JENT_ARCH_MEM_POSIX_MLOCK
-# endif
-#endif
-
 /* Override this if you want to allocate more than 2 MB of secure memory */
 #ifndef JENT_SECURE_MEMORY_SIZE_MAX
 # define JENT_SECURE_MEMORY_SIZE_MAX 2097152
@@ -100,7 +84,6 @@
 
 void jent_memset_secure(void *s, size_t n);
 void *jent_zalloc(size_t len);
-void *jent_zalloc_large(size_t len);
 void jent_zfree(void *ptr, size_t len);
 
 /*

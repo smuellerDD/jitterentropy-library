@@ -2,11 +2,11 @@
 /*
  * Architecture / OS-specific secure memory management.
  *
- * Definitions of jent_zalloc()/jent_zalloc_large()/jent_zfree() and
+ * Definitions of jent_zalloc()/jent_zfree() and
  * jent_memset_secure() (declared in arch/jitterentropy-arch-memory.h). See that
  * header for the dispatch rationale. For the Linux kernel all allocations use
- * kvmalloc()/kvzalloc() (never kmalloc()): the buffers are only accessed by the
- * CPU, so a vmalloc() fallback for large sizes is fine.
+ * kvmalloc()/kvzalloc() (never kmalloc()) in order to be able to allocate large
+ * buffers.
  *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
  *
@@ -48,6 +48,20 @@
 
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
+
+/*
+ * Platform detection.
+ */
+#ifdef LINUX_KERNEL
+# define JENT_ARCH_MEM_LINUX_KERNEL
+#else
+# if defined(_MSC_VER) || defined(__MINGW32__)
+#  define JENT_ARCH_MEM_WINDOWS
+# elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+       defined(__NetBSD__) || defined(__APPLE__)
+#  define JENT_ARCH_MEM_POSIX_MLOCK
+# endif
+#endif
 
 #ifdef JENT_ARCH_MEM_LINUX_KERNEL
 
@@ -145,16 +159,6 @@ static size_t jent_pagesize(void)
 #ifdef JENT_ARCH_MEM_LINUX_KERNEL
 
 void *jent_zalloc(size_t len)
-{
-	void *tmp = kvmalloc(len, GFP_KERNEL);
-
-	if (tmp)
-		jent_memset_secure(tmp, len);
-
-	return tmp;
-}
-
-void *jent_zalloc_large(size_t len)
 {
 	return kvzalloc(len, GFP_KERNEL);
 }
@@ -362,20 +366,6 @@ void *jent_zalloc(size_t len)
 	if (tmp != NULL)
 		jent_memset_secure(tmp, len);
 	return tmp;
-}
-
-void *jent_zalloc_large(size_t len)
-{
-	/*
-	 * The large memory-access noise buffer goes through the same secure
-	 * backends as the state allocations. Note their capacity limits: the
-	 * crypto-library secure heaps are sized by JENT_SECURE_MEMORY_SIZE_MAX
-	 * (2 MiB by default) and mlock() is bounded by RLIMIT_MEMLOCK. Callers
-	 * requesting a larger memory size (JENT_MAX_MEMSIZE_*, JENT_CACHE_ALL)
-	 * must raise JENT_SECURE_MEMORY_SIZE_MAX (and/or the memlock limit)
-	 * accordingly, otherwise the collector allocation fails.
-	 */
-	return jent_zalloc(len);
 }
 
 void jent_zfree(void *ptr, size_t len)

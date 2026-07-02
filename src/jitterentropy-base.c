@@ -614,7 +614,7 @@ static struct rand_data
 		flags = jent_update_memsize(flags, 0);
 		memsize = jent_memsize(flags);
 		entropy_collector->mem =
-			(unsigned char *)jent_zalloc_large(memsize);
+			(unsigned char *)jent_zalloc(memsize);
 		if (entropy_collector->mem == NULL)
 			goto err;
 
