@@ -61,6 +61,18 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t\"reinitializations\": %u,\n", ec->reinit_count);
 
 	/*
+	 * output accounting over the instance's lifetime
+	 */
+	jent_add_to_status("\t\"output\": {\n");
+	jent_add_to_status("\t\t\"invocations\": %llu,\n",
+			   (unsigned long long)ec->read_invocations);
+	jent_add_to_status("\t\t\"bytes\": %llu,\n",
+			   (unsigned long long)ec->bytes_output);
+	jent_add_to_status("\t\t\"bits\": %llu\n",
+			   (unsigned long long)ec->bytes_output * 8);
+	jent_add_to_status("\t},\n");
+
+	/*
 	 * health
 	 */
 	jent_add_to_status("\t\"healthFailure\": {\n");
