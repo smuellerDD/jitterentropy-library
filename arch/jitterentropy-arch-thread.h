@@ -76,7 +76,13 @@
  * kernel is matched before the generic baremetal test because it also
  * builds freestanding. Everything else is treated as hosted userspace.
  */
-#if defined(__KERNEL__)
+#if defined(__KERNEL__) || defined(LINUX_KERNEL)
+	/*
+	 * Match both the kernel's own __KERNEL__ and the build-system macro
+	 * LINUX_KERNEL used by every other arch file, so a TU compiled with
+	 * only one of them cannot pair the kernel memory backend with the
+	 * hosted thread backend.
+	 */
 # define JENT_ARCH_THREAD_LINUX_KERNEL
 #elif defined(_KERNEL) && defined(__FreeBSD__)
 # define JENT_ARCH_THREAD_FREEBSD_KERNEL
@@ -101,6 +107,16 @@ struct jent_notime_ctx {
 
 typedef void *(*jent_notime_start_routine)(void *);
 #else
+# ifdef __STDC_NO_THREADS__
+	/*
+	 * No auto-fallback to pthreads here: JENT_PTHREAD changes the callback
+	 * signature of the public struct jent_notime_thread (jitterentropy.h),
+	 * so it must be selected consistently by the build system for every
+	 * translation unit including external consumers, not silently by this
+	 * header.
+	 */
+#  error "C11 <threads.h> is unavailable (__STDC_NO_THREADS__); build with -DJENT_PTHREAD and link against pthreads instead"
+# endif
 # include <threads.h>
 struct jent_notime_ctx {
 	thrd_t notime_thread_id;		/* thread ID */
