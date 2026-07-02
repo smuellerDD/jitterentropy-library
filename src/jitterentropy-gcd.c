@@ -61,7 +61,7 @@ static int jent_gcd_analyze_internal(uint64_t *delta_history, size_t nelem,
 	uint64_t running_gcd, delta_sum = 0;
 	size_t i;
 
-	if (!delta_history)
+	if (!delta_history || !nelem)
 		return -EAGAIN;
 
 	running_gcd = delta_history[0];
