@@ -19,6 +19,14 @@ All of the following discussions assume you are in the directory `linux_kernel`.
 For each compilation, the file `Kbuild.config` contains configuration options
 that can be set accordingly.
 
+## Supported Kernel Versions
+
+The kernel support builds against Linux 5.10 and every newer release. 5.10 is
+the baseline because it is the first kernel providing `kfree_sensitive()` (used
+by the character-device and test interfaces) under its current name. Building
+against an older kernel is rejected at compile time with an explicit error (see
+`jitterentropy_compat.h`).
+
 ## Build as Standalone Kernel Module
 
 This option compiles a standalone kernel module that can be insmod'ed and
@@ -99,9 +107,34 @@ Its semantics are:
 
 * `close`: the Jitter RNG instance allocated on open is destroyed.
 
+* `ioctl(JENT_IOCSTATUS)`: retrieves the JSON status string of the Jitter RNG
+  instance bound to the open file description (the same information as the
+  user space `jent_status()` API: version, health-test state, runtime
+  environment and configuration).
+
 Example usage:
 
 	dd if=/dev/jitterentropy bs=32 count=1 | xxd
+
+The `JENT_IOCSTATUS` ioctl and its argument structure are defined in
+`jitterentropy_uapi.h`. The caller passes a buffer via `struct
+jent_status_ioctl` and receives the NUL-terminated status string:
+
+	#include "jitterentropy_uapi.h"
+
+	char status[JENT_STATUS_MAX_LEN];
+	struct jent_status_ioctl arg = {
+		.buf	= (unsigned long)status,
+		.length	= sizeof(status),
+	};
+	int fd = open("/dev/jitterentropy", O_RDONLY);
+
+	if (ioctl(fd, JENT_IOCSTATUS, &arg) == 0)
+		fputs(status, stdout);
+
+If the supplied buffer is too small the ioctl fails with `-EOVERFLOW` and
+`arg.length` is set to the number of bytes required (including the terminating
+NUL); on success `arg.length` holds the number of bytes written.
 
 # Linux Kernel Jitter RNG Hardware RNG (hwrng)
 
@@ -135,6 +168,57 @@ Example usage:
 
 	echo jitterentropy > /sys/class/misc/hw_random/rng_current
 	dd if=/dev/hwrng bs=32 count=1 | xxd
+
+The status of the single hwrng Jitter RNG instance is exported read-only as
+`/proc/jitter_rng/hwrng_status` (when the kernel provides `CONFIG_PROC_FS`).
+Reading it returns the same JSON status string as the user space
+`jent_status()` API (version, health-test state, runtime environment and
+configuration):
+
+	cat /proc/jitter_rng/hwrng_status | jq .
+
+# Linux Kernel Jitter RNG procfs Interface
+
+When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
+`/proc/jitter_rng/` that collects its read-only status and statistics files:
+
+* `version`: the Jitter RNG library version (e.g. `3.7.1`).
+
+
+* `statistics`: module-wide statistics in JSON format. It currently reports the
+  character-device instances (one Jitter RNG entropy collector is allocated per
+  `open()` of `/dev/jitterentropy`):
+
+		{
+			"charDevice": {
+				"openInstances": 3,
+				"cumulativeOpens": 42
+			}
+		}
+
+  `openInstances` is the number of instances open right now; `cumulativeOpens`
+  is the total number of opens since the module was loaded.
+
+* `hwrng_status`: the JSON status string of the single hwrng instance (only
+  present when the hwrng interface is enabled, see above).
+
+* `instances/`: a subdirectory holding one file per currently open character
+  device instance, named by the instance UUID (see below). Reading
+  `instances/<uuid>` returns the JSON status string of that specific instance.
+  Files appear on `open()` of `/dev/jitterentropy` and disappear on `close()`
+  (only present when the character device interface is enabled).
+
+Every Jitter RNG instance is assigned a stable RFC 4122 version 4 UUID at
+allocation. It is reported in the JSON status output as the `uuid` field and,
+for the character device, used as the `instances/<uuid>` file name. The UUID is
+preserved when an instance's collector is reallocated (e.g. on health-test
+recovery), so it identifies the instance for its whole lifetime.
+
+Example usage:
+
+	cat /proc/jitter_rng/statistics | jq .
+	ls /proc/jitter_rng/instances/
+	cat /proc/jitter_rng/instances/$(ls /proc/jitter_rng/instances/ | head -1) | jq .
 
 # Linux Kernel Jitter RNG Testing
 

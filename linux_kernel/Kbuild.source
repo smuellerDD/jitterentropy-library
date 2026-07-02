@@ -5,10 +5,16 @@
 
 # The option JENT_CONF_ENABLE_INTERNAL_TIMER must not be set as there is no
 # in-kernel support for a timer thread
-jitter_rng_c_args = -O0 -DLINUX_KERNEL -I. -I../ -I../src		       \
-		    -Icrypto/jitterentropy-library			       \
-		    -Icrypto/jitterentropy-library/src			       \
-		    -Icrypto/jitterentropy-library/linux_kernel
+#
+# Include paths are expressed relative to $(src) (the directory of this Kbuild,
+# i.e. linux_kernel/) so they resolve identically for an in-tree build and an
+# out-of-tree "make M=... modules" build, regardless of the kernel version's
+# handling of relative -I paths:
+#   $(src)        -> linux_kernel/       (kernel interface headers)
+#   $(src)/..     -> project root        (jitterentropy.h, arch/*.h)
+#   $(src)/../src -> src/                 (library internal headers)
+jitter_rng_c_args = -DLINUX_KERNEL					       \
+		    -I$(src) -I$(src)/.. -I$(src)/../src
 
 ifdef CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
@@ -37,7 +43,9 @@ jitter_rng-y += ../src/jitterentropy-base.o				       \
 		../src/jitterentropy-sha3.o				       \
 		../src/jitterentropy-status.o				       \
 		../src/jitterentropy-timer.o				       \
-		jitterentropy_kcapi.o
+		jitterentropy_kcapi.o					       \
+		jitterentropy_mem.o					       \
+		jitterentropy_proc.o
 
 jitter_rng_c_args_zero = -O0 $(jitter_rng_c_args)
 
@@ -49,6 +57,7 @@ CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_c_args)
 CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
 CFLAGS_jitterentropy_kcapi.o = $(jitter_rng_c_args)
+CFLAGS_jitterentropy_mem.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
 
 ######################### Character Device Compilation #########################
