@@ -67,6 +67,15 @@ static long jent_ncpu_sysfs(void)
 		return -EIO;
 	buf[rlen] = '\0';
 
+	/*
+	 * A read that fills the whole buffer without reaching the trailing
+	 * newline was truncated (a system with many discontiguous ranges can
+	 * exceed the buffer). Parsing the fragment would miscount the final
+	 * range, so report an error and let the caller fall back.
+	 */
+	if ((size_t)rlen == sizeof(buf) - 1 && buf[rlen - 1] != '\n')
+		return -EINVAL;
+
 	p = buf;
 	while (*p && *p != '\n') {
 		char *endp;
