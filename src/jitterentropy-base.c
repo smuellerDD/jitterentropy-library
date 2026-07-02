@@ -557,6 +557,17 @@ static struct rand_data
 		return NULL;
 
 	/*
+	 * The FIPS / NTG.1 startup samples the memory-access noise source as
+	 * an independent stage (startup_state jent_startup_memory). Without
+	 * the memory region every startup sample is stuck, so the allocation
+	 * could only fail after burning through the entire health-test reset
+	 * ladder. Reject the contradictory combination immediately.
+	 */
+	if ((flags & JENT_DISABLE_MEMORY_ACCESS) &&
+	    ((flags & (JENT_NTG1 | JENT_FORCE_FIPS)) || jent_fips_enabled()))
+		return NULL;
+
+	/*
 	 * Ensure over sampling rate is not too low.
 	 */
 	osr = ensure_osr_is_at_least_minimal(osr);
@@ -588,6 +599,16 @@ static struct rand_data
 	entropy_collector = jent_zalloc(sizeof(struct rand_data));
 	if (NULL == entropy_collector)
 		return NULL;
+
+	/*
+	 * Record whether the caller capped the memory size before
+	 * jent_update_memsize() normalizes the flags. This must happen here
+	 * and not in the outer jent_entropy_collector_alloc(): health-test
+	 * resets during the startup loop consult max_mem_set, and were it
+	 * still unset they would grow the memory region beyond the cap the
+	 * caller requested.
+	 */
+	entropy_collector->max_mem_set = !!JENT_FLAGS_TO_MAX_MEMSIZE(flags);
 
 	if (!(flags & JENT_DISABLE_MEMORY_ACCESS)) {
 		flags = jent_update_memsize(flags, 0);
@@ -760,17 +781,11 @@ JENT_PRIVATE_STATIC
 struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 					       unsigned int flags)
 {
-	struct rand_data *ec = _jent_entropy_collector_alloc(osr, flags);
-
-	if (!ec)
-		return ec;
-
 	/*
-	 * Define max_mem_set only if the external caller defined such memory.
+	 * max_mem_set is recorded in jent_entropy_collector_alloc_internal()
+	 * so that it is already valid during the startup health-test resets.
 	 */
-	ec->max_mem_set = !!JENT_FLAGS_TO_MAX_MEMSIZE(flags);
-
-	return ec;
+	return _jent_entropy_collector_alloc(osr, flags);
 }
 
 JENT_PRIVATE_STATIC
