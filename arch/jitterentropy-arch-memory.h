@@ -73,7 +73,17 @@
 
 #ifdef LINUX_KERNEL
 
-#include <linux/slab.h>
+/*
+ * The allocation helpers (jent_zalloc/jent_zfree and their _large variants)
+ * are provided out-of-line, implemented in linux_kernel/jitterentropy_mem.c,
+ * rather than as inline functions here. This keeps the heavy <linux/slab.h>
+ * header out of the entropy-collection core, which must be compiled with -O0
+ * (see the __OPTIMIZE__ guard in src/jitterentropy-base.c). Modern kernel
+ * headers reached through slab.h (e.g. the asm_inline in <linux/rwsem.h> via
+ * mm_types.h) cannot be compiled at -O0. Only <linux/string.h>, needed by the
+ * inline jent_memset_secure() below, is pulled in here and is -O0 safe.
+ */
+#include <linux/string.h>
 
 # define JENT_ARCH_MEM_LINUX_KERNEL
 
@@ -139,6 +149,20 @@ static inline size_t jent_round_up_to_pagesize(size_t size)
 	return (size + page_size - 1) & ~(page_size - 1);
 }
 #endif /* JENT_ARCH_MEM_WINDOWS */
+
+#ifdef JENT_ARCH_MEM_LINUX_KERNEL
+
+/*
+ * Out-of-line in the Linux kernel build (see the note above). Implemented in
+ * linux_kernel/jitterentropy_mem.c, compiled at the kernel's normal
+ * optimization level.
+ */
+void *jent_zalloc(size_t len);
+void *jent_zalloc_large(size_t len);
+void jent_zfree(void *ptr, size_t len);
+void jent_zfree_large(void *ptr, size_t len);
+
+#else /* !JENT_ARCH_MEM_LINUX_KERNEL */
 
 static inline void *jent_zalloc(size_t len)
 {
@@ -334,12 +358,10 @@ static inline void jent_zfree(void *ptr, size_t len)
 
 static inline void jent_zfree_large(void *ptr, size_t len)
 {
-#ifdef JENT_ARCH_MEM_LINUX_KERNEL
-	kvfree_sensitive(ptr, len);
-#else
 	jent_zfree(ptr, len);
-#endif
 }
+
+#endif /* JENT_ARCH_MEM_LINUX_KERNEL */
 
 #undef JENT_IS_POWER_OF_2
 #undef JENT_BUILD_BUG_ON

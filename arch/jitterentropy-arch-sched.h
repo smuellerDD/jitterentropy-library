@@ -73,7 +73,12 @@
 
 #ifdef LINUX_KERNEL
 
-#include <linux/sched.h>
+/*
+ * jent_yield() is provided out-of-line (implemented in
+ * linux_kernel/jitterentropy_mem.c) so <linux/sched.h> is not pulled into the
+ * -O0 entropy-collection core, which cannot compile modern kernel headers at
+ * -O0 (see arch/jitterentropy-arch-memory.h and linux_kernel/Kbuild.source).
+ */
 # define JENT_ARCH_SCHED_LINUX_KERNEL
 
 #else /* LINUX_KERNEL */
@@ -104,6 +109,12 @@
 
 #endif /* LINUX_KERNEL */
 
+#ifdef JENT_ARCH_SCHED_LINUX_KERNEL
+
+void jent_yield(void);
+
+#else /* !JENT_ARCH_SCHED_LINUX_KERNEL */
+
 static inline void jent_yield(void)
 {
 #if defined(JENT_ARCH_SCHED_PAUSE_X86)
@@ -118,9 +129,9 @@ static inline void jent_yield(void)
 	SwitchToThread();
 #elif defined(JENT_ARCH_SCHED_OS_POSIX)
 	(void)sched_yield();
-#elif defined(JENT_ARCH_SCHED_LINUX_KERNEL)
-	schedule();
 #endif
 }
+
+#endif /* JENT_ARCH_SCHED_LINUX_KERNEL */
 
 #endif /* _JITTERENTROPY_ARCH_SCHED_H */

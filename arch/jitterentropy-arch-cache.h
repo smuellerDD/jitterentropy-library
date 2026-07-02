@@ -62,7 +62,13 @@
 
 #ifdef LINUX_KERNEL
 
-#include <linux/cacheinfo.h>
+/*
+ * No kernel header is included here on purpose: the kernel implementation of
+ * jent_cache_size_roundup() below returns 0 (no cache-size discovery), and this
+ * header is pulled into the -O0 entropy-collection core, which must stay clear
+ * of kernel headers that do not compile at -O0 (see the note in
+ * arch/jitterentropy-arch-memory.h and linux_kernel/Kbuild.source).
+ */
 # define JENT_ARCH_CACHE_LINUX_KERNEL
 
 #else /* LINUX_KERNEL */
@@ -123,6 +129,145 @@ static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
 	cache_size |= (cache_size >> 16);
 
 	return cache_size;
+}
+
+/*
+ * x86 data-cache discovery via CPUID leaf 4 (deterministic cache parameters,
+ * Intel SDM Vol. 2A; also supported by modern AMD CPUs), shared by every x86
+ * backend that can issue CPUID. The instruction is issued through the supplied
+ * callback so each environment can plug in its own primitive (the userspace
+ * __get_cpuid_count() from <cpuid.h>, the kernel's cpuid_count(), ...). The
+ * callback returns non-zero on success and must fail when the leaf is
+ * unsupported, matching __get_cpuid_count().
+ *
+ *   EAX[ 4: 0]  cache type (1 = data, 2 = instruction, 3 = unified)
+ *   EAX[ 7: 5]  cache level (1, 2, 3, ...)
+ *   EBX[11: 0]  L = system coherency line size - 1
+ *   EBX[21:12]  P = physical line partitions - 1
+ *   EBX[31:22]  W = ways of associativity - 1
+ *   ECX         S = number of sets - 1
+ * Total size = (W + 1) * (P + 1) * (L + 1) * (S + 1).
+ */
+typedef int (*jent_cpuid_count_t)(unsigned int leaf, unsigned int subleaf,
+				  unsigned int *eax, unsigned int *ebx,
+				  unsigned int *ecx, unsigned int *edx);
+
+static inline uint32_t jent_cache_size_roundup_cpuid(jent_cpuid_count_t cpuid,
+						     int all_caches)
+{
+	long l1 = 0, l2 = 0, l3 = 0;
+	uint32_t cache_size;
+	unsigned int sub;
+
+	for (sub = 0; sub < 16; sub++) {
+		unsigned int eax, ebx, ecx, edx;
+		unsigned int cache_type, cache_level;
+		unsigned int ways, partitions, line_size, sets;
+		long size;
+
+		if (!cpuid(4, sub, &eax, &ebx, &ecx, &edx))
+			break;
+
+		cache_type = eax & 0x1F;
+		if (cache_type == 0)
+			break;
+
+		/* Only data (1) and unified (3) caches matter here. */
+		if (cache_type != 1 && cache_type != 3)
+			continue;
+
+		cache_level = (eax >> 5) & 0x7;
+		ways        = ((ebx >> 22) & 0x3FF) + 1;
+		partitions  = ((ebx >> 12) & 0x3FF) + 1;
+		line_size   = (ebx & 0xFFF) + 1;
+		sets        = ecx + 1;
+		size = (long)ways * (long)partitions *
+		       (long)line_size * (long)sets;
+
+		/*
+		 * L1 is typically split into separate data and instruction
+		 * caches; only the data cache (type 1) is relevant here. L2/L3
+		 * are usually unified, so accept data or unified.
+		 */
+		if (cache_level == 1 && cache_type == 1 && l1 == 0)
+			l1 = size;
+		else if (cache_level == 2 && l2 == 0)
+			l2 = size;
+		else if (cache_level == 3 && l3 == 0)
+			l3 = size;
+	}
+
+	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
+	if (cache_size == 0)
+		return 0;
+
+	/* smallest power of 2 strictly greater than the summed cache size */
+	return cache_size + 1;
+}
+
+/*
+ * AArch64 data-cache discovery via the cache ID registers, shared by any
+ * EL1-capable backend. CLIDR_EL1 gives the cache type per level and CCSIDR_EL1
+ * (selected via CSSELR_EL1) the geometry of the selected cache. Those registers
+ * are only accessible at EL1, so userspace (EL0) cannot use this - the Linux
+ * kernel backend can. The caller passes the CLIDR_EL1 value and the FEAT_CCIDX
+ * indication (wider CCSIDR fields) and supplies the CCSIDR_EL1 read for a given
+ * (1-based) level through the callback. See Arm ARM (DDI 0487), CLIDR_EL1 /
+ * CCSIDR_EL1.
+ */
+typedef uint64_t (*jent_read_ccsidr_t)(unsigned int level);
+
+static inline uint32_t jent_cache_size_roundup_arm64(uint64_t clidr, int ccidx,
+						     jent_read_ccsidr_t ccsidr_fn,
+						     int all_caches)
+{
+	long l1 = 0, l2 = 0, l3 = 0;
+	uint32_t cache_size;
+	unsigned int level;
+
+	for (level = 1; level <= 7; level++) {
+		/* CLIDR_EL1 holds a 3-bit cache type per level. */
+		unsigned int ctype =
+			(unsigned int)((clidr >> (3 * (level - 1))) & 0x7);
+		unsigned int line;
+		unsigned long assoc, sets;
+		uint64_t ccsidr;
+		long size;
+
+		if (ctype == 0)
+			break;		/* no cache at this or higher levels */
+
+		/* Need a data (2), separate I&D (3) or unified (4) cache. */
+		if (ctype != 2 && ctype != 3 && ctype != 4)
+			continue;
+
+		ccsidr = ccsidr_fn(level);
+
+		line = (unsigned int)(ccsidr & 0x7);	/* log2(line bytes) - 4 */
+		if (ccidx) {
+			/* FEAT_CCIDX: wider Associativity/NumSets fields. */
+			assoc = (unsigned long)((ccsidr >> 3) & 0x1FFFFF) + 1;
+			sets  = (unsigned long)((ccsidr >> 32) & 0xFFFFFF) + 1;
+		} else {
+			assoc = (unsigned long)((ccsidr >> 3) & 0x3FF) + 1;
+			sets  = (unsigned long)((ccsidr >> 13) & 0x7FFF) + 1;
+		}
+		size = (long)(((unsigned long)1 << (line + 4)) * assoc * sets);
+
+		if (level == 1 && l1 == 0)
+			l1 = size;
+		else if (level == 2 && l2 == 0)
+			l2 = size;
+		else if (level == 3 && l3 == 0)
+			l3 = size;
+	}
+
+	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
+	if (cache_size == 0)
+		return 0;
+
+	/* smallest power of 2 strictly greater than the summed cache size */
+	return cache_size + 1;
 }
 
 #if defined(JENT_ARCH_CACHE_LINUX) || defined(JENT_ARCH_CACHE_APPLE)
@@ -365,108 +510,25 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 
 #elif defined(JENT_ARCH_CACHE_BSD)
 
-#ifdef JENT_ARCH_CACHE_BSD_CPUID
-
-/*
- * The BSDs do not export data-cache sizes through sysctl in a uniform way.
- * On x86 we can read them directly with CPUID leaf 4 (deterministic cache
- * parameters, Intel SDM Vol. 2A; AMD CPUID Specification rev 2.34,
- * fn 0000_0004h).
- *
- * Each successful sub-leaf returns:
- *   EAX[ 4: 0]  cache type (1 = data, 2 = instruction, 3 = unified)
- *   EAX[ 7: 5]  cache level (1, 2, 3, ...)
- *   EBX[11: 0]  L = system coherency line size - 1
- *   EBX[21:12]  P = physical line partitions - 1
- *   EBX[31:22]  W = ways of associativity - 1
- *   ECX         S = number of sets - 1
- *
- * Total size = (W + 1) * (P + 1) * (L + 1) * (S + 1).
- */
-static inline void jent_get_cachesize_cpuid(long *l1, long *l2, long *l3)
-{
-	unsigned int sub;
-
-	*l1 = 0;
-	*l2 = 0;
-	*l3 = 0;
-
-	for (sub = 0; sub < 16; sub++) {
-		unsigned int eax, ebx, ecx, edx;
-		unsigned int cache_type, cache_level;
-		unsigned int ways, partitions, line_size, sets;
-		long size;
-
-		if (!__get_cpuid_count(4, sub, &eax, &ebx, &ecx, &edx))
-			break;
-
-		cache_type = eax & 0x1F;
-		if (cache_type == 0)
-			break;
-
-		/* Only data (1) and unified (3) caches matter here. */
-		if (cache_type != 1 && cache_type != 3)
-			continue;
-
-		cache_level = (eax >> 5) & 0x7;
-		ways        = ((ebx >> 22) & 0x3FF) + 1;
-		partitions  = ((ebx >> 12) & 0x3FF) + 1;
-		line_size   = (ebx & 0xFFF) + 1;
-		sets        = ecx + 1;
-		size = (long)ways * (long)partitions *
-		       (long)line_size * (long)sets;
-
-		/*
-		 * L1 is typically split into separate data and instruction
-		 * caches; only the data cache (type 1) is relevant here.
-		 * L2/L3 are usually unified, so accept data or unified.
-		 */
-		if (cache_level == 1 && cache_type == 1 && *l1 == 0)
-			*l1 = size;
-		else if (cache_level == 2 && *l2 == 0)
-			*l2 = size;
-		else if (cache_level == 3 && *l3 == 0)
-			*l3 = size;
-	}
-}
-
-#else /* BSD aarch64 / riscv */
-
-/*
- * AArch64 carries the data cache sizes in CCSIDR_EL1, an EL1 register that
- * the BSD arm64 kernels do not currently emulate for EL0. RISC-V has no
- * standardised user-mode cache-discovery instruction at all - the values
- * live in firmware-supplied device tree / ACPI tables that the BSDs do
- * not surface through a uniform sysctl. In both cases leave the cache
- * sizes at zero so the caller falls back to its built-in default.
- */
-static inline void jent_get_cachesize_cpuid(long *l1, long *l2, long *l3)
-{
-	*l1 = 0;
-	*l2 = 0;
-	*l3 = 0;
-}
-
-#endif /* JENT_ARCH_CACHE_BSD_CPUID */
-
 static inline uint32_t jent_cache_size_roundup(int all_caches)
 {
-	long l1 = 0, l2 = 0, l3 = 0;
-	uint32_t cache_size;
-
-	jent_get_cachesize_cpuid(&l1, &l2, &l3);
-
-	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
-	if (cache_size == 0)
-		return 0;
-
+#ifdef JENT_ARCH_CACHE_BSD_CPUID
 	/*
-	 * Make the output_size the smallest power of 2 strictly greater
-	 * than cache_size.
+	 * The BSDs do not export data-cache sizes through sysctl in a uniform
+	 * way; on x86 read them directly via CPUID leaf 4. __get_cpuid_count()
+	 * (from <cpuid.h>) already fails when the leaf is unsupported.
 	 */
-	cache_size++;
-
-	return cache_size;
+	return jent_cache_size_roundup_cpuid(__get_cpuid_count, all_caches);
+#else
+	/*
+	 * AArch64 carries the data cache sizes in CCSIDR_EL1, an EL1 register
+	 * that the BSD arm64 kernels do not currently emulate for EL0. RISC-V
+	 * has no standardised user-mode cache-discovery instruction at all. In
+	 * both cases return zero so the caller falls back to its default.
+	 */
+	(void)all_caches;
+	return 0;
+#endif /* JENT_ARCH_CACHE_BSD_CPUID */
 }
 
 #elif defined(JENT_ARCH_CACHE_AIX)
@@ -499,11 +561,14 @@ static inline uint32_t jent_cache_size_roundup(int all_caches)
 
 #elif defined(JENT_ARCH_CACHE_LINUX_KERNEL)
 
-static inline uint32_t jent_cache_size_roundup(int all_caches)
-{
-	(void)all_caches;
-	return 0;
-}
+/*
+ * Provided out-of-line in linux_kernel/jitterentropy_mem.c: the discovery uses
+ * CPUID (via <asm/processor.h>), which must not be pulled into the -O0 core.
+ * The kernel's own cacheinfo subsystem (get_cpu_cacheinfo()) is not exported to
+ * modules, so it cannot be used here; CPUID works for both the module and the
+ * built-in build.
+ */
+uint32_t jent_cache_size_roundup(int all_caches);
 
 #else /* no cache discovery available */
 
