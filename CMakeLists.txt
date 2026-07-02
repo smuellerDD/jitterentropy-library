@@ -96,7 +96,7 @@ if(STACK_PROTECTOR)
     endif()
 endif()
 
-file(GLOB JITTER_SRC "src/*.c")
+file(GLOB JITTER_SRC "src/*.c" "arch/*.c")
 add_library(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE ${JITTER_SRC})
 set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER "jitterentropy.h")

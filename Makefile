@@ -42,8 +42,9 @@ LIBMINOR=$(shell cat jitterentropy.h | egrep "define\s+JENT_MINVERSION" | awk '{
 LIBPATCH=$(shell cat jitterentropy.h | egrep "define\s+JENT_PATCHLEVEL" | awk '{print $$3}')
 LIBVERSION := $(LIBMAJOR).$(LIBMINOR).$(LIBPATCH)
 
-VPATH := $(SRCDIR)
-C_SRCS := $(notdir $(sort $(wildcard $(SRCDIR)/*.c)))
+ARCHDIR := arch
+VPATH := $(SRCDIR):$(ARCHDIR)
+C_SRCS := $(notdir $(sort $(wildcard $(SRCDIR)/*.c) $(wildcard $(ARCHDIR)/*.c)))
 C_OBJS := ${C_SRCS:.c=.o}
 OBJS := $(C_OBJS)
 

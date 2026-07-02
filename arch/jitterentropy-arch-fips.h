@@ -59,57 +59,10 @@
 #ifndef _JITTERENTROPY_ARCH_FIPS_H
 #define _JITTERENTROPY_ARCH_FIPS_H
 
-#ifdef LINUX_KERNEL
-
-#include <linux/fips.h>
-
-static inline int jent_fips_enabled(void)
-{
-	return fips_enabled;
-}
-
-#else /* LINUX_KERNEL */
-
-#if !defined(LIBGCRYPT) && !defined(AWSLC) && !defined(OPENSSL) && \
-    !defined(_MSC_VER) && !defined(__MINGW32__)
-# include <errno.h>
-# include <fcntl.h>
-# include <sys/types.h>
-# include <unistd.h>
-#endif
-
-static inline int jent_fips_enabled(void)
-{
-#ifdef LIBGCRYPT
-	return gcry_fips_mode_active();
-#elif defined(AWSLC)
-	return FIPS_mode();
-#elif defined(OPENSSL)
-	return EVP_default_properties_is_fips_enabled(NULL);
-#elif defined(_MSC_VER) || defined(__MINGW32__)
-	return 0;
-#else
-#define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
-	char buf[2] = "0";
-	int fd = 0;
-	ssize_t rlen;
-
-	if ((fd = open(FIPS_MODE_SWITCH_FILE, O_RDONLY)) >= 0) {
-		do {
-			rlen = read(fd, buf, sizeof(buf));
-		} while (rlen < 0 && errno == EINTR);
-		close(fd);
-		if (rlen <= 0)
-			return 0;
-	}
-	if (buf[0] == '1')
-		return 1;
-	else
-		return 0;
-#undef FIPS_MODE_SWITCH_FILE
-#endif
-}
-
-#endif /* LINUX_KERNEL */
+/*
+ * Return non-zero when FIPS mode is active for the active backend.
+ * Defined in arch/jitterentropy-arch-fips.c.
+ */
+int jent_fips_enabled(void);
 
 #endif /* _JITTERENTROPY_ARCH_FIPS_H */
