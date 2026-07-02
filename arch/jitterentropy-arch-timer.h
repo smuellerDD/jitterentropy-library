@@ -70,7 +70,10 @@
 
 #ifdef LINUX_KERNEL
 
+#include <linux/ktime.h>	/* ktime_t (required by timekeeping.h on older kernels) */
 #include <linux/time.h>
+#include <linux/timekeeping.h>	/* ktime_get_ns() */
+#include <linux/timex.h>	/* random_get_entropy() */
 #include "jitterentropy_testing.h"
 # define JENT_ARCH_TIMER_LINUX_KERNEL
 
@@ -176,11 +179,18 @@ static inline void jent_get_nstime(uint64_t *out)
 	 * TOD-clock bit 63 is approximately 244 picoseconds.
 	 */
 	uint8_t clk[16];
+	uint64_t v;
 
 	__asm__ __volatile__("stcke %0" : "=Q" (clk) : : "cc");
 
-	/* s390x is big-endian, so just perform a byte-by-byte copy */
-	*out = *(uint64_t *)(clk + 1);
+	/*
+	 * s390x is big-endian, so just copy the relevant 8 bytes. Use memcpy
+	 * rather than dereferencing (uint64_t *)(clk + 1): that address is
+	 * unaligned and the access would violate strict-aliasing rules (UB the
+	 * optimizer may break, even though s390x hardware tolerates the load).
+	 */
+	memcpy(&v, clk + 1, sizeof(v));
+	*out = v;
 
 #elif defined(JENT_ARCH_TIMER_POWERPC)
 
