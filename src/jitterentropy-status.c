@@ -54,6 +54,12 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	if (!ec)
 		goto out;
 
+	/* stable per-instance identifier */
+	jent_add_to_status("\t\"uuid\": \"%s\",\n", ec->uuid);
+
+	/* number of reinitializations (reallocations on health-test recovery) */
+	jent_add_to_status("\t\"reinitializations\": %u,\n", ec->reinit_count);
+
 	/*
 	 * health
 	 */
@@ -153,4 +159,19 @@ out:
 	used = strlen(buf);
 	return (used >= buflen - 1) ? -1 : 0;
 #undef jent_add_to_status
+}
+
+int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen)
+{
+	size_t len;
+
+	if (!ec || !buf || buflen == 0)
+		return -1;
+
+	len = strlen(ec->uuid) + 1;
+	if (buflen < len)
+		return -1;
+
+	memcpy(buf, ec->uuid, len);
+	return 0;
 }
