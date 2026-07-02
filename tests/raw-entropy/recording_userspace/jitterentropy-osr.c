@@ -70,13 +70,14 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 
 	ec_nostir = jent_entropy_collector_alloc(osr, flags);
 
-	if (timespec_get(&start, TIME_UTC) == 0) {
-		fprintf(stderr, "Unable to get start time\n");
-		return 1;
-	}
-	
 	if (!ec_nostir) {
 		fprintf(stderr, "Jitter RNG handle cannot be allocated\n");
+		return 1;
+	}
+
+	if (timespec_get(&start, TIME_UTC) == 0) {
+		fprintf(stderr, "Unable to get start time\n");
+		jent_entropy_collector_free(ec_nostir);
 		return 1;
 	}
 
@@ -85,12 +86,14 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 
 		if (0 > jent_read_entropy_safe(&ec_nostir, tmp, sizeof(tmp))) {
 			fprintf(stderr, "FIPS 140-2 continuous test failed\n");
+			jent_entropy_collector_free(ec_nostir);
 			return 1;
 		}
 	}
 
 	if (timespec_get(&finish, TIME_UTC) == 0) {
 		fprintf(stderr, "Unable to get finish time\n");
+		jent_entropy_collector_free(ec_nostir);
 		return 1;
 	}
 	runtime = ((uint64_t)finish.tv_sec * UINT64_C(1000000000) + (uint64_t)finish.tv_nsec) - ((uint64_t)start.tv_sec * UINT64_C(1000000000) + (uint64_t)start.tv_nsec);
@@ -110,7 +113,7 @@ int main(int argc, char * argv[])
 	unsigned int maxBound, minBound, firstLinearGuess, secondLinearGuess;
 	uint64_t minTime, maxTime, firstLinearTime, secondLinearTime;
 
-	if (argc < 2) {
+	if (argc < 3) {
 		fprintf(stderr, "%s <number of measurements> <target time> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--max-mem <NUM>|--hloopcnt <NUM>|--all-caches]\n", argv[0]);
 		return 1;
 	}
