@@ -193,7 +193,7 @@ extern "C" {
 #elif defined(LINUX_KERNEL)
 # define JENT_PRIVATE_STATIC
 #else /* JENT_PRIVATE_COMPILE */
-#if defined(_MSC_VER)
+#if defined(_WIN32)
 #define JENT_PRIVATE_STATIC __declspec(dllexport)
 #else
 #define JENT_PRIVATE_STATIC __attribute__((visibility("default")))
