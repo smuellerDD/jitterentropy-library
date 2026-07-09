@@ -77,42 +77,39 @@
             withTestInterface = false;
           };
 
-      # A NixOS integration test that boots a VM with the chosen kernel, the
-      # jitter_rng module built against it and loaded at boot, and the userspace
-      # tools in the system profile. Used both as a flake check (the test runs
-      # the assertions in a VM) and, via its interactive driver, as a `nix run`
-      # target (no dedicated system.build.vm image is produced).
-      mkVmTest = pkgs: name: kernelPackages:
-        pkgs.testers.runNixOSTest {
-          name = "jitterentropy-${name}";
-
-          nodes.machine = { config, pkgs, ... }: {
-            boot.kernelPackages = kernelPackages;
-            # The VM exercises every interface, including the debugfs raw
-            # entropy test interface that is off by default.
-            boot.extraModulePackages = [
-              ((moduleFor pkgs config.boot.kernelPackages.kernel).override {
-                withTestInterface = true;
-              })
-            ];
-            boot.kernelModules = [ "jitter_rng" ];
-            environment.systemPackages = [
-              (toolsFor pkgs)
-            ] ++ (with pkgs; [
-              fx
-              htop
-              jq
-              libkcapi
-              python3
-              sp800-90b-entropyassessment
-              tmux
-              vim
-              xxd
-            ]);
-            # Exercises the chardev O_NONBLOCK semantics: reads are capped at
-            # one 256-byte buffer, and a reader that would have to wait for a
-            # concurrent read on the same file description gets EAGAIN.
-            environment.etc."jitterentropy-nonblock-test.py".text = ''
+      # Machine configuration shared between the VM tests and the live ISO
+      # images: the chosen kernel with the jitter_rng module built against it
+      # and loaded at boot, the userspace tools in the system profile, and the
+      # testing conveniences (root autologin, shell aliases, smoke-test
+      # script). Both consumers are test environments, hence the module is
+      # built with the debugfs raw entropy test interface that must never be
+      # enabled on production systems.
+      machineFor = kernelPackages:
+        { config, lib, pkgs, ... }: {
+          boot.kernelPackages = kernelPackages;
+          boot.extraModulePackages = [
+            ((moduleFor pkgs config.boot.kernelPackages.kernel).override {
+              withTestInterface = true;
+            })
+          ];
+          boot.kernelModules = [ "jitter_rng" ];
+          environment.systemPackages = [
+            (toolsFor pkgs)
+          ] ++ (with pkgs; [
+            fx
+            htop
+            jq
+            libkcapi
+            python3
+            sp800-90b-entropyassessment
+            tmux
+            vim
+            xxd
+          ]);
+          # Exercises the chardev O_NONBLOCK semantics: reads are capped at
+          # one 32-byte buffer, and a reader that would have to wait for a
+          # concurrent read on the same file description gets EAGAIN.
+          environment.etc."jitterentropy-nonblock-test.py".text = ''
               import os
               import threading
               import time
@@ -120,15 +117,18 @@
               fd = os.open("/dev/jitterentropy", os.O_RDONLY | os.O_NONBLOCK)
 
               data = os.read(fd, 4096)
-              assert len(data) == 256, f"nonblocking read returned {len(data)} bytes"
+              assert len(data) == 32, f"nonblocking read returned {len(data)} bytes"
 
-              # A large blocking read holds the instance lock for its whole
-              # duration; nonblocking reads on the same file description must
-              # then see EAGAIN. The read must be issued while the fd is still
-              # blocking (O_NONBLOCK is checked on entry), hence the sleep
-              # before flipping the shared flag back. The daemon thread is
-              # killed on process exit; the kernel read loop honors the
-              # pending signal, so exit is not delayed by the large request.
+              # A large blocking read takes the instance lock per 32-byte
+              # chunk, and generation dominates the time between chunks, so a
+              # nonblocking read on the same file description sees EAGAIN with
+              # high probability per attempt (the retry loop below tolerates
+              # the occasional win between chunks). The read must be issued
+              # while the fd is still blocking (O_NONBLOCK is checked on
+              # entry), hence the sleep before flipping the shared flag back.
+              # The daemon thread is killed on process exit; the kernel read
+              # loop honors the pending signal, so exit is not delayed by the
+              # large request.
               os.set_blocking(fd, True)
               t = threading.Thread(target=os.read, args=(fd, 4 * 1024 * 1024),
                                    daemon=True)
@@ -145,15 +145,31 @@
                   assert time.monotonic() < deadline, "no EAGAIN observed"
                   time.sleep(0.01)
               print("OK")
-            '';
-            services.getty.autologinUser = "root";
-            console.keyMap = "de";
-            environment.shellAliases = {
-              "clock_rdtsc" = "echo rdtsc > /sys/devices/system/clocksource/clocksource0/current_clocksource";
-              "jitter_hwrng" = "echo jitterentropy > /sys/class/misc/hw_random/rng_current";
-              "show_hwrng" = "cat /sys/class/misc/hw_random/rng_current";
-              "kcapi_read" = "kcapi-rng -n jitter_rng -b 32 --hex";
-            };
+          '';
+          # mkForce: the ISO's installation-device profile autologs in the
+          # "nixos" user; these images are for testing, log in root directly.
+          services.getty.autologinUser = lib.mkForce "root";
+          console.keyMap = "de";
+          environment.shellAliases = {
+            "clock_rdtsc" = "echo tsc > /sys/devices/system/clocksource/clocksource0/current_clocksource";
+            "jitter_hwrng" = "echo jitterentropy > /sys/class/misc/hw_random/rng_current";
+            "show_hwrng" = "cat /sys/class/misc/hw_random/rng_current";
+            "kcapi_read" = "kcapi-rng -n jitter_rng -b 32 --hex";
+          };
+        };
+
+      # A NixOS integration test that boots a VM with the shared machine
+      # configuration on the chosen kernel. Used both as a flake check (the
+      # test runs the assertions in a VM) and, via its interactive driver, as
+      # a `nix run` target (no dedicated system.build.vm image is produced).
+      mkVmTest = pkgs: name: kernelPackages:
+        pkgs.testers.runNixOSTest {
+          name = "jitterentropy-${name}";
+
+          nodes.machine = {
+            imports = [ (machineFor kernelPackages) ];
+            boot.kernelParams = [ "clocksource=tsc" "tsc=reliable" ];
+            virtualisation.qemu.options = [ "-cpu" "host" ];
           };
 
           testScript = ''
@@ -226,6 +242,39 @@
             vm = mkVmTest pkgs "vm" pkgs.linuxPackages;
             vm-latest = mkVmTest pkgs "vm-latest" pkgs.linuxPackages_latest;
           };
+
+      # A live ISO image booting the shared machine configuration on the
+      # chosen kernel, for exercising the Jitter RNG on real hardware. Build
+      # with e.g. `nix build .#iso-linux_6_6`; the image lands in
+      # result/iso/jitterentropy-<name>-<kernel version>.iso.
+      mkIso = system: name: kernelPackages:
+        (lib.nixosSystem {
+          modules = [
+            "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
+            (machineFor kernelPackages)
+            ({ config, lib, ... }: {
+              nixpkgs.hostPlatform = system;
+              image.baseName = lib.mkForce
+                "jitterentropy-${name}-${config.boot.kernelPackages.kernel.version}";
+              # The installation CD enables ZFS via all-hardware; not every
+              # kernel here has a compatible ZFS module (latest, testing,
+              # xanmod, ...), and the live image does not need ZFS.
+              boot.supportedFilesystems.zfs = lib.mkForce false;
+              # Throwaway live image, no state to migrate.
+              system.stateVersion = lib.trivial.release;
+            })
+          ];
+        }).config.system.build.isoImage;
+
+      # One live ISO per nixpkgs kernel, plus the default and latest kernels,
+      # mirroring the VM test set.
+      isosFor = system: pkgs:
+        (lib.mapAttrs'
+          (name: ps: lib.nameValuePair "iso-${name}" (mkIso system name ps))
+          (kernelSetsFor pkgs)) // {
+            iso = mkIso system "default" pkgs.linuxPackages;
+            iso-latest = mkIso system "latest" pkgs.linuxPackages_latest;
+          };
     in {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
@@ -236,7 +285,7 @@
           # selection is tunable via .override { withChardev, withHwrng,
           # withTestInterface }.
           jitterentropy-module = moduleFor pkgs pkgs.linuxPackages.kernel;
-        });
+        } // isosFor system pkgs);
 
       # `nix flake check` boots every VM and runs its assertions. Individual
       # VMs can be run with e.g. `nix build .#checks.x86_64-linux.vm-linux_6_6`.
