@@ -179,6 +179,10 @@ add_subdirectory(tests/gcd)
 add_subdirectory(tests/raw-entropy/validation-runtime)
 add_subdirectory(tests/raw-entropy/recording_userspace)
 add_subdirectory(tests/raw-entropy/recording_runtime_kernelspace)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Talks to the kernel module's chardev ioctl interface; Linux-only.
+    add_subdirectory(tests/chardev)
+endif()
 
 # pkg-config
 configure_package_config_file(
