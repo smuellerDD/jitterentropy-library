@@ -220,7 +220,10 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 		rc = jent_read_entropy_safe(&ctx->entropy_collector, tmp,
 					    towork);
 		if (rc < 0) {
-			/* Map the error; may panic under FIPS. */
+			/*
+			 * Map the error; panics under FIPS if the health
+			 * test failure is permanent.
+			 */
 			int err = jent_map_read_error(rc);
 
 			if (ret == 0)
