@@ -41,8 +41,12 @@
 extern unsigned int osr;
 extern int flags;
 
-/* Largest chunk handed to jent_read_entropy_safe() in one iteration. */
-#define JENT_CHARDEV_READ_BUF_SIZE 256
+/*
+ * Largest chunk handed to jent_read_entropy_safe() in one iteration. The
+ * instance lock is only held per chunk, so this also bounds how long a single
+ * reader can stall other users (readers, ioctl, procfs) of the same instance.
+ */
+#define JENT_CHARDEV_READ_BUF_SIZE 32
 
 /*
  * Subdirectory /proc/jitter_rng/instances holding one status file per open
@@ -75,7 +79,10 @@ static int jent_chardev_instance_status_show(struct seq_file *m, void *v)
 	if (!buf)
 		return -ENOMEM;
 
-	mutex_lock(&ctx->lock);
+	if (mutex_lock_interruptible(&ctx->lock)) {
+		kvfree(buf);
+		return -ERESTARTSYS;
+	}
 	if (ctx->entropy_collector)
 		ret = jent_status(ctx->entropy_collector, buf,
 				  JENT_STATUS_MAX_LEN);
@@ -188,28 +195,34 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 		return -ENOMEM;
 
 	/*
-	 * Jitter entropy collection is CPU-bound and slow, and the mutex may be
-	 * held by another reader of the same instance for a long time. A
-	 * non-blocking reader must not sleep on it; additionally, cap the
-	 * request at one buffer so the time spent generating stays bounded.
+	 * A non-blocking reader must not sleep on the instance lock and is
+	 * capped at one buffer so the time spent generating stays bounded.
 	 * Userspace observes an ordinary short read and is expected to retry.
 	 */
-	if (file->f_flags & O_NONBLOCK) {
+	if (file->f_flags & O_NONBLOCK)
 		nbytes = min_t(size_t, nbytes, JENT_CHARDEV_READ_BUF_SIZE);
-
-		if (!mutex_trylock(&ctx->lock)) {
-			ret = -EAGAIN;
-			goto out;
-		}
-	} else if (mutex_lock_interruptible(&ctx->lock)) {
-		ret = -ERESTARTSYS;
-		goto out;
-	}
 
 	while (nbytes) {
 		size_t towork = min_t(size_t, nbytes,
 				      JENT_CHARDEV_READ_BUF_SIZE);
 		ssize_t rc;
+
+		/*
+		 * Jitter entropy collection is CPU-bound and slow. Take the
+		 * lock per chunk so a large request cannot monopolize the
+		 * instance: concurrent readers, the status ioctl and the
+		 * per-instance proc file get a chance between chunks.
+		 */
+		if (file->f_flags & O_NONBLOCK) {
+			if (!mutex_trylock(&ctx->lock)) {
+				ret = -EAGAIN;
+				break;
+			}
+		} else if (mutex_lock_interruptible(&ctx->lock)) {
+			if (ret == 0)
+				ret = -ERESTARTSYS;
+			break;
+		}
 
 		/*
 		 * jent_read_entropy_safe() reallocates the collector on
@@ -219,6 +232,8 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 		 */
 		rc = jent_read_entropy_safe(&ctx->entropy_collector, tmp,
 					    towork);
+		mutex_unlock(&ctx->lock);
+
 		if (rc < 0) {
 			/*
 			 * Map the error; panics under FIPS if the health
@@ -231,6 +246,7 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 			break;
 		}
 
+		/* tmp is private to this call, no lock needed to copy out. */
 		if (copy_to_user(buf, tmp, rc)) {
 			if (ret == 0)
 				ret = -EFAULT;
@@ -253,9 +269,6 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 			cond_resched();
 	}
 
-	mutex_unlock(&ctx->lock);
-
-out:
 	kvfree_sensitive(tmp, JENT_CHARDEV_READ_BUF_SIZE);
 	return ret;
 }
