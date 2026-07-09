@@ -16,19 +16,22 @@
 jitter_rng_c_args = -DLINUX_KERNEL					       \
 		    -I$(src) -I$(src)/.. -I$(src)/../src
 
-ifdef CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
+# The interface options are boolean: 'y' enables, anything else (unset, empty,
+# 'n') disables. This allows overriding the Kbuild.config defaults from the
+# make command line, e.g. "make CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=n".
+ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
 endif
 
-ifdef CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV
+ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_CHARDEV
 endif
 
-ifdef CONFIG_EXTERNAL_JITTERENTROPY_HWRNG
+ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_HWRNG
 endif
 
-ifdef CONFIG_BUILTIN_JITTERENTROPY
+ifeq ($(CONFIG_BUILTIN_JITTERENTROPY),y)
 jitter_rng_c_args += -DCONFIG_BUILTIN_JITTERENTROPY
 endif
 
