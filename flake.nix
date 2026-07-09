@@ -80,11 +80,49 @@
               htop
               jq
               libkcapi
+              python3
               sp800-90b-entropyassessment
               tmux
               vim
               xxd
             ]);
+            # Exercises the chardev O_NONBLOCK semantics: reads are capped at
+            # one 256-byte buffer, and a reader that would have to wait for a
+            # concurrent read on the same file description gets EAGAIN.
+            environment.etc."jitterentropy-nonblock-test.py".text = ''
+              import os
+              import threading
+              import time
+
+              fd = os.open("/dev/jitterentropy", os.O_RDONLY | os.O_NONBLOCK)
+
+              data = os.read(fd, 4096)
+              assert len(data) == 256, f"nonblocking read returned {len(data)} bytes"
+
+              # A large blocking read holds the instance lock for its whole
+              # duration; nonblocking reads on the same file description must
+              # then see EAGAIN. The read must be issued while the fd is still
+              # blocking (O_NONBLOCK is checked on entry), hence the sleep
+              # before flipping the shared flag back. The daemon thread is
+              # killed on process exit; the kernel read loop honors the
+              # pending signal, so exit is not delayed by the large request.
+              os.set_blocking(fd, True)
+              t = threading.Thread(target=os.read, args=(fd, 4 * 1024 * 1024),
+                                   daemon=True)
+              t.start()
+              time.sleep(0.5)
+              os.set_blocking(fd, False)
+
+              deadline = time.monotonic() + 10
+              while True:
+                  try:
+                      os.read(fd, 16)
+                  except BlockingIOError:
+                      break
+                  assert time.monotonic() < deadline, "no EAGAIN observed"
+                  time.sleep(0.01)
+              print("OK")
+            '';
             services.getty.autologinUser = "root";
             console.keyMap = "de";
             environment.shellAliases = {
@@ -113,6 +151,9 @@
                 "exec 3<&-"
             )
             machine.succeed("test \"$(head -c 32 /dev/jitterentropy | wc -c)\" = 32")
+
+            # O_NONBLOCK reads: short-read cap and EAGAIN on contention.
+            print(machine.succeed("python3 /etc/jitterentropy-nonblock-test.py"))
 
             # The CMake-built userspace tools are on PATH.
             for tool in ("jitterentropy-rng", "jitterentropy-osr",
