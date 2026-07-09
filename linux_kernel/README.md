@@ -245,7 +245,14 @@ The Jitter RNG instance discussed before can be tested similar as the user space
 instance. For doing that, the option
 `CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE` found in the `Kbuild.config` must
 be enabled. This enables the test code and the interfaces to utilize the
-testing.
+testing. Instead of editing `Kbuild.config`, the option can also be set on the
+make command line:
+
+	make CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y
+
+The same applies to the other interface options
+(`CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV`,
+`CONFIG_EXTERNAL_JITTERENTROPY_HWRNG`), which can be disabled with `=n`.
 
 ## Test Execution
 
