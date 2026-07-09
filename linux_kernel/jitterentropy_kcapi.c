@@ -140,7 +140,7 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 		ret = 0;
 	} else {
 		/*
-		 * Map the error (panicking under FIPS on an unrecoverable
+		 * Map the error (panicking under FIPS on a permanent
 		 * health-test failure). Shared with the hwrng and character
 		 * device interfaces, see jitterentropy_error.h.
 		 */
