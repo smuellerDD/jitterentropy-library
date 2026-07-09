@@ -178,6 +178,7 @@ endif()
 add_subdirectory(tests/gcd)
 add_subdirectory(tests/raw-entropy/validation-runtime)
 add_subdirectory(tests/raw-entropy/recording_userspace)
+add_subdirectory(tests/raw-entropy/recording_runtime_kernelspace)
 
 # pkg-config
 configure_package_config_file(
