@@ -13,8 +13,8 @@
       forAllSystems = f: lib.genAttrs systems (system: f system);
 
       # Userspace library and tools, built with the project's CMake build.
-      # Installs jitterentropy-{hashtime,osr,rng}, gcd, extractlsb and
-      # getrawentropy into bin.
+      # Installs jitterentropy-{hashtime,osr,rng}, gcd, extractlsb,
+      # getrawentropy and jitterentropy-chardev-status into bin.
       toolsFor = pkgs:
         pkgs.stdenv.mkDerivation {
           pname = "jitterentropy-tools";
@@ -176,6 +176,12 @@
             )
             machine.succeed("test \"$(head -c 32 /dev/jitterentropy | wc -c)\" = 32")
 
+            # The chardev JENT_IOCSTATUS ioctl delivers the instance's JSON
+            # status (the tool also probes the EOVERFLOW length-report path).
+            print(machine.succeed(
+                "jitterentropy-chardev-status | jq -e .uuid"
+            ))
+
             # O_NONBLOCK reads: short-read cap and EAGAIN on contention.
             print(machine.succeed("python3 /etc/jitterentropy-nonblock-test.py"))
 
@@ -196,7 +202,7 @@
             # The CMake-built userspace tools are on PATH.
             for tool in ("jitterentropy-rng", "jitterentropy-osr",
                          "jitterentropy-hashtime", "gcd", "extractlsb",
-                         "getrawentropy"):
+                         "getrawentropy", "jitterentropy-chardev-status"):
                 machine.succeed(f"command -v {tool}")
           '';
         };
