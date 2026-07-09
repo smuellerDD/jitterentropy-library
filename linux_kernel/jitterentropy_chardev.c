@@ -5,7 +5,9 @@
  * This registers a misc character device (/dev/jitterentropy). For every
  * open() a dedicated Jitter RNG entropy collector is allocated; it is freed
  * again on the matching release(). read() delivers entropy bytes obtained
- * from that per-open instance.
+ * from that per-open instance. O_NONBLOCK reads return -EAGAIN instead of
+ * waiting for a concurrent reader of the same instance and are capped at
+ * one internal buffer (a short read) per call.
  *
  * The whole interface can be disabled at compile time by not setting the
  * CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV configuration option (see
@@ -185,7 +187,21 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 	if (!tmp)
 		return -ENOMEM;
 
-	if (mutex_lock_interruptible(&ctx->lock)) {
+	/*
+	 * Jitter entropy collection is CPU-bound and slow, and the mutex may be
+	 * held by another reader of the same instance for a long time. A
+	 * non-blocking reader must not sleep on it; additionally, cap the
+	 * request at one buffer so the time spent generating stays bounded.
+	 * Userspace observes an ordinary short read and is expected to retry.
+	 */
+	if (file->f_flags & O_NONBLOCK) {
+		nbytes = min_t(size_t, nbytes, JENT_CHARDEV_READ_BUF_SIZE);
+
+		if (!mutex_trylock(&ctx->lock)) {
+			ret = -EAGAIN;
+			goto out;
+		}
+	} else if (mutex_lock_interruptible(&ctx->lock)) {
 		ret = -ERESTARTSYS;
 		goto out;
 	}
