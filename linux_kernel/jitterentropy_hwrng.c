@@ -72,15 +72,17 @@ static int jent_hwrng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 
 	/*
 	 * Jitter entropy collection is CPU-bound and slow, and the mutex may be
-	 * held by another reader for a long time. A non-blocking caller
-	 * (wait == false) must not sleep on it; report "no data available"
-	 * instead so the hwrng core can fall back or retry.
+	 * held by another reader while it generates (bounded by the hwrng core
+	 * buffer size per call). A non-blocking caller (wait == false) must not
+	 * sleep on it; report "no data available" instead so the hwrng core can
+	 * fall back or retry. A blocking caller sleeps interruptibly so a
+	 * /dev/hwrng reader stays killable while waiting.
 	 */
 	if (!wait) {
 		if (!mutex_trylock(&ctx->lock))
 			return 0;
-	} else {
-		mutex_lock(&ctx->lock);
+	} else if (mutex_lock_interruptible(&ctx->lock)) {
+		return -ERESTARTSYS;
 	}
 	/*
 	 * jent_read_entropy_safe() reallocates the collector on intermittent
@@ -128,7 +130,10 @@ static int jent_hwrng_proc_status_show(struct seq_file *m, void *v)
 	 * the read path, which may reallocate the collector on health-test
 	 * recovery, so it cannot be freed underneath jent_status().
 	 */
-	mutex_lock(&ctx->lock);
+	if (mutex_lock_interruptible(&ctx->lock)) {
+		kvfree(buf);
+		return -ERESTARTSYS;
+	}
 	if (ctx->entropy_collector)
 		ret = jent_status(ctx->entropy_collector, buf,
 				  JENT_HWRNG_STATUS_BUF_SIZE);
