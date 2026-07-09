@@ -13,7 +13,8 @@
       forAllSystems = f: lib.genAttrs systems (system: f system);
 
       # Userspace library and tools, built with the project's CMake build.
-      # Installs jitterentropy-{hashtime,osr,rng}, gcd and extractlsb into bin.
+      # Installs jitterentropy-{hashtime,osr,rng}, gcd, extractlsb and
+      # getrawentropy into bin.
       toolsFor = pkgs:
         pkgs.stdenv.mkDerivation {
           pname = "jitterentropy-tools";
@@ -28,36 +29,53 @@
         };
 
       # Out-of-tree kernel module (jitter_rng.ko) built against a given kernel.
-      # The Kbuild.config in linux_kernel/ enables the crypto, character device
-      # and hwrng interfaces, so the resulting module carries all of them.
+      # The with* arguments mirror the CONFIG_EXTERNAL_JITTERENTROPY_* options
+      # in linux_kernel/Kbuild.config and are passed on the make command line,
+      # overriding that file's defaults. They can be changed on the resulting
+      # derivation via .override. withTestInterface enables the debugfs raw
+      # entropy test interface, which starves the RNG of entropy and thus must
+      # never be enabled on production systems.
       moduleFor = pkgs: kernel:
-        pkgs.stdenv.mkDerivation {
-          pname = "jitterentropy-kmod";
-          version = kernel.version;
-          src = self;
+        lib.makeOverridable ({ withChardev, withHwrng, withTestInterface }:
+          let
+            flag = enabled: if enabled then "y" else "n";
+          in pkgs.stdenv.mkDerivation {
+            pname = "jitterentropy-kmod";
+            version = kernel.version;
+            src = self;
 
-          hardeningDisable = [ "pic" "format" ];
-          nativeBuildInputs = kernel.moduleBuildDependencies;
+            hardeningDisable = [ "pic" "format" ];
+            nativeBuildInputs = kernel.moduleBuildDependencies;
 
-          buildPhase = ''
-            runHook preBuild
-            make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build \
-              M=$(pwd)/linux_kernel modules
-            runHook postBuild
-          '';
+            buildPhase = ''
+              runHook preBuild
+              make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build \
+                M=$(pwd)/linux_kernel \
+                CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV=${flag withChardev} \
+                CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=${flag withHwrng} \
+                CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=${
+                  flag withTestInterface
+                } \
+                modules
+              runHook postBuild
+            '';
 
-          installPhase = ''
-            runHook preInstall
-            install -D linux_kernel/jitter_rng.ko \
-              "$out/lib/modules/${kernel.modDirVersion}/extra/jitter_rng.ko"
-            runHook postInstall
-          '';
+            installPhase = ''
+              runHook preInstall
+              install -D linux_kernel/jitter_rng.ko \
+                "$out/lib/modules/${kernel.modDirVersion}/extra/jitter_rng.ko"
+              runHook postInstall
+            '';
 
-          meta = {
-            description = "Jitter RNG out-of-tree Linux kernel module";
-            license = lib.licenses.gpl2Plus;
+            meta = {
+              description = "Jitter RNG out-of-tree Linux kernel module";
+              license = lib.licenses.gpl2Plus;
+            };
+          }) {
+            withChardev = true;
+            withHwrng = true;
+            withTestInterface = false;
           };
-        };
 
       # A NixOS integration test that boots a VM with the chosen kernel, the
       # jitter_rng module built against it and loaded at boot, and the userspace
@@ -70,8 +88,13 @@
 
           nodes.machine = { config, pkgs, ... }: {
             boot.kernelPackages = kernelPackages;
-            boot.extraModulePackages =
-              [ (moduleFor pkgs config.boot.kernelPackages.kernel) ];
+            # The VM exercises every interface, including the debugfs raw
+            # entropy test interface that is off by default.
+            boot.extraModulePackages = [
+              ((moduleFor pkgs config.boot.kernelPackages.kernel).override {
+                withTestInterface = true;
+              })
+            ];
             boot.kernelModules = [ "jitter_rng" ];
             environment.systemPackages = [
               (toolsFor pkgs)
@@ -126,6 +149,7 @@
             services.getty.autologinUser = "root";
             console.keyMap = "de";
             environment.shellAliases = {
+              "clock_rdtsc" = "echo rdtsc > /sys/devices/system/clocksource/clocksource0/current_clocksource";
               "jitter_hwrng" = "echo jitterentropy > /sys/class/misc/hw_random/rng_current";
               "show_hwrng" = "cat /sys/class/misc/hw_random/rng_current";
               "kcapi_read" = "kcapi-rng -n jitter_rng -b 32 --hex";
@@ -155,9 +179,24 @@
             # O_NONBLOCK reads: short-read cap and EAGAIN on contention.
             print(machine.succeed("python3 /etc/jitterentropy-nonblock-test.py"))
 
+            # The debugfs raw entropy test interface delivers timing samples.
+            machine.succeed(
+                "test \"$(head -c 64 /sys/kernel/debug/jitter_rng/jent_raw_hires"
+                " | wc -c)\" = 64"
+            )
+
+            # getrawentropy drives the same interface end-to-end: it sets the
+            # testing_osr module parameter and prints time deltas of the raw
+            # samples. --samples N yields N + 1 deltas (the tool requests one
+            # extra word beyond the delta baseline).
+            machine.succeed(
+                "test \"$(getrawentropy --samples 100 --osr 3 | wc -l)\" = 101"
+            )
+
             # The CMake-built userspace tools are on PATH.
             for tool in ("jitterentropy-rng", "jitterentropy-osr",
-                         "jitterentropy-hashtime", "gcd", "extractlsb"):
+                         "jitterentropy-hashtime", "gcd", "extractlsb",
+                         "getrawentropy"):
                 machine.succeed(f"command -v {tool}")
           '';
         };
@@ -187,7 +226,9 @@
         in {
           default = toolsFor pkgs;
           jitterentropy-tools = toolsFor pkgs;
-          # Module built against the nixpkgs default kernel.
+          # Module built against the nixpkgs default kernel. Interface
+          # selection is tunable via .override { withChardev, withHwrng,
+          # withTestInterface }.
           jitterentropy-module = moduleFor pkgs pkgs.linuxPackages.kernel;
         });
 
