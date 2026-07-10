@@ -86,6 +86,15 @@ extern "C" {
 # define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #endif
 
+/*
+ * Test interface support (see jitterentropy-base.c): allocate an entropy
+ * collector without running the startup entropy collection and its
+ * health-test reset ladder. Only intended for the kernel test interface
+ * (linux_kernel/jitterentropy_testing.c).
+ */
+struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
+						   unsigned int flags);
+
 #else /* LINUX_KERNEL */
 
 #if __has_attribute(__fallthrough__)

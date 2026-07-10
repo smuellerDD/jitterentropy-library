@@ -218,20 +218,25 @@ static int __init jent_mod_init(void)
 {
 	int ret = 0;
 
-	jent_testing_init();
-
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
 		/* Handle permanent health test error */
 		if (fips_enabled)
 			panic("jitterentropy: Initialization failed with host not compliant with requirements: %d\n", ret);
 
-		jent_testing_exit();
 		pr_info("jitterentropy: Initialization failed with host not compliant with requirements: %d\n", ret);
 		return -EFAULT;
 	}
 
 	jent_proc_init();
+
+	/*
+	 * Register the debugfs test interface only after the library
+	 * initialization above completed: the file is visible to userspace
+	 * immediately, and a read triggers library init paths that must not
+	 * run concurrently with jent_entropy_init_ex().
+	 */
+	jent_testing_init();
 
 	ret = crypto_register_rng(&jent_alg);
 	if (ret)
@@ -252,8 +257,8 @@ err_chardev:
 err_crypto:
 	crypto_unregister_rng(&jent_alg);
 err:
-	jent_proc_exit();
 	jent_testing_exit();
+	jent_proc_exit();
 	return ret;
 }
 

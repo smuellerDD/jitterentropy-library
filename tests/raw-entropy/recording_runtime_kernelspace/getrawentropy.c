@@ -44,7 +44,6 @@
 #define DEBUGFS_INTERFACE	"/sys/kernel/debug/jitter_rng/jent_raw_hires"
 #define SYSFS_PARAM_DIR		"/sys/module/jitter_rng/parameters"
 
-#define JENT_TEST_COMMON (1<<14)
 #define JENT_TEST_HASHLOOP (1<<15)
 #define JENT_TEST_MEMACCLOOP (1<<16)
 

@@ -1,6 +1,13 @@
 KERNELRELEASE ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(KERNELRELEASE)/build
 
+# Kbuild.source defines jitter_rng-y, which the clean target below needs: the
+# kernel's own external-module clean only covers this directory, while the
+# library objects live in ../src and ../arch. Both files only set variables
+# (no rules), so including them does not affect the default target.
+include Kbuild.config
+include Kbuild.source
+
 default: modules
 install: modules_install
 

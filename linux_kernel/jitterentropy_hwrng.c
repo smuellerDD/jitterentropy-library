@@ -25,6 +25,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/version.h>
 
 #include "jitterentropy.h"
 #include "jitterentropy_error.h"
@@ -43,16 +44,27 @@ extern int flags;
  * Entropy quality declared to the hw_random framework, expressed as the number
  * of bits of estimated entropy per 1024 bits of output (maximum 1024).
  *
- * A value of 0 (the default) registers the device without contributing to the
- * kernel random pool automatically; the Jitter RNG output is still available
- * via /dev/hwrng. Set it to a non-zero value (e.g. 1024 as the Jitter RNG is
- * designed to deliver full-entropy, conditioned output) to let the in-kernel
- * hwrng thread feed the entropy pool.
+ * The meaning of the default of 0 depends on the kernel version:
+ *
+ * - Kernels < 6.2: the device is registered without contributing to the
+ *   kernel random pool automatically; the Jitter RNG output is still
+ *   available via /dev/hwrng.
+ *
+ * - Kernels >= 6.2: the hw_random core promotes a driver quality of 0 to the
+ *   global default (module parameter rng_core.default_quality, 1024 unless
+ *   overridden), so the in-kernel hwrng thread will feed the random pool with
+ *   full entropy credit. A per-driver opt-out no longer exists; boot with
+ *   rng_core.default_quality=0 or lower /sys/class/misc/hw_random/rng_quality
+ *   at runtime to prevent the automatic crediting. jent_hwrng_init() reports
+ *   the effective quality after registration.
+ *
+ * Set a non-zero value (e.g. 1024, as the Jitter RNG is designed to deliver
+ * full-entropy, conditioned output) to declare the quality explicitly.
  */
 static unsigned int hwrng_quality = 0;
 module_param(hwrng_quality, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(hwrng_quality,
-		 "Jitter RNG hwrng entropy quality (bits per 1024 bits, 0..1024)");
+		 "Jitter RNG hwrng entropy quality (bits per 1024 bits, 0..1024; on kernels >= 6.2 the hw_random core promotes 0 to rng_core.default_quality)");
 
 /* State backing the single hwrng instance. */
 struct jent_hwrng_ctx {
@@ -180,8 +192,18 @@ int jent_hwrng_init(void)
 		return ret;
 	}
 
-	pr_info("jitterentropy: hwrng device '%s' registered\n",
-		jent_hwrng.name);
+	/*
+	 * Report the effective quality: on kernels >= 6.2, hwrng_register()
+	 * rewrites the requested value (in particular it promotes 0 to the
+	 * rng_core.default_quality global, 1024 unless overridden).
+	 */
+	pr_info("jitterentropy: hwrng device '%s' registered (effective quality %u)\n",
+		jent_hwrng.name, jent_hwrng.quality);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+	if (!hwrng_quality && jent_hwrng.quality)
+		pr_notice("jitterentropy: hwrng_quality=0 was promoted to %u by the hw_random core; the kernel may credit Jitter RNG output to the random pool (boot with rng_core.default_quality=0 to prevent this)\n",
+			  jent_hwrng.quality);
+#endif
 
 	/*
 	 * Non-fatal: the hwrng device is fully functional without the status

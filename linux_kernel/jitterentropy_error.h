@@ -44,7 +44,13 @@ static inline int jent_map_read_error(ssize_t ret)
 		if (fips_enabled)
 			panic("Jitter RNG permanent health test failure\n");
 
-		pr_err("Jitter RNG permanent health test failure\n");
+		/*
+		 * Rate-limited: a permanent failure is sticky for the affected
+		 * instance, and periodic retries (e.g. the hwrng core's fill
+		 * thread, which retries every 10 seconds forever) would
+		 * otherwise flood the log.
+		 */
+		pr_err_ratelimited("Jitter RNG permanent health test failure\n");
 		return -EFAULT;
 	case -2:
 	case -3:

@@ -20,6 +20,7 @@
 #include <linux/sched/signal.h>
 #include <linux/uaccess.h>
 
+#include "jitterentropy-internal.h"
 #include "jitterentropy-noise.h"
 #include "jitterentropy.h"
 #include "jitterentropy_testing.h"
@@ -32,7 +33,6 @@
  */
 static DEFINE_MUTEX(jent_testing_read_lock);
 
-#define JENT_TEST_COMMON (1<<14)
 #define JENT_TEST_HASHLOOP (1<<15)
 #define JENT_TEST_MEMACCLOOP (1<<16)
 
@@ -125,11 +125,29 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 	if (mutex_lock_interruptible(&jent_testing_read_lock))
 		return -ERESTARTSYS;
 
-	ec = jent_entropy_collector_alloc(testing_osr, testing_flags);
+	/*
+	 * Allocate the collector without the startup entropy collection and
+	 * its health-test reset ladder (mirroring the userspace recording
+	 * tools): the startup could silently escalate OSR, memory size and
+	 * hash loop count, but the recorded raw data must correspond exactly
+	 * to the requested testing_osr/testing_flags.
+	 */
+	ec = jent_entropy_collector_alloc_raw(testing_osr, testing_flags);
 	if (!ec) {
+		/*
+		 * The allocation also fails on invalid parameters or a failed
+		 * power-up self test, not only on memory shortage.
+		 */
+		pr_warn("jitterentropy: raw entropy collector allocation failed (out of memory, invalid testing_osr/testing_flags or self-test failure)\n");
 		ret = -ENOMEM;
 		goto out;
 	}
+
+	/*
+	 * Match the userspace recording tools: enable the full SP800-90B
+	 * health test handling while recording.
+	 */
+	ec->is_fips_enabled = 1;
 
 	jent_testing_log(ec);
 
@@ -153,14 +171,16 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 		size_t not_copied;
 		u32 i;
 
-		if (large_request && need_resched()) {
-			if (signal_pending(current)) {
-				if (ret == 0)
-					ret = -ERESTARTSYS;
-				break;
-			}
-			schedule();
+		/* Honor pending signals regardless of the resched state. */
+		if (signal_pending(current)) {
+			if (ret == 0)
+				ret = -ERESTARTSYS;
+			break;
 		}
+
+		/* Be cooperative for large requests. */
+		if (large_request && need_resched())
+			schedule();
 
 		/*
 		 * Prime the common measurement (initialize ec->prev_time) so
