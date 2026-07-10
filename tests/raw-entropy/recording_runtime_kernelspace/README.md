@@ -22,7 +22,12 @@ vanilla kernel follow these steps:
    set to `u64` you MUST compile the tool with `-DRAW_DATATYPE_U64`.
 
 3. Execute as root to obtain the raw entropy data:
-	`getrawentropy -f /sys/kernel/debug/jitterentropy_testing/jent_raw_hires -s 1000001 > /dev/shm/jent-raw-noise-0001.data`
+	`getrawentropy --timestamps -f /sys/kernel/debug/jitterentropy_testing/jent_raw_hires -s 1000000 > /dev/shm/jent-raw-noise-0001.data`
+
+   NOTE: The vanilla kernel interface delivers raw time stamps. The
+   `--timestamps` option instructs getrawentropy to convert them into the
+   time deltas required for the entropy analysis. `--samples N` emits
+   exactly N values.
 
 4. In parallel to step 3, stimulate the generation of entropy, e.g. by using
    the following command with a tool from libkcapi using the following command
@@ -38,6 +43,12 @@ vanilla kernel follow these steps:
 When compiling the Jitter RNG provided with this archive as your entropy source,
 follow the test steps outlined in the `linux_kernel/README.md` file to enable
 testing.
+
+Unlike the vanilla kernel interface, the out-of-tree module's debugfs interface
+delivers the output time deltas of the measure_jitter operation directly (i.e.
+the raw noise values as consumed by the health tests and the entropy pool,
+including the division by the common timer GCD). getrawentropy therefore prints
+the values unmodified; do NOT use the `--timestamps` option here.
    
 ### Linux Entropy Recording and Validation
 

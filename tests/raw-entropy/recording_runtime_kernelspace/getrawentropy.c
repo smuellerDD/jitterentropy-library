@@ -71,6 +71,7 @@ struct opts {
 	size_t samples;
 	unsigned int flags;
 	unsigned int osr;
+	unsigned int timestamps;
 	const char *debugfs_file;
 	const char *sysfs_dir;
 };
@@ -115,9 +116,12 @@ static int getrawentropy(const struct opts *opts)
 	/*
 	 * Use size_t to avoid truncating the byte count for large --samples
 	 * values (the previous uint32_t wrapped, e.g. silently yielding 0).
+	 *
+	 * requested counts the output samples still to be printed; --samples N
+	 * yields exactly N output lines in both operation modes.
 	 */
-	size_t requested = (opts->samples + 1) * DATASIZE;
-	lrngval_t leftover;
+	size_t requested = opts->samples * DATASIZE;
+	lrngval_t leftover = 0;
 	uint8_t leftover_present = 0;
 	uint8_t *buffer_p, buffer[BUFFER_SIZE];
 	ssize_t ret;
@@ -136,8 +140,18 @@ static int getrawentropy(const struct opts *opts)
 
 	while (requested) {
 		unsigned int i;
-		unsigned int gather = ((BUFFER_SIZE > (requested + DATASIZE)) ?
-				       (requested + DATASIZE) : BUFFER_SIZE);
+		size_t need = requested;
+		size_t gather;
+
+		/*
+		 * In time stamp mode, the first input value only serves as the
+		 * baseline of the delta computation and produces no output, so
+		 * one extra input value is required.
+		 */
+		if (opts->timestamps && !leftover_present)
+			need += DATASIZE;
+
+		gather = (need > BUFFER_SIZE) ? BUFFER_SIZE : need;
 
 		buffer_p = buffer;
 
@@ -163,22 +177,35 @@ static int getrawentropy(const struct opts *opts)
 			lrngval_t val;
 
 			memcpy(&val, buffer_p, DATASIZE);
+			buffer_p += DATASIZE;
 
-			if (leftover_present) {
+			if (opts->timestamps) {
+				/*
+				 * Time stamp mode: the interface delivers raw
+				 * time stamps, output the deltas of successive
+				 * values.
+				 */
+				if (!leftover_present) {
+					leftover = val;
+					leftover_present = 1;
+					continue;
+				}
+
 				printf("%"PR_DATATYPE"\n", val - leftover);
-
 				leftover = val;
-
-				requested -= DATASIZE;
-
-				if (requested == 0)
-					break;
 			} else {
-				leftover = val;
-				leftover_present = 1;
+				/*
+				 * Delta mode (default): the interface delivers
+				 * the raw noise time deltas as consumed by the
+				 * Jitter RNG, output them unmodified.
+				 */
+				printf("%"PR_DATATYPE"\n", val);
 			}
 
-			buffer_p += DATASIZE;
+			requested -= DATASIZE;
+
+			if (requested == 0)
+				break;
 		}
 	}
 
@@ -199,6 +226,12 @@ out:
  * --samples Number of raw values generated for one instance
  * --debugfs-file DebugFS file to access
  * --param-dir SysFS parameter directory
+ * --timestamps The interface delivers raw time stamps instead of time deltas:
+ *	        print the deltas of successive values. This is required for the
+ *	        test interface of the vanilla Linux kernel
+ *	        (crypto/jitterentropy-testing.c). The out-of-tree module of this
+ *	        code base delivers the measure_jitter output time deltas
+ *	        directly, which are printed unmodified (default).
  * --ntg1 Enable flag JENT_NTG1
  * --force-fips Enable flag JENT_FORCE_FIPS
  * --disable-memory-access Enable flag JENT_DISABLE_MEMORY_ACCESS
@@ -223,9 +256,10 @@ int main(int argc, char * argv[])
 	opts.sysfs_dir = SYSFS_PARAM_DIR;
 	opts.osr = 0;
 	opts.flags = 0;
+	opts.timestamps = 0;
 
 	if (argc < 4) {
-		printf("%s --samples <NUMSAMPLES> | --debugfs-file <FILE> [ --param-dir <DIR> | --ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>|--status]\n", argv[0]);
+		printf("%s --samples <NUMSAMPLES> | --debugfs-file <FILE> [ --param-dir <DIR> | --timestamps | --ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>|--status]\n", argv[0]);
 		return 1;
 	}
 
@@ -270,7 +304,9 @@ int main(int argc, char * argv[])
 
 			opts.sysfs_dir = argv[1];
 
-		} else if (!strncmp(argv[1], "--ntg1", 6))
+		} else if (!strncmp(argv[1], "--timestamps", 12))
+			opts.timestamps = 1;
+		else if (!strncmp(argv[1], "--ntg1", 6))
 			opts.flags |= JENT_NTG1;
 		else if (!strncmp(argv[1], "--force-fips", 12))
 			opts.flags |= JENT_FORCE_FIPS;
