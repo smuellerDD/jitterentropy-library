@@ -32,8 +32,8 @@
  *
  * osr, flags and verbose are non-static as they are shared with the kernel
  * interfaces: osr and flags with the crypto API, hwrng and character device
- * interfaces, verbose with the crypto API interface (see
- * jitterentropy_kcapi.c).
+ * interfaces, verbose with the crypto API and test interfaces (see
+ * jitterentropy_kcapi.c and jitterentropy_testing.c).
  */
 unsigned int osr = 0;
 int flags = 0;
