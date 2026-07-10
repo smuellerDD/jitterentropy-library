@@ -3,11 +3,12 @@
  * Test interface for Jitter RNG.
  *
  * The debugfs file jent_raw_hires provides the raw noise data of the Jitter
- * RNG: each read drives the measure_jitter operation of a dedicated Jitter RNG
- * instance and returns one u64 per measurement holding the time delta as
- * consumed by the health tests and the entropy pool (i.e. including the
- * division by the common timer GCD). This mirrors the user space recording
- * logic in tests/raw-entropy/recording_userspace/jitterentropy-hashtime.c.
+ * RNG: each open allocates a dedicated Jitter RNG instance, each read drives
+ * its measure_jitter operation and returns one u64 per measurement holding
+ * the time delta as consumed by the health tests and the entropy pool (i.e.
+ * including the division by the common timer GCD). This mirrors the user
+ * space recording logic in
+ * tests/raw-entropy/recording_userspace/jitterentropy-hashtime.c.
  *
  * Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
  */
@@ -18,6 +19,7 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 
 #include "jitterentropy-internal.h"
@@ -40,8 +42,8 @@ static struct dentry *jent_raw_debugfs_root = NULL;
 
 /*
  * The tester can define the OSR as well as the flags used to perform the
- * testing with. The module_param below allwos them to be also updated while
- * the module is inserted. As for each new read operation to get test data
+ * testing with. The module_param below allows them to be also updated while
+ * the module is inserted. As for each new open of the test interface file
  * a new Jitter RNG instance is allocated with the given OSR/flags, the
  * tester can perform the following without loading/unloading the Jitter RNG:
  *
@@ -63,10 +65,20 @@ MODULE_PARM_DESC(testing_flags, "Jitter RNG testing flags parameter");
 static unsigned int logged_osr = 0xffffffff;
 static int logged_flags = 0xffffffff;
 
+/*
+ * Verbose logging switch, configurable via the module parameter of the same
+ * name (see jitterentropy_mod.c).
+ */
+extern unsigned int verbose;
+
 static int jent_testing_log(struct rand_data *ec)
 {
+	char *line, *p;
 	char *buf;
 	int ret;
+
+	if (!verbose)
+		return 0;
 
 	if (logged_osr == testing_osr && logged_flags == testing_flags)
 		return 0;
@@ -90,7 +102,17 @@ static int jent_testing_log(struct rand_data *ec)
 	if (ret < 0)
 		goto err;
 
-	pr_notice_ratelimited("%s\n", buf);
+	/*
+	 * printk truncates records at about 1 kB; emit the multi-line JSON
+	 * status line by line so it arrives intact. Rate-limit the status as
+	 * a whole, not per line, so an emitted status is never cut short.
+	 */
+	p = buf;
+	while ((line = strsep(&p, "\n")) != NULL) {
+		if (*line) {
+			pr_notice("%s\n", line);
+		}
+	}
 
 err:
 	kvfree(buf);
@@ -99,31 +121,40 @@ err:
 
 /************** Raw High-Resolution Timer Entropy Data Handling **************/
 
-static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
-					 size_t nbytes, loff_t *ppos)
-{
-	struct rand_data *ec = NULL;
-	u64 *tmp = NULL;
-	ssize_t ret = 0;
-	int large_request = (nbytes > 256);
-
+/*
+ * Per-open state: each open() gets its own Jitter RNG instance, allocated
+ * with the testing_osr/testing_flags values at open time. The measurement
+ * routine is captured alongside so a testing_flags update between open() and
+ * read() cannot make the recording routine disagree with the instance's
+ * configuration.
+ */
+struct jent_testing_ctx {
+	struct rand_data *ec;
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 				       uint64_t loop_cnt,
 				       uint64_t *ret_current_delta);
+};
+
+static int jent_testing_open(struct inode *inode, struct file *file)
+{
+	struct jent_testing_ctx *ctx;
+
+	ctx = kvzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
 
 	if (testing_flags & (JENT_TEST_HASHLOOP))
-		measure_jitter = jent_measure_jitter_ntg1_sha3;
+		ctx->measure_jitter = jent_measure_jitter_ntg1_sha3;
 	else if (testing_flags & (JENT_TEST_MEMACCLOOP))
-		measure_jitter = jent_measure_jitter_ntg1_memaccess;
+		ctx->measure_jitter = jent_measure_jitter_ntg1_memaccess;
 	else
-		measure_jitter = jent_measure_jitter;
+		ctx->measure_jitter = jent_measure_jitter;
 
-	if (!nbytes)
-		return 0;
-
-	/* Only one extract session may run at a time. */
-	if (mutex_lock_interruptible(&jent_testing_read_lock))
+	/* Serialize the jent_testing_log() bookkeeping. */
+	if (mutex_lock_interruptible(&jent_testing_read_lock)) {
+		kvfree(ctx);
 		return -ERESTARTSYS;
+	}
 
 	/*
 	 * Allocate the collector without the startup entropy collection and
@@ -132,24 +163,66 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 	 * hash loop count, but the recorded raw data must correspond exactly
 	 * to the requested testing_osr/testing_flags.
 	 */
-	ec = jent_entropy_collector_alloc_raw(testing_osr, testing_flags);
-	if (!ec) {
+	ctx->ec = jent_entropy_collector_alloc_raw(testing_osr, testing_flags);
+	if (!ctx->ec) {
+		mutex_unlock(&jent_testing_read_lock);
 		/*
 		 * The allocation also fails on invalid parameters or a failed
 		 * power-up self test, not only on memory shortage.
 		 */
 		pr_warn("jitterentropy: raw entropy collector allocation failed (out of memory, invalid testing_osr/testing_flags or self-test failure)\n");
-		ret = -ENOMEM;
-		goto out;
+		kvfree(ctx);
+		return -ENOMEM;
 	}
 
 	/*
 	 * Match the userspace recording tools: enable the full SP800-90B
 	 * health test handling while recording.
 	 */
-	ec->is_fips_enabled = 1;
+	ctx->ec->is_fips_enabled = 1;
 
-	jent_testing_log(ec);
+	jent_testing_log(ctx->ec);
+	mutex_unlock(&jent_testing_read_lock);
+
+	file->private_data = ctx;
+
+	return 0;
+}
+
+static int jent_testing_release(struct inode *inode, struct file *file)
+{
+	struct jent_testing_ctx *ctx = file->private_data;
+
+	if (!ctx)
+		return 0;
+
+	jent_entropy_collector_free(ctx->ec);
+	kvfree(ctx);
+	file->private_data = NULL;
+
+	return 0;
+}
+
+static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
+					 size_t nbytes, loff_t *ppos)
+{
+	struct jent_testing_ctx *ctx = file->private_data;
+	struct rand_data *ec = ctx->ec;
+	u64 *tmp = NULL;
+	ssize_t ret = 0;
+	int large_request = (nbytes > 256);
+
+	unsigned int (*measure_jitter)(struct rand_data *ec,
+				       uint64_t loop_cnt,
+				       uint64_t *ret_current_delta) =
+		ctx->measure_jitter;
+
+	if (!nbytes)
+		return 0;
+
+	/* Only one extract session may run at a time. */
+	if (mutex_lock_interruptible(&jent_testing_read_lock))
+		return -ERESTARTSYS;
 
 	/*
 	 * The intention of this interface is for collecting at least
@@ -160,8 +233,8 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 #define JENT_TESTING_DATA_SIZE	(JENT_TESTING_SAMPLES * sizeof(u64))
 	tmp = kvmalloc(JENT_TESTING_DATA_SIZE, GFP_KERNEL);
 	if (!tmp) {
-		ret = -ENOMEM;
-		goto out;
+		mutex_unlock(&jent_testing_read_lock);
+		return -ENOMEM;
 	}
 
 	while (nbytes >= sizeof(u64)) {
@@ -220,17 +293,15 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 	if (ret > 0)
 		*ppos += ret;
 
-out:
-	if (ec)
-		jent_entropy_collector_free(ec);
-	if (tmp)
-		kvfree_sensitive(tmp, JENT_TESTING_DATA_SIZE);
+	kvfree_sensitive(tmp, JENT_TESTING_DATA_SIZE);
 	mutex_unlock(&jent_testing_read_lock);
 	return ret;
 }
 
 static const struct file_operations jent_raw_hires_fops = {
 	.owner = THIS_MODULE,
+	.open = jent_testing_open,
+	.release = jent_testing_release,
 	.read = jent_testing_extract_user,
 };
 

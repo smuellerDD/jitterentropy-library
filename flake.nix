@@ -93,10 +93,11 @@
             })
           ];
           boot.kernelModules = [ "jitter_rng" ];
-          # Verbose logging of the kcapi per-instance JSON status to the
-          # kernel log; only useful on test systems like these images.
+          # Verbose logging of the kcapi and test interface per-instance
+          # JSON status to the kernel log; only useful on test systems like
+          # these images.
           boot.extraModprobeConfig = ''
-            options jitter_rng verbose=0
+            options jitter_rng verbose=1
           '';
           environment.systemPackages = [
             (toolsFor pkgs)
@@ -209,10 +210,33 @@
 
             # The debugfs raw entropy test interface delivers the raw noise
             # time deltas of the measure_jitter operation.
+            machine.succeed("dmesg --clear")
             machine.succeed(
                 "test \"$(head -c 64 /sys/kernel/debug/jitter_rng/jent_raw_hires"
                 " | wc -c)\" = 64"
             )
+
+            # With verbose=1 (set via modprobe.d in the machine
+            # configuration), the open of the test interface logged the
+            # recording instance's JSON status to the kernel log. printk
+            # truncates records at about 1 kB, so the status is emitted line
+            # by line; verify that the complete document landed in the log
+            # buffer.
+            import json
+            import re
+
+            kernel_log = machine.succeed("dmesg")
+            # Strip the timestamp prefix and undo dmesg's escaping of the
+            # tab indentation.
+            msgs = [
+                re.sub(r"^\[[^\]]*\] ?", "", line).replace("\\x09", "\t")
+                for line in kernel_log.splitlines()
+            ]
+            start = msgs.index("{")
+            end = msgs.index("}", start)
+            doc = "\n".join(msgs[start:end + 1])
+            print(doc)
+            json.loads(doc)
 
             # getrawentropy drives the same interface end-to-end: it sets the
             # testing_osr module parameter and prints the raw time delta
