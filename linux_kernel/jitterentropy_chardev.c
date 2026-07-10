@@ -215,7 +215,14 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 		 */
 		if (file->f_flags & O_NONBLOCK) {
 			if (!mutex_trylock(&ctx->lock)) {
-				ret = -EAGAIN;
+				/*
+				 * Preserve an already accumulated partial
+				 * count (reachable when O_NONBLOCK is set
+				 * mid-read via fcntl()), like every other
+				 * error path in this loop.
+				 */
+				if (ret == 0)
+					ret = -EAGAIN;
 				break;
 			}
 		} else if (mutex_lock_interruptible(&ctx->lock)) {

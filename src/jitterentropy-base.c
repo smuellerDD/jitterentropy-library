@@ -788,6 +788,26 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	return _jent_entropy_collector_alloc(osr, flags);
 }
 
+#ifdef LINUX_KERNEL
+/*
+ * Test interface support: allocate an entropy collector without running the
+ * startup entropy collection and its health-test reset ladder, so the
+ * requested OSR/flags (and thus memory size and hash loop count) remain
+ * exactly what the raw noise recording measures. This mirrors the userspace
+ * recording tools (tests/raw-entropy/recording_userspace), which call
+ * jent_entropy_collector_alloc_internal() directly by including this file.
+ *
+ * Only intended for the kernel test interface
+ * (linux_kernel/jitterentropy_testing.c); regular consumers must use
+ * jent_entropy_collector_alloc().
+ */
+struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
+						   unsigned int flags)
+{
+	return jent_entropy_collector_alloc_internal(osr, flags);
+}
+#endif /* LINUX_KERNEL */
+
 JENT_PRIVATE_STATIC
 void jent_entropy_collector_free(struct rand_data *entropy_collector)
 {
