@@ -49,8 +49,11 @@ MAX_EVENTS=1000000
 # Code only after this line -- do not change               #
 ############################################################
 
+# The extraction and analysis tools are invoked in pipelines with tee for
+# logging; without pipefail their failures would be masked by tee's exit code.
+set -o pipefail
+
 EXTRACT=${EXTRACT:-"./extractlsb"}
-CFILE="extractlsb.c"
 
 if [ ! -d $ENTROPYDATA_DIR ]
 then
@@ -68,9 +71,9 @@ then
 	fi
 fi
 
-if [ ! -f $EA_TOOL ]
+if [ ! -f "$EATOOL_NONIID" ]
 then
-	echo "ERROR: Path of Entropy Data tool $EA_TOOL is missing"
+	echo "ERROR: Path of Entropy Data tool $EATOOL_NONIID is missing"
 	exit 1
 fi
 
@@ -107,6 +110,11 @@ do
 		bits=${item#*:}
 
 		$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
+		if [ $? -ne 0 ]
+		then
+			echo "ERROR: Extraction of $file (mask $mask) failed" | tee -a $LOGFILE
+			exit 1
+		fi
 
 	done
 done
@@ -137,6 +145,14 @@ do
 				echo "Analyzing entropy for $infile ${bits}-bit" | tee -a $LOGFILE
 				#python -u $EATOOL_NONIID -v $infilesingle $bits > $outfile
 				$EATOOL_NONIID -i -a -v $infile ${bits} > $outfile
+				if [ $? -ne 0 ]
+				then
+					echo "ERROR: Entropy analysis of $infile (${bits} bits) failed" | tee -a $LOGFILE
+					# do not leave a partial result behind that
+					# would be skipped as complete on a re-run
+					rm -f $outfile
+					exit 1
+				fi
 			else
 				echo "File $outfile already generated"
 			fi

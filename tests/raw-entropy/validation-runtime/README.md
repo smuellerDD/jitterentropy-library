@@ -123,7 +123,7 @@ program shows a summary of the extraction, indicating the bit positions that
 have not changed in any of the samples. For example, this is the output of
 the extraction program.
 
-Processed 1000000 items from ./extractlsb samples with
+Processed 1000000 items from ../results-measurements/jent-raw-noise-0001.data samples with
 mask [0x00000000000000ff] significant bits [8]
 
 Constant 0s in var sample:
