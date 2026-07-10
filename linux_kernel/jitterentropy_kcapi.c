@@ -8,7 +8,6 @@
 
 #include <crypto/hash.h>
 #include <crypto/sha3.h>
-#include <linux/fips.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -19,29 +18,17 @@
 #include <crypto/internal/rng.h>
 
 #include "jitterentropy.h"
-#include "jitterentropy_chardev.h"
-#include "jitterentropy_compat.h"
 #include "jitterentropy_error.h"
-#include "jitterentropy_hwrng.h"
-#include "jitterentropy_proc.h"
-#include "jitterentropy_testing.h"
+#include "jitterentropy_kcapi.h"
 
 /*
- * Kernel module options.
- *
- * osr and flags are non-static as they are shared with the (optional)
- * character device interface in jitterentropy_chardev.c.
+ * The OSR and flags used to allocate the per-tfm Jitter RNG instances and the
+ * verbose logging switch are configurable via the module parameters of the
+ * same name (see jitterentropy_mod.c).
  */
-unsigned int osr = 0;
-int flags = 0;
-static unsigned int verbose = 0;
-
-module_param(osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
-MODULE_PARM_DESC(osr, "Jitter RNG OSR parameter");
-module_param(flags, int, S_IRUSR | S_IRGRP | S_IROTH);
-MODULE_PARM_DESC(flags, "Jitter RNG flags parameter");
-module_param(verbose, uint, S_IRUSR | S_IRGRP | S_IROTH);
-MODULE_PARM_DESC(verbose, "Jitter RNG verbose logging");
+extern unsigned int osr;
+extern int flags;
+extern unsigned int verbose;
 
 /***************************************************************************
  * Kernel crypto API interface
@@ -52,7 +39,7 @@ struct jitterentropy {
 	struct rand_data *entropy_collector;
 };
 
-static void jent_kcapi_cleanup(struct crypto_tfm *tfm)
+static void jent_kcapi_tfm_cleanup(struct crypto_tfm *tfm)
 {
 	struct jitterentropy *rng = crypto_tfm_ctx(tfm);
 
@@ -110,7 +97,7 @@ err:
 	return ret;
 }
 
-static int jent_kcapi_init(struct crypto_tfm *tfm)
+static int jent_kcapi_tfm_init(struct crypto_tfm *tfm)
 {
 	struct jitterentropy *rng = crypto_tfm_ctx(tfm);
 
@@ -209,81 +196,17 @@ static struct rng_alg jent_alg = {
 		.cra_priority           = 100,
 		.cra_ctxsize            = sizeof(struct jitterentropy),
 		.cra_module             = THIS_MODULE,
-		.cra_init               = jent_kcapi_init,
-		.cra_exit               = jent_kcapi_cleanup,
+		.cra_init               = jent_kcapi_tfm_init,
+		.cra_exit               = jent_kcapi_tfm_cleanup,
 	}
 };
 
-static int __init jent_mod_init(void)
+int jent_kcapi_init(void)
 {
-	int ret = 0;
-
-	ret = jent_entropy_init_ex(osr, flags);
-	if (ret) {
-		/* Handle permanent health test error */
-		if (fips_enabled)
-			panic("jitterentropy: Initialization failed with host not compliant with requirements: %d\n", ret);
-
-		pr_info("jitterentropy: Initialization failed with host not compliant with requirements: %d\n", ret);
-		return -EFAULT;
-	}
-
-	jent_proc_init();
-
-	/*
-	 * Register the debugfs test interface only after the library
-	 * initialization above completed: the file is visible to userspace
-	 * immediately, and a read triggers library init paths that must not
-	 * run concurrently with jent_entropy_init_ex().
-	 */
-	jent_testing_init();
-
-	ret = crypto_register_rng(&jent_alg);
-	if (ret)
-		goto err;
-
-	ret = jent_chardev_init();
-	if (ret)
-		goto err_crypto;
-
-	ret = jent_hwrng_init();
-	if (ret)
-		goto err_chardev;
-
-	return 0;
-
-err_chardev:
-	jent_chardev_exit();
-err_crypto:
-	crypto_unregister_rng(&jent_alg);
-err:
-	jent_testing_exit();
-	jent_proc_exit();
-	return ret;
+	return crypto_register_rng(&jent_alg);
 }
 
-static void __exit jent_mod_exit(void)
+void jent_kcapi_exit(void)
 {
-	jent_hwrng_exit();
-	jent_chardev_exit();
-	jent_proc_exit();
-	jent_testing_exit();
 	crypto_unregister_rng(&jent_alg);
 }
-
-module_init(jent_mod_init);
-module_exit(jent_mod_exit);
-
-MODULE_LICENSE("Dual BSD/GPL");
-MODULE_AUTHOR("Stephan Mueller <smueller@chronox.de>");
-MODULE_DESCRIPTION("Non-physical True Random Number Generator based on CPU Jitter");
-/*
- * The crypto API name depends on the build mode (see jent_alg.base.cra_name
- * above). Alias the matching name so the algorithm can be auto-loaded on
- * request via the kernel crypto API.
- */
-#ifdef CONFIG_BUILTIN_JITTERENTROPY
-MODULE_ALIAS_CRYPTO("jitterentropy_rng");
-#else
-MODULE_ALIAS_CRYPTO("jitter_rng");
-#endif
