@@ -32,7 +32,7 @@ program_C_SRCS := jitterentropy-hashtime.c
 program_C_OBJS := ${program_C_SRCS:.c=.o}
 program_OBJS := $(program_C_OBJS)
 
-program_INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src
+program_INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src $(JENT_DIR)/arch
 program_LIBRARY_DIRS :=
 ifeq (Darwin,$(shell uname))
 program_LIBRARIES := pthread

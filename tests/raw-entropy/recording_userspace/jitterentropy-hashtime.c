@@ -44,6 +44,14 @@
 #include "jitterentropy-base.c"
 #include "jitterentropy-status.c"
 
+#include "jitterentropy-arch-cache.c"
+#include "jitterentropy-arch-fips.c"
+#include "jitterentropy-arch-memory.c"
+#include "jitterentropy-arch-ncpu.c"
+#include "jitterentropy-arch-sched.c"
+#include "jitterentropy-arch-thread.c"
+#include "jitterentropy-arch-uuid.c"
+
 #ifndef REPORT_COUNTER_TICKS
 #define REPORT_COUNTER_TICKS 1
 #endif

@@ -22,7 +22,7 @@ else
 endif
 
 JENT_DIR := jitterentropy
-JENT_SRCS := $(wildcard $(JENT_DIR)/src/*.c)
+JENT_SRCS := $(wildcard $(JENT_DIR)/src/*.c) $(wildcard $(JENT_DIR)/arch/*.c)
 
 NAME := jitterentropy-rng
 C_SRCS := $(JENT_SRCS) jitterentropy-rng.c
