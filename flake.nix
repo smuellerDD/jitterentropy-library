@@ -151,6 +151,7 @@
           services.getty.autologinUser = lib.mkForce "root";
           console.keyMap = "de";
           environment.shellAliases = {
+            "sample_kernel" = "getrawentropy --samples 1000000 --debugfs-file /sys/kernel/debug/jitter_rng/jent_raw_hires";
             "clock_rdtsc" = "echo tsc > /sys/devices/system/clocksource/clocksource0/current_clocksource";
             "jitter_hwrng" = "echo jitterentropy > /sys/class/misc/hw_random/rng_current";
             "show_hwrng" = "cat /sys/class/misc/hw_random/rng_current";
@@ -201,18 +202,18 @@
             # O_NONBLOCK reads: short-read cap and EAGAIN on contention.
             print(machine.succeed("python3 /etc/jitterentropy-nonblock-test.py"))
 
-            # The debugfs raw entropy test interface delivers timing samples.
+            # The debugfs raw entropy test interface delivers the raw noise
+            # time deltas of the measure_jitter operation.
             machine.succeed(
                 "test \"$(head -c 64 /sys/kernel/debug/jitter_rng/jent_raw_hires"
                 " | wc -c)\" = 64"
             )
 
             # getrawentropy drives the same interface end-to-end: it sets the
-            # testing_osr module parameter and prints time deltas of the raw
-            # samples. --samples N yields N + 1 deltas (the tool requests one
-            # extra word beyond the delta baseline).
+            # testing_osr module parameter and prints the raw time delta
+            # samples unmodified. --samples N yields exactly N values.
             machine.succeed(
-                "test \"$(getrawentropy --samples 100 --osr 3 | wc -l)\" = 101"
+                "test \"$(getrawentropy --samples 100 --osr 3 | wc -l)\" = 100"
             )
 
             # The CMake-built userspace tools are on PATH.
