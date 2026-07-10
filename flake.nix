@@ -93,6 +93,11 @@
             })
           ];
           boot.kernelModules = [ "jitter_rng" ];
+          # Verbose logging of the kcapi per-instance JSON status to the
+          # kernel log; only useful on test systems like these images.
+          boot.extraModprobeConfig = ''
+            options jitter_rng verbose=0
+          '';
           environment.systemPackages = [
             (toolsFor pkgs)
           ] ++ (with pkgs; [
