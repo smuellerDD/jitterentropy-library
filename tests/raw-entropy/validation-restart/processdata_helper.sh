@@ -16,7 +16,7 @@ fi
 LOGFILE="$RESULTS_DIR/processdata.log"
 
 # point to the min entropy tool
-EATOOL="../../SP800-90B_EntropyAssessment/cpp/ea_restart"
+EATOOL=${EATOOL:-"../../SP800-90B_EntropyAssessment/cpp/ea_restart"}
 
 # specify if you want to compile the extractlsb program in this script
 BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
@@ -46,10 +46,14 @@ MAX_EVENTS=1000000
 #############################
 # Preparation
 #############################
+
+# The extraction and analysis tools are invoked in pipelines with tee for
+# logging; without pipefail their failures would be masked by tee's exit code.
+set -o pipefail
+
 INPUTCONSOLIDATED="$RESULTS_DIR/jent-raw-noise-restart-consolidated.data"
 
 EXTRACT="extractlsb"
-CFILE="extractlsb.c"
 
 if [ ! -d $ENTROPYDATA_DIR ]
 then
@@ -67,9 +71,9 @@ then
 	fi
 fi
 
-if [ ! -f $EA_TOOL ]
+if [ ! -f "$EATOOL" ]
 then
-	echo "ERROR: Path of Entropy Data tool $EA_TOOL is missing"
+	echo "ERROR: Path of Entropy Data tool $EATOOL is missing"
 	exit 1
 fi
 
@@ -96,7 +100,10 @@ fi
 #
 # Step 1: Concatenate all individual restart files into single file
 #
-rm -f $INPUTCONSOLIDATED
+# Also remove bit output files of a previous (possibly interrupted) run:
+# extractlsb creates them with O_EXCL and would fail on existing files,
+# leaving the stale data to be analyzed in step 3.
+rm -f $INPUTCONSOLIDATED $RESULTS_DIR/*bitout.data
 for i in $NONIID_DATA
 do
 	echo "Process recorded entropy data $i"
@@ -118,6 +125,11 @@ do
 		bits=${item#*:}
 
 		./$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
+		if [ $? -ne 0 ]
+		then
+			echo "ERROR: Extraction of $file (mask $mask) failed" | tee -a $LOGFILE
+			exit 1
+		fi
 	done
 done
 
@@ -151,6 +163,14 @@ do
 			then
 				echo "Analyzing entropy for $infile ${bits}-bit single" | tee -a $LOGFILE
 				$EATOOL -n -v $infile ${bits} 0.333 > $outfile
+				if [ $? -ne 0 ]
+				then
+					echo "ERROR: Entropy analysis of $infile (${bits} bits) failed" | tee -a $LOGFILE
+					# do not leave a partial result behind that
+					# would be skipped as complete on a re-run
+					rm -f $outfile
+					exit 1
+				fi
 			else
 				echo "File $outfile already generated"
 			fi

@@ -4,28 +4,22 @@ CC ?= gcc
 override CFLAGS +=-pedantic -Wall -Wextra -O2
 
 program_NAME := extractlsb
-#program_C_SRCS := $(wildcard *.c)
-program_C_SRCS := extractlsb.c
-program_C_OBJS := ${program_C_SRCS:.c=.o}
-program_OBJS := $(program_C_OBJS)
+# The extractlsb source is shared between validation-runtime and
+# validation-restart and therefore lives in the common parent directory.
+program_C_SRCS := ../extractlsb.c
 
-program_INCLUDE_DIRS :=
-program_LIBRARY_DIRS :=
 program_LIBRARIES := rt
 
-CPPFLAGS += $(foreach includedir,$(program_INCLUDE_DIRS),-I$(includedir))
-LDFLAGS += $(foreach librarydir,$(program_LIBRARY_DIRS),-L$(librarydir))
 LDFLAGS += $(foreach library,$(program_LIBRARIES),-l$(library))
 
 .PHONY: all clean distclean
 
 all: $(program_NAME)
 
-$(program_NAME): $(program_OBJS)
-	$(CC) $(program_OBJS) -o $(program_NAME) $(LDFLAGS)
+$(program_NAME): $(program_C_SRCS)
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(program_C_SRCS) -o $(program_NAME) $(LDFLAGS)
 
 clean:
 	@- $(RM) $(program_NAME)
-	@- $(RM) $(program_OBJS)
 
 distclean: clean
