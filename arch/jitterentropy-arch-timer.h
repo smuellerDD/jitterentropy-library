@@ -74,7 +74,6 @@
 #include <linux/time.h>
 #include <linux/timekeeping.h>	/* ktime_get_ns() */
 #include <linux/timex.h>	/* random_get_entropy() */
-#include "jitterentropy_testing.h"
 # define JENT_ARCH_TIMER_LINUX_KERNEL
 
 #else /* LINUX_KERNEL */
@@ -234,7 +233,6 @@ static inline void jent_get_nstime(uint64_t *out)
 		tmp = ktime_get_ns();
 
 	*out = tmp;
-	jent_raw_hires_entropy_store(tmp);
 
 #else /* JENT_ARCH_TIMER_GENERIC */
 
