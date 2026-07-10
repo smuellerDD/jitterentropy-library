@@ -26,6 +26,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -34,8 +36,9 @@
 
 #ifdef _MSC_VER
 #include <io.h>
-#define open  _open
-#define close _close
+#define open   _open
+#define close  _close
+#define unlink _unlink
 #else
 #include <unistd.h>
 #endif
@@ -80,7 +83,7 @@ static int hextolong(char *p_strmask, uint64_t *p_mask)
 			mask |= *p_strmask - '0';
 		else if ((*p_strmask >= 'A') && (*p_strmask <= 'F'))
 			mask |= *p_strmask - 'A' + 10;
-		else if ((*p_strmask >= '0') && (*p_strmask <= '9'))
+		else if ((*p_strmask >= 'a') && (*p_strmask <= 'f'))
 			mask |= *p_strmask - 'a' + 10;
 		else
 			return -1;
@@ -142,50 +145,70 @@ int main(int argc, char *argv[])
 {
 	FILE *f = NULL;
 	char buf[64];
+	char *endptr = NULL;
 	int fd = -1;
 	uint32_t count;
 	uint32_t i = 0;
+	unsigned long val;
 
 	uint64_t mask;
 	uint64_t unchanged0s, unchanged1s;
 	int rc;
 
 	if (argc != 5) {
-		printf("Usage: %s inputfile outfile maxevents mask\n", argv[0]);
+		fprintf(stderr, "Usage: %s inputfile outfile maxevents mask\n",
+			argv[0]);
+		return 1;
+	}
+
+	/*
+	 * Validate all parameters before the output file is created: the
+	 * output file is created with O_EXCL, so an early error exit must not
+	 * leave an (empty) output file behind that would make every
+	 * subsequent invocation fail.
+	 */
+	errno = 0;
+	val = strtoul(argv[3], &endptr, 10);
+	if (errno || !endptr || *endptr != '\0' || val == 0 ||
+	    val > UINT32_MAX) {
+		fprintf(stderr, "maxevents value is incorrect [%s]\n", argv[3]);
+		return 1;
+	}
+	count = (uint32_t)val;
+
+	rc = hextolong(argv[4], &mask);
+	if (rc) {
+		fprintf(stderr,
+			"Mask value is incorrect [%s], use up to 16 hexadecimal characters\n",
+			argv[4]);
+		return 1;
+	}
+
+	if (bitcount(mask) > 8) {
+		fprintf(stderr,
+			"SP800-90B tool only supports up to 8 bits. Check the mask value\n");
 		return 1;
 	}
 
 	f = fopen(argv[1], "r");
 	if (!f) {
-		printf("File %s cannot be opened for read\n", argv[1]);
+		fprintf(stderr, "File %s cannot be opened for read: %s\n",
+			argv[1], strerror(errno));
 		return 1;
 	}
 
 	fd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL, 0777);
 	if (fd < 0) {
-		printf("File %s cannot be opened for write\n", argv[2]);
+		fprintf(stderr, "File %s cannot be opened for write: %s\n",
+			argv[2], strerror(errno));
 		fclose(f);
-		close(fd);
-		return 1;
-	}
-
-	count = strtoul(argv[3], NULL, 10);
-	rc = hextolong(argv[4], &mask);
-
-	if (rc) {
-		printf("Mask value is incorrect [%s], use up to 16 hexadecimal characters", argv[4]);
-		return 1;
-	}
-
-	if (bitcount(mask) > 8) {
-		printf("SP800-90B tool only supports up to 8 bits. Check the mask value");
 		return 1;
 	}
 
 	unchanged0s = 0;
-	unchanged1s = ~0;
+	unchanged1s = ~(uint64_t)0;
 
-	while (fgets(buf, sizeof(buf), f)) {
+	while (i < count && fgets(buf, sizeof(buf), f)) {
 		uint64_t sample;
 		unsigned char var;
 		char *saveptr = NULL;
@@ -199,26 +222,34 @@ int main(int argc, char *argv[])
 		res = strtok_r(buf, " ", &saveptr);
 #endif
 		if (!res) {
-			printf("strtok_r/s error\n");
-			return 1;
+			fprintf(stderr, "strtok_r/s error (%s)\n", buf);
+			goto err;
 		}
 
-		sample = strtoul(res, NULL, 10);
+		sample = strtoull(res, NULL, 10);
 		unchanged0s |= sample;
 		unchanged1s &= sample;
 
 		var = extract(sample, mask);
-		rc = write(fd, &var, sizeof(var));
-		if (rc != sizeof(var)) {
-			printf("write error\n");
-			return 1;
+		if (write(fd, &var, sizeof(var)) != (int)sizeof(var)) {
+			fprintf(stderr, "write error: %s\n", strerror(errno));
+			goto err;
 		}
-
-		if (i >= count)
-			break;
 	}
 
-	printf("Processed %d items from %s samples with mask [0x%016llx] significant bits [%d]\n", i, argv[0], (unsigned long long)mask, bitcount(mask));
+	if (ferror(f)) {
+		fprintf(stderr, "Read error on %s\n", argv[1]);
+		goto err;
+	}
+
+	if (i < count) {
+		fprintf(stderr,
+			"Premature end of input: only %" PRIu32 " of %" PRIu32 " samples processed from %s\n",
+			i, count, argv[1]);
+		goto err;
+	}
+
+	printf("Processed %" PRIu32 " items from %s samples with mask [0x%016llx] significant bits [%d]\n", i, argv[1], (unsigned long long)mask, bitcount(mask));
 
 	printf("Constant 0s in sample: \n%s\n", printbits(unchanged0s, 0));
 	printf("Constant 1s in sample: \n%s\n", printbits(unchanged1s, 1));
@@ -226,4 +257,14 @@ int main(int argc, char *argv[])
 	fclose(f);
 	close(fd);
 	return 0;
+
+err:
+	fclose(f);
+	close(fd);
+	/*
+	 * Do not leave a partial output file behind: it would be analyzed as
+	 * if it were complete and, due to O_EXCL, block any re-run.
+	 */
+	unlink(argv[2]);
+	return 1;
 }
