@@ -254,6 +254,19 @@ The same applies to the other interface options
 (`CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV`,
 `CONFIG_EXTERNAL_JITTERENTROPY_HWRNG`), which can be disabled with `=n`.
 
+The debugfs file `jent_raw_hires` provided by the test interface also
+implements the `ioctl(JENT_IOCSTATUS)` described in the character device
+section above, returning the JSON status string of the raw-noise Jitter RNG
+instance bound to the open file description (`getrawentropy --status` prints
+it).
+
+In addition, the test interface (and only the test interface) implements
+`ioctl(JENT_IOCLOOPCNT)`, which sets the loop count applied to the raw noise
+measurements of the open instance: 0 (the default) selects the loop count the
+instance was configured with, any other value overrides the hash and memory
+access loop counts of every subsequent measurement (`getrawentropy --loopcnt
+<NUM>` uses it). See `jitterentropy_uapi.h` for the ABI of both ioctls.
+
 ## Test Execution
 
 See `tests/raw-entropy/recording_runtime_kernelspace/README.md`.
