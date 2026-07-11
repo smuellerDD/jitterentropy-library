@@ -19,10 +19,10 @@
 
 /*
  * Compile for older kernels (< 6.13):
- * gcc -Wall -pedantic -Wextra -I../../ -o getrawentropy getrawentropy.c
+ * gcc -Wall -pedantic -Wextra -I../../.. -I../../../linux_kernel -o getrawentropy getrawentropy.c
  *
  * Compile for newer kernels (>= 6.13):
- * gcc -Wall -pedantic -Wextra -I../../ -DRAW_DATATYPE_U64 -o getrawentropy getrawentropy.c
+ * gcc -Wall -pedantic -Wextra -I../../.. -I../../../linux_kernel -DRAW_DATATYPE_U64 -o getrawentropy getrawentropy.c
  */
 
 #include <sys/types.h>
@@ -36,9 +36,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include "jitterentropy.h"
+#include "jitterentropy_uapi.h"
 
 #define RAWENTROPY_SAMPLES	1001
 #define DEBUGFS_INTERFACE	"/sys/kernel/debug/jitter_rng/jent_raw_hires"
@@ -71,6 +73,8 @@ struct opts {
 	unsigned int flags;
 	unsigned int osr;
 	unsigned int timestamps;
+	unsigned int status;
+	uint64_t loopcnt;
 	const char *debugfs_file;
 	const char *sysfs_dir;
 };
@@ -136,6 +140,45 @@ static int getrawentropy(const struct opts *opts)
 	fd = open(opts->debugfs_file, O_RDONLY);
 	if (fd < 0)
 		return errno;
+
+	/*
+	 * A non-default loop count requires the JENT_IOCLOOPCNT ioctl of the
+	 * out-of-tree module's test interface. Fail hard when it is absent
+	 * (e.g. the test interface of the vanilla kernel) instead of silently
+	 * recording with the configured loop count.
+	 */
+	if (opts->loopcnt) {
+		uint64_t loopcnt = opts->loopcnt;
+
+		if (ioctl(fd, JENT_IOCLOOPCNT, &loopcnt) < 0) {
+			perror("JENT_IOCLOOPCNT");
+			ret = -errno;
+			goto out;
+		}
+	}
+
+	/*
+	 * Early exit when the status is requested: print the JSON status of
+	 * the freshly opened recording instance without recording any data,
+	 * mirroring jitterentropy-hashtime --status. Can be used to compare
+	 * the configuration of past measurements with the runtime.
+	 */
+	if (opts->status) {
+		struct jent_status_ioctl status;
+		char status_str[JENT_STATUS_MAX_LEN];
+
+		status.buf = (uintptr_t)status_str;
+		status.length = sizeof(status_str);
+
+		if (ioctl(fd, JENT_IOCSTATUS, &status) < 0) {
+			perror("JENT_IOCSTATUS");
+			ret = -errno;
+			goto out;
+		}
+		printf("%s", status_str);
+		ret = 0;
+		goto out;
+	}
 
 	while (requested) {
 		unsigned int i;
@@ -238,17 +281,20 @@ out:
  * --force-internal-timer Enable flag JENT_FORCE_INTERNAL_TIMER
  * --osr Apply the given OSR value
  * --loopcnt Apply the given loop count value for the operation (i.e. apply it
- *	     to the respecive used noise source(s))
+ *	     to the respecive used noise source(s)) - requires the
+ *	     JENT_IOCLOOPCNT ioctl of the out-of-tree module's test interface
  * --max-mem Set the memory size of the memory block used for the memory access
  *	     loop
  * --hashloop Perform the measurement of the hash loop only
  * --memaccess Perform the measurement of the memory access loop only
  * --hloopcnt Number of hashloop operations at runtime
+ * --status Print the JSON status of the recording instance and exit without
+ *	    recording - requires the JENT_IOCSTATUS ioctl of the out-of-tree
+ *	    module's test interface
  */
 int main(int argc, char * argv[])
 {
 	struct opts opts;
-	//unsigned int loopcnt = 0;
 
 	opts.samples = RAWENTROPY_SAMPLES;
 	opts.debugfs_file = DEBUGFS_INTERFACE;
@@ -256,6 +302,8 @@ int main(int argc, char * argv[])
 	opts.osr = 0;
 	opts.flags = 0;
 	opts.timestamps = 0;
+	opts.status = 0;
+	opts.loopcnt = 0;
 
 	if (argc < 4) {
 		printf("%s --samples <NUMSAMPLES> | --debugfs-file <FILE> [ --param-dir <DIR> | --timestamps | --ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>|--status]\n", argv[0]);
@@ -287,7 +335,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("OSR value missing\n");
+				printf("debugfs file path missing\n");
 				return 1;
 			}
 
@@ -297,7 +345,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("OSR value missing\n");
+				printf("sysfs parameter directory path missing\n");
 				return 1;
 			}
 
@@ -335,20 +383,25 @@ int main(int argc, char * argv[])
 			if (val >= UINT_MAX)
 				return 1;
 			opts.osr = (unsigned int)val;
-		// } else if (!strncmp(argv[1], "--loopcnt", 9)) {
-		// 	unsigned long val;
-  //
-		// 	argc--;
-		// 	argv++;
-		// 	if (argc <= 1) {
-		// 		printf("Loop count value missing\n");
-		// 		return 1;
-		// 	}
-  //
-		// 	val = strtoul(argv[1], NULL, 10);
-		// 	if (val >= UINT_MAX)
-		// 		return 1;
-		// 	loopcnt = (unsigned int)val;
+		} else if (!strncmp(argv[1], "--loopcnt", 9)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("Loop count value missing\n");
+				return 1;
+			}
+
+			/*
+			 * Mirror the bound of the userspace recording tool
+			 * jitterentropy-hashtime (also enforced by the
+			 * JENT_IOCLOOPCNT ioctl).
+			 */
+			val = strtoul(argv[1], NULL, 10);
+			if (val >= UINT_MAX)
+				return 1;
+			opts.loopcnt = val;
 		} else if (!strncmp(argv[1], "--max-mem", 9)) {
 			unsigned long val;
 
@@ -468,8 +521,8 @@ int main(int argc, char * argv[])
 				printf("Unknown hashloop value\n");
 				return 1;
 			}
-		// } else if (!strncmp(argv[1], "--status", 8)) {
-		// 	status = 1;
+		} else if (!strncmp(argv[1], "--status", 8)) {
+			opts.status = 1;
 		} else {
 			printf("Unknown option %s\n", argv[1]);
 			return 1;

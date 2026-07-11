@@ -238,12 +238,37 @@
             print(doc)
             json.loads(doc)
 
+            # The JENT_IOCSTATUS ioctl is also exposed on the debugfs test
+            # interface, reporting the status of the per-open raw-noise
+            # recording instance (the tool takes the file to query as
+            # argument). Raw instances skip the startup sequence and thus
+            # carry no UUID, so assert on the version field instead.
+            print(machine.succeed(
+                "jitterentropy-chardev-status"
+                " /sys/kernel/debug/jitter_rng/jent_raw_hires"
+                " | jq -e .version"
+            ))
+
             # getrawentropy drives the same interface end-to-end: it sets the
             # testing_osr module parameter and prints the raw time delta
             # samples unmodified. --samples N yields exactly N values.
             machine.succeed(
                 "test \"$(getrawentropy --samples 100 --osr 3 | wc -l)\" = 100"
             )
+
+            # --loopcnt drives the JENT_IOCLOOPCNT ioctl: a fixed loop count
+            # overrides the instance's configured hash and memory access loop
+            # counts for the recorded measurements.
+            machine.succeed(
+                "test \"$(getrawentropy --samples 100 --loopcnt 4 | wc -l)\""
+                " = 100"
+            )
+
+            # --status fetches the recording instance's JSON status via
+            # JENT_IOCSTATUS and records nothing.
+            print(machine.succeed(
+                "getrawentropy --samples 1 --status | jq -e .version"
+            ))
 
             # The CMake-built userspace tools are on PATH.
             for tool in ("jitterentropy-rng", "jitterentropy-osr",

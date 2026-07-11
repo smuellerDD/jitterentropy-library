@@ -10,10 +10,17 @@
  * space recording logic in
  * tests/raw-entropy/recording_userspace/jitterentropy-hashtime.c.
  *
+ * The file also implements the JENT_IOCSTATUS ioctl known from the character
+ * device (see jitterentropy_uapi.h), returning the JSON status string of the
+ * Jitter RNG instance bound to the open file description, and the test-
+ * interface-only JENT_IOCLOOPCNT ioctl, overriding the loop count applied to
+ * the raw noise measurements of that instance.
+ *
  * Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
  */
 
 #include <linux/debugfs.h>
+#include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -26,6 +33,7 @@
 #include "jitterentropy-noise.h"
 #include "jitterentropy.h"
 #include "jitterentropy_testing.h"
+#include "jitterentropy_uapi.h"
 
 /*
  * Serialize extract sessions: a concurrent reader would run its own timing
@@ -93,12 +101,11 @@ static int jent_testing_log(struct rand_data *ec)
 	logged_osr = testing_osr;
 	logged_flags = testing_flags;
 
-#define JENT_STATUS_BUF_SIZE 4096
-	buf = kvzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 
-	ret = jent_status(ec, buf, JENT_STATUS_BUF_SIZE);
+	ret = jent_status(ec, buf, JENT_STATUS_MAX_LEN);
 	if (ret < 0)
 		goto err;
 
@@ -133,6 +140,14 @@ struct jent_testing_ctx {
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 				       uint64_t loop_cnt,
 				       uint64_t *ret_current_delta);
+	/*
+	 * Loop count applied to each raw noise measurement, settable via
+	 * JENT_IOCLOOPCNT: 0 (the default) selects the loop count the
+	 * instance was configured with. Protected by
+	 * jent_testing_read_lock, so it cannot change in the middle of an
+	 * extract session.
+	 */
+	u64 loop_cnt;
 };
 
 static int jent_testing_open(struct inode *inode, struct file *file)
@@ -209,6 +224,7 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 	struct jent_testing_ctx *ctx = file->private_data;
 	struct rand_data *ec = ctx->ec;
 	u64 *tmp = NULL;
+	u64 loop_cnt;
 	ssize_t ret = 0;
 	int large_request = (nbytes > 256);
 
@@ -223,6 +239,12 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 	/* Only one extract session may run at a time. */
 	if (mutex_lock_interruptible(&jent_testing_read_lock))
 		return -ERESTARTSYS;
+
+	/*
+	 * Snapshot the JENT_IOCLOOPCNT setting under the lock: the whole
+	 * extract session records with one consistent loop count.
+	 */
+	loop_cnt = ctx->loop_cnt;
 
 	/*
 	 * The intention of this interface is for collecting at least
@@ -261,13 +283,15 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 		 * stamp (unprimed instance or the gap spent in copy_to_user()
 		 * between two rounds). The NTG.1 hash-loop and memory-access
 		 * variants prime themselves and need no separate priming.
+		 * The priming uses the configured loop count (loop_cnt 0),
+		 * mirroring the userspace recording tools.
 		 */
 		if (measure_jitter == jent_measure_jitter)
 			jent_measure_jitter(ec, 0, NULL);
 
 		for (i = 0; i < samples; i++) {
 			/* Disregard stuck indicator */
-			measure_jitter(ec, 0, &tmp[i]);
+			measure_jitter(ec, loop_cnt, &tmp[i]);
 		}
 
 		not_copied = copy_to_user(buf, tmp, len);
@@ -298,11 +322,127 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 	return ret;
 }
 
+/*
+ * Serialize the JSON status string of the per-open Jitter RNG instance into a
+ * user-provided buffer. Same ABI and semantics as the JENT_IOCSTATUS handler
+ * of the character device (see jitterentropy_chardev.c).
+ *
+ * The status is derived from mutable collector state (health test and output
+ * accounting), so the extract-session lock is held while jent_status() runs
+ * to keep a concurrent extract session from mutating it mid-serialization.
+ * Unlike the character device, the collector is never reallocated during the
+ * lifetime of the open file, so ctx->ec itself is stable.
+ */
+static long jent_testing_ioctl_status(struct jent_testing_ctx *ctx,
+				      void __user *arg)
+{
+	struct jent_status_ioctl status;
+	char *buf;
+	size_t slen;
+	long ret;
+
+	if (copy_from_user(&status, arg, sizeof(status)))
+		return -EFAULT;
+
+	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	if (mutex_lock_interruptible(&jent_testing_read_lock)) {
+		ret = -ERESTARTSYS;
+		goto out;
+	}
+
+	ret = jent_status(ctx->ec, buf, JENT_STATUS_MAX_LEN);
+	mutex_unlock(&jent_testing_read_lock);
+
+	if (ret) {
+		ret = -EIO;
+		goto out;
+	}
+
+	/* Number of bytes to copy out, including the terminating NUL. */
+	slen = strlen(buf) + 1;
+
+	if (status.length < slen) {
+		/* Buffer too small: report the required size to userspace. */
+		status.length = slen;
+		if (copy_to_user(arg, &status, sizeof(status)))
+			ret = -EFAULT;
+		else
+			ret = -EOVERFLOW;
+		goto out;
+	}
+
+	if (copy_to_user(u64_to_user_ptr(status.buf), buf, slen)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	status.length = slen;
+	if (copy_to_user(arg, &status, sizeof(status))) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	ret = 0;
+
+out:
+	kvfree(buf);
+	return ret;
+}
+
+/*
+ * Set the loop count applied to the raw noise measurements of this open
+ * instance (see the loop_cnt member of struct jent_testing_ctx). Taking the
+ * extract-session lock defers the update until a running extract session has
+ * finished.
+ */
+static long jent_testing_ioctl_loopcnt(struct jent_testing_ctx *ctx,
+				       void __user *arg)
+{
+	u64 loop_cnt;
+
+	if (copy_from_user(&loop_cnt, arg, sizeof(loop_cnt)))
+		return -EFAULT;
+
+	/* Mirror the bound of the userspace recording tools. */
+	if (loop_cnt > UINT_MAX)
+		return -EINVAL;
+
+	if (mutex_lock_interruptible(&jent_testing_read_lock))
+		return -ERESTARTSYS;
+	ctx->loop_cnt = loop_cnt;
+	mutex_unlock(&jent_testing_read_lock);
+
+	return 0;
+}
+
+static long jent_testing_ioctl(struct file *file, unsigned int cmd,
+			       unsigned long arg)
+{
+	struct jent_testing_ctx *ctx = file->private_data;
+
+	if (!ctx)
+		return -EFAULT;
+
+	switch (cmd) {
+	case JENT_IOCSTATUS:
+		return jent_testing_ioctl_status(ctx, (void __user *)arg);
+	case JENT_IOCLOOPCNT:
+		return jent_testing_ioctl_loopcnt(ctx, (void __user *)arg);
+	default:
+		return -ENOTTY;
+	}
+}
+
 static const struct file_operations jent_raw_hires_fops = {
 	.owner = THIS_MODULE,
 	.open = jent_testing_open,
 	.release = jent_testing_release,
 	.read = jent_testing_extract_user,
+	.unlocked_ioctl = jent_testing_ioctl,
+	.compat_ioctl = compat_ptr_ioctl,
 };
 
 /******************************* Initialization *******************************/
