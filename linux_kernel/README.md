@@ -173,12 +173,12 @@ Example usage:
 	dd if=/dev/hwrng bs=32 count=1 | xxd
 
 The status of the single hwrng Jitter RNG instance is exported read-only as
-`/proc/jitter_rng/hwrng_status` (when the kernel provides `CONFIG_PROC_FS`).
+`/proc/jitterentropy/hwrng_status` (when the kernel provides `CONFIG_PROC_FS`).
 Reading it returns the same JSON status string as the user space
 `jent_status()` API (version, health-test state, runtime environment and
 configuration):
 
-	cat /proc/jitter_rng/hwrng_status | jq .
+	cat /proc/jitterentropy/hwrng_status | jq .
 
 Note on the `output` counters in this status: they count the bytes *generated*
 by the Jitter RNG instance, which is more than the bytes read from
@@ -188,13 +188,13 @@ reads from that cache, so e.g. a single 32-byte read shows up as 64 generated
 bytes. The divergence is bounded by one buffer size; additionally, the
 in-kernel hwrng entropy thread consumes bytes when the effective quality is
 non-zero. The character-device instance counters
-(`/proc/jitter_rng/instances/`) have no such intermediary and match the bytes
+(`/proc/jitterentropy/instances/`) have no such intermediary and match the bytes
 delivered to the reader exactly.
 
 # Linux Kernel Jitter RNG procfs Interface
 
 When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
-`/proc/jitter_rng/` that collects its read-only status and statistics files:
+`/proc/jitterentropy/` that collects its read-only status and statistics files:
 
 * `version`: the Jitter RNG library version (e.g. `3.7.1`).
 
@@ -230,9 +230,9 @@ recovery), so it identifies the instance for its whole lifetime.
 
 Example usage:
 
-	cat /proc/jitter_rng/statistics | jq .
-	ls /proc/jitter_rng/instances/
-	cat /proc/jitter_rng/instances/$(ls /proc/jitter_rng/instances/ | head -1) | jq .
+	cat /proc/jitterentropy/statistics | jq .
+	ls /proc/jitterentropy/instances/
+	cat /proc/jitterentropy/instances/$(ls /proc/jitterentropy/instances/ | head -1) | jq .
 
 # Linux Kernel Jitter RNG Testing
 
