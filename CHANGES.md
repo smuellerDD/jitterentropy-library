@@ -1,4 +1,10 @@
 3.7.1-prerelease
+ * Jitter RNG core: apply LLM code review -> add sanity checks
+ * Jitter RNG core: add UUID generation and update status printing
+ * Jitter RNG core: try to pin the timer thread to one CPU
+ * Jitter RNG core: add Linux kernel support header files and conditionally compile support code that is already offered by the Linux kernel
+ * Architecture-specific code: Revamp code implementing C files and restructuring the code into per-mechanism type support code
+ * Linux kernel: add support for kernel crypto API, HW-RAND and character device files along with full test code matching user space (see linux_kernel/README.md)
 
 3.7.0
  * Add secure memory implementation for Linux and {Net,Open,Free}BSD, MacOS and Windows
