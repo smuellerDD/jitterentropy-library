@@ -12,7 +12,7 @@
 # handling of relative -I paths:
 #   $(src)        -> linux_kernel/       (kernel interface headers)
 #   $(src)/..     -> project root        (jitterentropy.h, arch/*.h)
-#   $(src)/../src -> src/                 (library internal headers)
+#   $(src)/../src -> src/                (library internal headers)
 jitter_rng_c_args = -DLINUX_KERNEL					       \
 		    -I$(src) -I$(src)/.. -I$(src)/../src
 
@@ -21,6 +21,10 @@ jitter_rng_c_args = -DLINUX_KERNEL					       \
 # make command line, e.g. "make CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=n".
 ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
+endif
+
+ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_KCAPI),y)
+jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_KCAPI
 endif
 
 ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV),y)
@@ -52,7 +56,6 @@ jitter_rng-y += ../src/jitterentropy-base.o				       \
 		../arch/jitterentropy-arch-fips.o			       \
 		../arch/jitterentropy-arch-ncpu.o			       \
 		../arch/jitterentropy-arch-uuid.o			       \
-		jitterentropy_kcapi.o					       \
 		jitterentropy_mod.o					       \
 		jitterentropy_proc.o
 
@@ -71,9 +74,15 @@ CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-ncpu.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-uuid.o = $(jitter_rng_c_args)
-CFLAGS_jitterentropy_kcapi.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_mod.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
+
+################### Kernel Crypto API Interface Compilation ####################
+
+jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_KCAPI)			       \
+	+= jitterentropy_kcapi.o
+
+CFLAGS_jitterentropy_kcapi.o = $(jitter_rng_c_args)
 
 ######################### Character Device Compilation #########################
 
@@ -82,7 +91,7 @@ jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV)			       \
 
 CFLAGS_jitterentropy_chardev.o = $(jitter_rng_c_args)
 
-############################# HW RNG Compilation ##############################
+############################# HW RNG Compilation ###############################
 
 jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG)			       \
 	+= jitterentropy_hwrng.o
