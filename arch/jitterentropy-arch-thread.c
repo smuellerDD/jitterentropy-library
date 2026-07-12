@@ -123,7 +123,7 @@ int jent_thread_pin_to_cpu(unsigned long cpu)
 	if (cpu >= (unsigned long)CPU_SETSIZE)
 		return -EINVAL;
 	CPU_ZERO(&set);
-	CPU_SET((int)cpu, &set);
+	CPU_SET((size_t)cpu, &set);
 	if (sched_setaffinity(0, sizeof(set), &set))
 		return -errno;
 	return 0;
