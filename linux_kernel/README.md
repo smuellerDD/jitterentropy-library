@@ -236,10 +236,9 @@ Example usage:
 
 # Linux Kernel Jitter RNG Testing
 
-WARNING: The test code discussed in the following IS NOT MEANT for PRODUCTION
-systems. You MUST NOT ENABLE it for PRODUCTION Linux kernels. The reason is that
-it provides an interface that extracts entropy and thus can starve the Linux
-kernel Jitter RNG of entropy for production uses.
+The test code discussed in the following is not intended for production
+systems. Its functionality does not support production environment as it offers
+additional interfaces to the kernel not needed in production mode.
 
 The Jitter RNG instance discussed before can be tested similar as the user space
 instance. For doing that, the option
