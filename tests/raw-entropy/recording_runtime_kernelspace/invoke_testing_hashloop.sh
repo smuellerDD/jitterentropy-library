@@ -20,7 +20,7 @@ raw_entropy_ntg1_hashloop()
 
 	local cmdopts="--hloopcnt ${hashloop} --hashloop -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 
-	$JENT_GETRAWENTROPY -s $NUM_EVENTS $cmdopts > $OUTDIR/${NONIID_HASH_DATA}_${hashloop}
+	$JENT_GETRAWENTROPY -s $NUM_EVENTS $cmdopts > $OUTDIR/${NONIID_HASH_DATA}_${hashloop}.data
 
 	echo "---"
 }

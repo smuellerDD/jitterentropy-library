@@ -44,7 +44,7 @@ raw_entropy_ntg1_memloop()
 
 	local cmdopts="--max-mem ${memsize} --memaccess -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 
-	$JENT_GETRAWENTROPY -s $NUM_EVENTS $cmdopts > $OUTDIR/${NONIID_MEMLOOP_DATA}_${testtype}${memsize}
+	$JENT_GETRAWENTROPY -s $NUM_EVENTS $cmdopts > $OUTDIR/${NONIID_MEMLOOP_DATA}_${testtype}${memsize}.data
 
 	echo "---"
 }

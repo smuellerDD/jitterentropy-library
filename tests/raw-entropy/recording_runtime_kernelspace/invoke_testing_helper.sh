@@ -32,7 +32,7 @@ DEBUGFS_DIR="/sys/kernel/debug/jitter_rng/jent_raw_hires"
 
 build()
 {
-	gcc -Wall -pedantic -Wextra -I../../../ -DRAW_DATATYPE_U64 -o $JENT_GETRAWENTROPY getrawentropy.c
+	gcc -Wall -pedantic -Wextra -I../../../ -I../../../linux_kernel/ -DRAW_DATATYPE_U64 -o $JENT_GETRAWENTROPY getrawentropy.c
 }
 
 cleanup()
