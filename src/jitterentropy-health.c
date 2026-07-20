@@ -607,6 +607,7 @@ static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 
 void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 {
+	/* RCT with memory re-initialization to intermittent error */
 	new_ec->rct_mem_count = old_ec->rct_mem_cutoff;
 }
 
