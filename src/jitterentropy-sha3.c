@@ -397,7 +397,8 @@ void jent_sha3_dealloc(void *hash_state)
 {
 	struct jent_sha_ctx *ctx = (struct jent_sha_ctx *)hash_state;
 
-	jent_zfree(ctx, JENT_SHA_MAX_CTX_SIZE);
+	if (ctx)
+		jent_zfree(ctx, JENT_SHA_MAX_CTX_SIZE);
 }
 
 /*********************************** XDRBG ************************************/
