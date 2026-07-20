@@ -382,7 +382,7 @@ void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest)
 
 int jent_sha3_alloc(void **hash_state)
 {
-	struct sha_ctx *tmp;
+	struct jent_sha_ctx *tmp;
 
 	tmp = jent_zalloc(JENT_SHA_MAX_CTX_SIZE);
 	if (!tmp)
@@ -395,7 +395,7 @@ int jent_sha3_alloc(void **hash_state)
 
 void jent_sha3_dealloc(void *hash_state)
 {
-	struct sha_ctx *ctx = (struct sha_ctx *)hash_state;
+	struct jent_sha_ctx *ctx = (struct jent_sha_ctx *)hash_state;
 
 	jent_zfree(ctx, JENT_SHA_MAX_CTX_SIZE);
 }
