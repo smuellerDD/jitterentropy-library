@@ -58,6 +58,16 @@
 #include "arch/jitterentropy-arch-sched.h"
 #include "arch/jitterentropy-arch-uuid.h"
 
+#ifdef LINUX_KERNEL
+/*
+ * Kernel div64 primitives backing jent_udiv64()/jent_umod64() below. The
+ * header is deliberately lightweight (types, math, the arch div64
+ * primitives), so it is safe for the -O0 entropy-collection core including
+ * this file.
+ */
+#include <linux/math64.h>	/* div64_u64(), div64_u64_rem() */
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -95,6 +105,28 @@ extern "C" {
 struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
 						   unsigned int flags);
 
+/*
+ * 64-bit division / modulo with a 64-bit divisor.
+ *
+ * The plain C operators on 64-bit operands are lowered to libgcc helper
+ * calls (__udivdi3, __aeabi_uldivmod, ...) on 32-bit kernels, and the kernel
+ * does not provide those helpers; route the operations through the kernel's
+ * div64 primitives instead. On 64-bit kernels both primitives are inline
+ * plain divisions, so code generation there is identical to the operators.
+ */
+static inline uint64_t jent_udiv64(uint64_t dividend, uint64_t divisor)
+{
+	return div64_u64(dividend, divisor);
+}
+
+static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
+{
+	uint64_t rem;
+
+	div64_u64_rem(dividend, divisor, &rem);
+	return rem;
+}
+
 #else /* LINUX_KERNEL */
 
 #if __has_attribute(__fallthrough__)
@@ -106,6 +138,21 @@ struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+/*
+ * 64-bit division / modulo with a 64-bit divisor; see the kernel branch
+ * above for the rationale. Userspace links against libgcc (or an
+ * equivalent), so the plain operators are used directly.
+ */
+static inline uint64_t jent_udiv64(uint64_t dividend, uint64_t divisor)
+{
+	return dividend / divisor;
+}
+
+static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
+{
+	return dividend % divisor;
+}
 
 #endif /* LINUX_KERNEL */
 

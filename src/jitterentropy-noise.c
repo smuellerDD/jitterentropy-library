@@ -258,8 +258,9 @@ static void jent_memaccess_pseudorandom(struct rand_data *ec, uint64_t loop_cnt,
 	 */
 	if (current_delta) {
 		jent_get_nstime_internal(ec, &time_now_end);
-		tmp_delta += jent_delta(time_now_start, time_now_end) /
-					ec->jent_common_timer_gcd;
+		tmp_delta += jent_udiv64(jent_delta(time_now_start,
+						    time_now_end),
+					 ec->jent_common_timer_gcd);
 		*current_delta = tmp_delta;
 	}
 }
@@ -333,8 +334,9 @@ static void jent_memaccess_deterministic(struct rand_data *ec,
 
 	if (current_delta) {
 		jent_get_nstime_internal(ec, &time_now_end);
-		tmp_delta += jent_delta(time_now_start, time_now_end) /
-					ec->jent_common_timer_gcd;
+		tmp_delta += jent_udiv64(jent_delta(time_now_start,
+						    time_now_end),
+					 ec->jent_common_timer_gcd);
 		*current_delta = tmp_delta;
 	}
 }
@@ -449,8 +451,8 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	 * invocation to measure the timing variations
 	 */
 	jent_get_nstime_internal(ec, &time_now);
-	current_delta = jent_delta(ec->prev_time, time_now) /
-				   ec->jent_common_timer_gcd;
+	current_delta = jent_udiv64(jent_delta(ec->prev_time, time_now),
+				    ec->jent_common_timer_gcd);
 
 	/*
 	 * Check whether we have a stuck measurement - and apply the health
@@ -509,8 +511,8 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	 * invocation to measure the timing variations
 	 */
 	jent_get_nstime_internal(ec, &time_now);
-	current_delta = jent_delta(ec->prev_time, time_now) /
-				   ec->jent_common_timer_gcd;
+	current_delta = jent_udiv64(jent_delta(ec->prev_time, time_now),
+				    ec->jent_common_timer_gcd);
 	ec->prev_time = time_now;
 
 	/* Check whether we have a stuck measurement. */
@@ -544,7 +546,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
  * Therefore, round up the jitter loop counter to the nearest multiple of three.
  */
 #define JENT_ROUNDUP_TO_THREE(x)                                               \
-	( (((x) + 2) / 3) * 3 )
+	(jent_udiv64((x) + 2, 3) * 3)
 #define JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)            \
 	JENT_ROUNDUP_TO_THREE(                                                 \
 		JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor))
