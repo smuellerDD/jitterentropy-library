@@ -241,6 +241,12 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 		max memory size:             auto (derived from cache size)
 		hash loop count:             default
 
+* `flags_raw`: the effective flags value as a plain hexadecimal number (e.g.
+  `0x00000060`), directly reusable as the `flags=` module parameter.
+
+* `osr`: the OSR module parameter value as a plain number (`0` selects the
+  default), directly reusable as the `osr=` module parameter.
+
 * `statistics`: module-wide statistics in JSON format. It currently reports the
   character-device instances (one Jitter RNG entropy collector is allocated per
   `open()` of `/dev/jitterentropy`):
