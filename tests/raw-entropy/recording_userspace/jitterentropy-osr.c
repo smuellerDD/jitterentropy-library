@@ -20,6 +20,7 @@
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <stdio.h>
@@ -29,6 +30,24 @@
 #include <float.h>
 #include <assert.h>
 #include <time.h>
+
+/*
+ * Parse a complete numeric option value. A plain strtoul(str, NULL, 10) turns
+ * a typo (or a follow-up option consumed as value) into 0 and the tool would
+ * silently measure with a configuration different from what was requested.
+ */
+static int parse_ulong(const char *str, unsigned long *val)
+{
+	char *endptr;
+
+	errno = 0;
+	*val = strtoul(str, &endptr, 10);
+	if (endptr == str || *endptr != '\0' || errno != 0) {
+		fprintf(stderr, "Invalid numeric value \"%s\"\n", str);
+		return 1;
+	}
+	return 0;
+}
 
 /* We use a linear interpolation to estimate where the value is going to be.
  * The way these variable are named, this is technically the inverse function
@@ -118,14 +137,20 @@ int main(int argc, char * argv[])
 		return 1;
 	}
 
-	rounds = strtoul(argv[1], NULL, 10);
-	if ((rounds >= UINT_MAX) || (rounds == 0))
+	if (parse_ulong(argv[1], &rounds) || rounds >= UINT_MAX || rounds == 0)
 		return 1;
 	argc--;
 	argv++;
 
+	/*
+	 * Reject NaN, infinities and values whose nanosecond representation
+	 * does not fit uint64_t: converting such a double to uint64_t below is
+	 * undefined behavior and would yield a garbage time bound.
+	 */
 	timeBoundIn = strtod(argv[1], &endtimeparam);
-	if ((timeBoundIn <= 0.0) || (*endtimeparam != '\0'))
+	if (!isfinite(timeBoundIn) || (timeBoundIn <= 0.0) ||
+	    (timeBoundIn > 1.8e10) || (endtimeparam == argv[1]) ||
+	    (*endtimeparam != '\0'))
 		return 1;
 
 	/* The time upper bound, expressed as an integer number of nanoseconds. */
@@ -156,7 +181,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				/* Allow to set no option */
@@ -235,7 +261,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				flags |= JENT_HASHLOOP_1;

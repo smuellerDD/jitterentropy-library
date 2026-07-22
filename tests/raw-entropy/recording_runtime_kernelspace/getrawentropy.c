@@ -79,6 +79,25 @@ struct opts {
 	const char *sysfs_dir;
 };
 
+/*
+ * Parse a complete numeric option value. A plain strtoul(str, NULL, 10) turns
+ * a typo (or a follow-up option consumed as value due to the prefix matching
+ * below) into 0 and the tool would silently record with a configuration
+ * different from what the operator requested.
+ */
+static int parse_ulong(const char *str, unsigned long *val)
+{
+	char *endptr;
+
+	errno = 0;
+	*val = strtoul(str, &endptr, 10);
+	if (endptr == str || *endptr != '\0' || errno != 0) {
+		printf("Invalid numeric value \"%s\"\n", str);
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static int write_config(const struct opts *opts, const char *file,
 			unsigned int val)
 {
@@ -305,7 +324,11 @@ int main(int argc, char * argv[])
 	opts.status = 0;
 	opts.loopcnt = 0;
 
-	if (argc < 4) {
+	/*
+	 * Every option has a default, so any single option (e.g. --samples N
+	 * or --status) is a valid invocation.
+	 */
+	if (argc < 2) {
 		printf("%s --samples <NUMSAMPLES> | --debugfs-file <FILE> [ --param-dir <DIR> | --timestamps | --ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>|--status]\n", argv[0]);
 		return 1;
 	}
@@ -322,12 +345,16 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			/*
 			 * Bound the sample count so that the byte total
-			 * (samples + 1) * DATASIZE cannot overflow size_t.
+			 * (samples + 1) * DATASIZE cannot overflow size_t. A
+			 * zero count would record an empty data file with exit
+			 * status 0.
 			 */
-			if (val >= UINT_MAX || val + 1 > SIZE_MAX / DATASIZE)
+			if (!val || val >= UINT_MAX ||
+			    val + 1 > SIZE_MAX / DATASIZE)
 				return 1;
 			opts.samples = (size_t)val;
 		} else if (!strncmp(argv[1], "--debugfs-file", 14) ||
@@ -379,8 +406,7 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
-			if (val >= UINT_MAX)
+			if (parse_ulong(argv[1], &val) || val >= UINT_MAX)
 				return 1;
 			opts.osr = (unsigned int)val;
 		} else if (!strncmp(argv[1], "--loopcnt", 9)) {
@@ -398,8 +424,7 @@ int main(int argc, char * argv[])
 			 * jitterentropy-hashtime (also enforced by the
 			 * JENT_IOCLOOPCNT ioctl).
 			 */
-			val = strtoul(argv[1], NULL, 10);
-			if (val >= UINT_MAX)
+			if (parse_ulong(argv[1], &val) || val >= UINT_MAX)
 				return 1;
 			opts.loopcnt = val;
 		} else if (!strncmp(argv[1], "--max-mem", 9)) {
@@ -412,7 +437,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				/* Allow to set no option */
@@ -491,7 +517,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				opts.flags |= JENT_HASHLOOP_1;
