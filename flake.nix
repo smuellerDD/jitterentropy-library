@@ -210,7 +210,7 @@
           services.getty.autologinUser = lib.mkForce "root";
           console.keyMap = "de";
           environment.shellAliases = {
-            "sample_kernel" = "getrawentropy --samples 1000000 --debugfs-file /sys/kernel/debug/jitter_rng/jent_raw_hires";
+            "sample_kernel" = "getrawentropy --ntg1 --samples 1000000 --debugfs-file /sys/kernel/debug/jitter_rng/jent_raw_hires";
             "clock_rdtsc" = "echo tsc > /sys/devices/system/clocksource/clocksource0/current_clocksource";
             "jitter_hwrng" = "echo jitterentropy > /sys/class/misc/hw_random/rng_current";
             "show_hwrng" = "cat /sys/class/misc/hw_random/rng_current";
@@ -331,16 +331,34 @@
           '';
         };
 
-      # Every kernel package set exposed by nixpkgs that provides a real kernel
-      # derivation. tryEval guards the sets that fail to evaluate (unfree,
-      # unsupported on the current system, ...). Note that board-specific
-      # kernels (e.g. linux_rpi*) only boot on a matching host architecture.
+      # One kernel module package per nixpkgs kernel, plus the default and
+      # latest kernels, mirroring the VM test and image sets. Interface
+      # selection is tunable on every attribute via .override { withChardev,
+      # withHwrng, withTestInterface }.
+      modulesFor = pkgs:
+        (lib.mapAttrs'
+          (name: ps:
+            lib.nameValuePair "jitterentropy-module-${name}"
+              (moduleFor pkgs ps.kernel))
+          (kernelSetsFor pkgs)) // {
+            jitterentropy-module = moduleFor pkgs pkgs.linuxPackages.kernel;
+            jitterentropy-module-latest =
+              moduleFor pkgs pkgs.linuxPackages_latest.kernel;
+          };
+
+      # The numbered kernel package sets exposed by nixpkgs (linux_6_12, ...)
+      # plus the mainline testing kernel — the flavored variants (zen,
+      # xanmod, hardened, libre, rpi, ...) are of no interest here. tryEval
+      # guards the sets that fail to evaluate (unsupported on the current
+      # system, ...).
       kernelSetsFor = pkgs:
-        lib.filterAttrs (_name: ps:
+        lib.filterAttrs (name: ps:
           let
             r = builtins.tryEval
               (lib.isAttrs ps && ps ? kernel && lib.isDerivation ps.kernel);
-          in r.success && r.value) pkgs.linuxKernel.packages;
+          in (builtins.match "linux_[0-9]+_[0-9]+" name != null
+            || name == "linux_testing") && r.success && r.value)
+          pkgs.linuxKernel.packages;
 
       # One VM test per nixpkgs kernel, plus the default and latest kernels.
       vmTestsFor = pkgs:
@@ -383,17 +401,56 @@
             iso = mkIso system "default" pkgs.linuxPackages;
             iso-latest = mkIso system "latest" pkgs.linuxPackages_latest;
           };
+
+      # A bootable SD card image for the 64-bit Raspberry Pi boards (Zero 2,
+      # 3, 4, 5) booting the shared machine configuration on the chosen
+      # kernel, for exercising the Jitter RNG on real hardware without a
+      # bootable CD path. Build with e.g. `nix build .#sd-image-linux_6_18`;
+      # the image lands in
+      # result/sd-image/jitterentropy-<name>-<kernel version>.img.zst.
+      mkSdImage = system: name: kernelPackages:
+        (lib.nixosSystem {
+          modules = [
+            "${nixpkgs}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
+            (machineFor kernelPackages)
+            ({ config, lib, ... }: {
+              nixpkgs.hostPlatform = system;
+              image.baseName = lib.mkForce
+                "jitterentropy-${name}-${config.boot.kernelPackages.kernel.version}";
+              # The base profile pulled in by sd-image-aarch64.nix enables
+              # ZFS whenever the platform supports it; not every kernel here
+              # has a compatible ZFS module (latest, rpi, ...), and the test
+              # image does not need ZFS.
+              boot.supportedFilesystems.zfs = lib.mkForce false;
+              # Throwaway test image, no state to migrate.
+              system.stateVersion = lib.trivial.release;
+            })
+          ];
+        }).config.system.build.sdImage;
+
+      # One SD image per kernel set, plus the default and latest kernels,
+      # mirroring the ISO set. The nixos-hardware vendor kernels (rpi3, rpi4,
+      # rpi5) are among them; the default mainline kernel is the combination
+      # the upstream image targets.
+      sdImagesFor = system: pkgs:
+        (lib.mapAttrs'
+          (name: ps:
+            lib.nameValuePair "sd-image-${name}" (mkSdImage system name ps))
+          (kernelSetsFor pkgs)) // {
+            sd-image = mkSdImage system "default" pkgs.linuxPackages;
+            sd-image-latest = mkSdImage system "latest" pkgs.linuxPackages_latest;
+          };
     in {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
         in {
           default = toolsFor pkgs;
           jitterentropy-tools = toolsFor pkgs;
-          # Module built against the nixpkgs default kernel. Interface
-          # selection is tunable via .override { withChardev, withHwrng,
-          # withTestInterface }.
-          jitterentropy-module = moduleFor pkgs pkgs.linuxPackages.kernel;
-        } // isosFor system pkgs
+        } // modulesFor pkgs
+          // isosFor system pkgs
+          # The SD images boot Raspberry Pi boards, which are aarch64.
+          // lib.optionalAttrs (system == "aarch64-linux")
+            (sdImagesFor system pkgs)
           # The NDK host toolchain in nixpkgs is x86_64-linux only.
           // lib.optionalAttrs (system == "x86_64-linux") {
             android = androidFor system;
@@ -403,7 +460,7 @@
             # helpers replacing the libgcc 64-bit division routines that the
             # kernel does not provide.
             jitterentropy-module-i686 =
-              moduleFor pkgs.pkgsi686Linux pkgs.pkgsi686Linux.linuxPackages.kernel;
+              moduleFor pkgs.pkgsi686Linux pkgs.pkgsi686Linux.linuxPackages_latest.kernel;
           });
 
       # `nix flake check` boots every VM and runs its assertions. Individual
