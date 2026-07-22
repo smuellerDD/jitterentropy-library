@@ -397,6 +397,13 @@
           # The NDK host toolchain in nixpkgs is x86_64-linux only.
           // lib.optionalAttrs (system == "x86_64-linux") {
             android = androidFor system;
+            # 32-bit x86 build of the kernel module, compiled natively via the
+            # pkgsi686Linux package set (x86_64 hosts execute i686 binaries
+            # directly). Exercises the 32-bit code paths, e.g. the div64
+            # helpers replacing the libgcc 64-bit division routines that the
+            # kernel does not provide.
+            jitterentropy-module-i686 =
+              moduleFor pkgs.pkgsi686Linux pkgs.pkgsi686Linux.linuxPackages.kernel;
           });
 
       # `nix flake check` boots every VM and runs its assertions. Individual
