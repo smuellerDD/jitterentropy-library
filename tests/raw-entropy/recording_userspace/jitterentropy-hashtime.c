@@ -206,12 +206,25 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		measure_jitter(ec, loopcnt, &duration[size]);
 	}
 
+	/*
+	 * Treat output errors as fatal for the tool: a silently truncated
+	 * sample file would be analyzed by the SP800-90B validation pipeline
+	 * as if it were complete.
+	 */
 #ifdef JENT_TEST_BINARY_OUTPUT
 	recordsWritten = fwrite(duration, sizeof(uint64_t), rounds, out);
-	if(recordsWritten != rounds) fprintf(stderr, "Can't output data.\n");
-	#else
-	for (size = 0; size < rounds; size++)
-		fprintf(out, "%" PRIu64 "\n", duration[size]);
+	if (recordsWritten != rounds) {
+		fprintf(stderr, "Can't output data.\n");
+		ret = 1;
+	}
+#else
+	for (size = 0; size < rounds; size++) {
+		if (fprintf(out, "%" PRIu64 "\n", duration[size]) < 0) {
+			fprintf(stderr, "Can't output data.\n");
+			ret = 1;
+			break;
+		}
+	}
 #endif
 
 	if ((health_test_result = jent_health_failure(ec))) {
@@ -225,8 +238,11 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 out:
 	free(duration);
 
-	if (out)
-		fclose(out);
+	/* An fclose() error means buffered sample data was lost. */
+	if (out && fclose(out) != 0) {
+		fprintf(stderr, "Can't close output file.\n");
+		ret = 1;
+	}
 
 	if (ec) {
 		/* checks internally if timer was used, maybe NOOP */
@@ -483,11 +499,24 @@ int main(int argc, char * argv[])
 	}
 
 	for (i = 1; i <= repeats; i++) {
+		int len;
+
 #if defined(JENT_TEST_BINARY_OUTPUT)
-		snprintf(pathname, sizeof(pathname), "%s-%.4lu-u64.bin", file, i);
+		len = snprintf(pathname, sizeof(pathname), "%s-%.4lu-u64.bin",
+			       file, i);
 #else
-		snprintf(pathname, sizeof(pathname), "%s-%.4lu.data", file, i);
+		len = snprintf(pathname, sizeof(pathname), "%s-%.4lu.data",
+			       file, i);
 #endif
+		/*
+		 * A truncated path would drop the repeat-number suffix and make
+		 * every repeat overwrite the same file, silently collapsing the
+		 * SP800-90B restart matrix to a single repeat.
+		 */
+		if (len < 0 || (size_t)len >= sizeof(pathname)) {
+			fprintf(stderr, "Output file path too long\n");
+			return 1;
+		}
 
 		ret = jent_one_test(pathname, rounds, flags, osr, jent_es,
 				    loopcnt, REPORT_COUNTER_TICKS, status);

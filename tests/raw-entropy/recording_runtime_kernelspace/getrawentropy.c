@@ -127,8 +127,17 @@ static int write_config(const struct opts *opts, const char *file,
 	}
 
 out:
-	if (config)
-		fclose(config);
+	/*
+	 * The value leaves the stdio buffer only at fclose() time (it is far
+	 * smaller than the buffer), so a kernel rejecting it (e.g. EINVAL)
+	 * surfaces only here. Without this check the recording would silently
+	 * run with a different osr/flags configuration than requested.
+	 */
+	if (config && fclose(config) != 0 && !ret) {
+		printf("Configuration parameters writing to %s failed: %s\n",
+		       file, strerror(errno));
+		ret = -EINVAL;
+	}
 	return ret;
 }
 
@@ -275,6 +284,16 @@ static int getrawentropy(const struct opts *opts)
 out:
 	if (fd >= 0)
 		close(fd);
+
+	/*
+	 * The samples were written through stdout's buffer; a write error on
+	 * the redirect target (e.g. ENOSPC) may surface only at flush time.
+	 * Report it so a truncated data file cannot pass as a success.
+	 */
+	if (!ret && (fflush(stdout) != 0 || ferror(stdout))) {
+		fprintf(stderr, "Failed to write output\n");
+		ret = -EIO;
+	}
 
 	return (int)ret;
 }
