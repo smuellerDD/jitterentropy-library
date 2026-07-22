@@ -52,7 +52,7 @@ extern int flags;
 #define JENT_CHARDEV_READ_BUF_SIZE 32
 
 /*
- * Subdirectory /proc/jitter_rng/instances holding one status file per open
+ * Subdirectory /proc/jitterentropy/instances holding one status file per open
  * character-device instance. NULL if procfs is unavailable.
  */
 static struct proc_dir_entry *jent_chardev_proc_dir;
@@ -62,13 +62,13 @@ static struct proc_dir_entry *jent_chardev_proc_dir;
 struct jent_chardev_ctx {
 	struct mutex lock;
 	struct rand_data *entropy_collector;
-	/* Per-instance status file /proc/jitter_rng/instances/<uuid>. */
+	/* Per-instance status file /proc/jitterentropy/instances/<uuid>. */
 	struct proc_dir_entry *proc;
 };
 
 /*
  * Emit the JSON status string of a single open instance, exported read-only as
- * /proc/jitter_rng/instances/<id>. Holds the instance lock (as read()/ioctl()
+ * /proc/jitterentropy/instances/<id>. Holds the instance lock (as read()/ioctl()
  * do) so the collector cannot be reallocated on health-test recovery while
  * jent_status() runs.
  */
@@ -146,8 +146,8 @@ static int jent_chardev_open(struct inode *inode, struct file *file)
 	file->private_data = ctx;
 
 	/*
-	 * Account for this instance in /proc/jitter_rng/statistics and publish
-	 * its status under /proc/jitter_rng/instances/<uuid>.
+	 * Account for this instance in /proc/jitterentropy/statistics and
+	 * publish its status under /proc/jitterentropy/instances/<uuid>.
 	 */
 	jent_proc_instance_inc();
 	jent_chardev_instance_proc_create(ctx);
