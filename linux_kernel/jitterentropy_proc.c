@@ -39,6 +39,30 @@ static int jent_proc_flags_raw_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+/*
+ * Quick-check mode indicators reported via /proc/jitterentropy/ntg1 and
+ * /proc/jitterentropy/fips as plain 0/1. They report the modes the
+ * collectors actually run with (see jent_entropy_collector_alloc_internal()):
+ * FIPS compliant operation is in effect when the JENT_FORCE_FIPS flag is set,
+ * when the kernel itself runs in FIPS mode, or when NTG.1 mode is enabled
+ * (NTG.1 implies FIPS operation).
+ */
+static int jent_proc_ntg1_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%u\n", !!(flags & JENT_NTG1));
+
+	return 0;
+}
+
+static int jent_proc_fips_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%u\n",
+		   !!((flags & (JENT_FORCE_FIPS | JENT_NTG1)) ||
+		      jent_fips_enabled()));
+
+	return 0;
+}
+
 static int jent_proc_osr_show(struct seq_file *m, void *v)
 {
 	/*
@@ -186,6 +210,16 @@ void __init jent_proc_init(void)
 	if (!proc_create_single("osr", 0444, jent_proc_dir,
 				jent_proc_osr_show))
 		pr_warn("jitterentropy: failed to create /proc/%s/osr\n",
+			JENT_PROC_DIRNAME);
+
+	if (!proc_create_single("ntg1", 0444, jent_proc_dir,
+				jent_proc_ntg1_show))
+		pr_warn("jitterentropy: failed to create /proc/%s/ntg1\n",
+			JENT_PROC_DIRNAME);
+
+	if (!proc_create_single("fips", 0444, jent_proc_dir,
+				jent_proc_fips_show))
+		pr_warn("jitterentropy: failed to create /proc/%s/fips\n",
 			JENT_PROC_DIRNAME);
 }
 
