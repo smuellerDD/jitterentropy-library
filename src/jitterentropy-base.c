@@ -516,6 +516,18 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 uint32_t jent_memsize(unsigned int flags)
 {
 	uint32_t memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
+	static const uint32_t max_field =
+		JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX);
+
+	/*
+	 * Flags of collectors instantiated with JENT_DISABLE_MEMORY_ACCESS are
+	 * never normalized by jent_update_memsize(), so an out-of-range
+	 * caller-provided size field can reach this point (e.g. via
+	 * jent_status()). Clamp it: the shift below would otherwise exceed the
+	 * uint32_t width, which is undefined behavior.
+	 */
+	if (memsize > max_field)
+		memsize = max_field;
 
 	if (memsize == 0) {
 		memsize = JENT_DEFAULT_MEMORY_BITS;
