@@ -257,13 +257,39 @@ int main(int argc, char * argv[])
 			ret = 1;
 			goto out;
 		}
+		/*
+		 * Treat output errors as fatal: consumers pipe this data into
+		 * files for analysis, and a silently truncated stream with
+		 * exit code 0 would be processed as if complete.
+		 */
 		if (hex) {
 			for (i = 0; i < sizeof(tmp); ++i) {
-				fprintf(stdout, "%02X", (unsigned int)tmp[i]);
+				if (fprintf(stdout, "%02X",
+					    (unsigned int)tmp[i]) < 0) {
+					fprintf(stderr, "Can't output data\n");
+					ret = 1;
+					goto out;
+				}
 			}
 		} else {
-			fwrite(&tmp, sizeof(tmp), 1, stdout);
+			if (fwrite(&tmp, sizeof(tmp), 1, stdout) != 1) {
+				fprintf(stderr, "Can't output data\n");
+				ret = 1;
+				goto out;
+			}
 		}
+	}
+
+	/*
+	 * Most of the output above only fills the stdio buffer; the final
+	 * chunk would be flushed inside exit(), where a write failure (e.g.
+	 * ENOSPC) is silently discarded. Flush explicitly so a truncated
+	 * stream cannot terminate with exit code 0.
+	 */
+	if (fflush(stdout) != 0) {
+		fprintf(stderr, "Can't output data\n");
+		ret = 1;
+		goto out;
 	}
 
 	ret = 0;
