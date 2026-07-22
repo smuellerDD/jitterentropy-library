@@ -27,6 +27,7 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
+#include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
 
