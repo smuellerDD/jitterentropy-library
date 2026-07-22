@@ -62,45 +62,65 @@ static int __init jent_mod_init(void)
 
 	jent_proc_init();
 
-	/*
-	 * Register the debugfs test interface only after the library
-	 * initialization above completed: the file is visible to userspace
-	 * immediately, and a read triggers library init paths that must not
-	 * run concurrently with jent_entropy_init_ex().
-	 */
-	jent_testing_init();
-
 	ret = jent_kcapi_init();
 	if (ret)
 		goto err;
 
-	ret = jent_chardev_init();
+	ret = jent_hwrng_init();
 	if (ret)
 		goto err_crypto;
 
-	ret = jent_hwrng_init();
+	/*
+	 * Register the character device after all other fallible steps:
+	 * misc_register() makes /dev/jitterentropy openable by userspace
+	 * (e.g. udev) immediately, and misc_deregister() does not wait for
+	 * open files. If a later init step failed after the device went live,
+	 * an already-open file would keep pointing into a module that init
+	 * failure frees. The hwrng registration is safe to precede it as
+	 * hwrng_unregister() drains all readers before returning.
+	 */
+	ret = jent_chardev_init();
 	if (ret)
-		goto err_chardev;
+		goto err_hwrng;
+
+	/*
+	 * Register the debugfs test interface as the very last step: like the
+	 * character device, the file is visible to userspace immediately and
+	 * debugfs_remove_recursive() does not wait for open files, so it must
+	 * not be created while a later init step could still fail (an open
+	 * file would outlive the module memory freed on init failure). Being
+	 * after jent_entropy_init_ex() also keeps its reads from racing the
+	 * library initialization. jent_testing_init() itself cannot fail, so
+	 * no unwind is needed for it.
+	 */
+	jent_testing_init();
 
 	return 0;
 
-err_chardev:
-	jent_chardev_exit();
+err_hwrng:
+	jent_hwrng_exit();
 err_crypto:
 	jent_kcapi_exit();
 err:
-	jent_testing_exit();
 	jent_proc_exit();
 	return ret;
 }
 
 static void __exit jent_mod_exit(void)
 {
-	jent_hwrng_exit();
-	jent_chardev_exit();
-	jent_proc_exit();
+	/*
+	 * Tear down in reverse order of the registrations in jent_mod_init().
+	 * The relative order of the character device, hwrng and procfs teardown
+	 * matters: both interfaces remove their status files below the shared
+	 * /proc/jitterentropy directory, so their exits must run before
+	 * jent_proc_exit() removes that directory recursively (a later
+	 * proc_remove() on an already-removed entry would act on freed memory).
+	 */
 	jent_testing_exit();
+	jent_chardev_exit();
+	jent_hwrng_exit();
 	jent_kcapi_exit();
+	jent_proc_exit();
 }
 
 module_init(jent_mod_init);
