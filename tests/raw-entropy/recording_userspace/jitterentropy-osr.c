@@ -67,7 +67,14 @@ double linearInverse(double y, double x1, double y1, double x2, double y2) {
 	return (y-y1)*((x2-x1)/(y2-y1)) + x1;
 }
 
-/* Returns the number of nanoseconds per output for the selected flags and osr. */
+/*
+ * Returns the number of nanoseconds per output for the selected flags and osr.
+ *
+ * A failed measurement terminates the program: any numeric return value would
+ * be indistinguishable from a legitimate (fast) timing and would corrupt the
+ * search invariants of the caller (e.g. drive the doubling search into an
+ * endless loop).
+ */
 uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 {
 	struct rand_data *ec_nostir;
@@ -77,27 +84,27 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
-		if (osr > JENT_MAX_OSR) {
+		if (osr > JENT_MAX_OSR)
 			fprintf(stderr,
 				"The initialization failed with error code %d due to selected OSR %u too high (max %u)\n",
 				ret, osr, JENT_MAX_OSR);
-			return 1;
-		}
-		fprintf(stderr, "The initialization failed with error code %d\n", ret);
-		return 1;
+		else
+			fprintf(stderr,
+				"The initialization failed with error code %d\n",
+				ret);
+		exit(1);
 	}
 
 	ec_nostir = jent_entropy_collector_alloc(osr, flags);
 
 	if (!ec_nostir) {
 		fprintf(stderr, "Jitter RNG handle cannot be allocated\n");
-		return 1;
+		exit(1);
 	}
 
 	if (timespec_get(&start, TIME_UTC) == 0) {
 		fprintf(stderr, "Unable to get start time\n");
-		jent_entropy_collector_free(ec_nostir);
-		return 1;
+		exit(1);
 	}
 
 	for (unsigned long size = 0; size < rounds; size++) {
@@ -105,15 +112,13 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 
 		if (0 > jent_read_entropy_safe(&ec_nostir, tmp, sizeof(tmp))) {
 			fprintf(stderr, "FIPS 140-2 continuous test failed\n");
-			jent_entropy_collector_free(ec_nostir);
-			return 1;
+			exit(1);
 		}
 	}
 
 	if (timespec_get(&finish, TIME_UTC) == 0) {
 		fprintf(stderr, "Unable to get finish time\n");
-		jent_entropy_collector_free(ec_nostir);
-		return 1;
+		exit(1);
 	}
 	runtime = ((uint64_t)finish.tv_sec * UINT64_C(1000000000) + (uint64_t)finish.tv_nsec) - ((uint64_t)start.tv_sec * UINT64_C(1000000000) + (uint64_t)start.tv_nsec);
 
