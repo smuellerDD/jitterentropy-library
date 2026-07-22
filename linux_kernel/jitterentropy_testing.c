@@ -510,14 +510,34 @@ static const struct file_operations jent_raw_hires_fops = {
 
 /******************************* Initialization *******************************/
 
-void __init jent_testing_init(void)
+int __init jent_testing_init(void)
 {
+	struct dentry *raw_hires;
+	int ret;
+
+	/*
+	 * Without debugfs there is nothing to create and every debugfs call
+	 * would return -ENODEV; the test interface is a pure debugging aid,
+	 * so its absence must not fail the module load.
+	 */
+	if (!IS_ENABLED(CONFIG_DEBUG_FS)) {
+		pr_info("jitterentropy: debugfs not available, not exposing the raw entropy test interface\n");
+		return 0;
+	}
+
 	if (jent_testing_locked_down()) {
 		pr_info("jitterentropy: kernel is locked down, not exposing the raw entropy test interface\n");
-		return;
+		return 0;
 	}
 
 	jent_raw_debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
+	if (IS_ERR(jent_raw_debugfs_root)) {
+		ret = PTR_ERR(jent_raw_debugfs_root);
+		pr_warn("jitterentropy: failed to create debugfs directory %s: %d\n",
+			KBUILD_MODNAME, ret);
+		jent_raw_debugfs_root = NULL;
+		return ret;
+	}
 
 	/*
 	 * Use the proxied variant: the fops do not implement the
@@ -525,9 +545,19 @@ void __init jent_testing_init(void)
 	 * variant requires, so only the proxy protects a reader against a
 	 * concurrent debugfs_remove_recursive() from jent_testing_exit().
 	 */
-	debugfs_create_file("jent_raw_hires", 0400,
-			    jent_raw_debugfs_root, NULL,
-			    &jent_raw_hires_fops);
+	raw_hires = debugfs_create_file("jent_raw_hires", 0400,
+					jent_raw_debugfs_root, NULL,
+					&jent_raw_hires_fops);
+	if (IS_ERR(raw_hires)) {
+		ret = PTR_ERR(raw_hires);
+		pr_warn("jitterentropy: failed to create debugfs file jent_raw_hires: %d\n",
+			ret);
+		debugfs_remove_recursive(jent_raw_debugfs_root);
+		jent_raw_debugfs_root = NULL;
+		return ret;
+	}
+
+	return 0;
 }
 
 void jent_testing_exit(void)

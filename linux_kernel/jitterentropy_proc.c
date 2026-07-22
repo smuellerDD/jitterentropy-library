@@ -220,45 +220,55 @@ static const struct {
 	{ "fips",	jent_proc_fips_show },
 };
 
-void __init jent_proc_init(void)
+int __init jent_proc_init(void)
 {
 	struct proc_dir_entry *config_dir, *interfaces_dir;
 	unsigned int i;
+
+	/*
+	 * Without procfs there is nothing to create and jent_proc_dir stays
+	 * NULL, which the other interfaces already handle; only a failed
+	 * creation on a procfs-enabled kernel is an error.
+	 */
+	if (!IS_ENABLED(CONFIG_PROC_FS))
+		return 0;
 
 	jent_proc_dir = proc_mkdir(JENT_PROC_DIRNAME, NULL);
 	if (!jent_proc_dir) {
 		pr_warn("jitterentropy: failed to create /proc/%s\n",
 			JENT_PROC_DIRNAME);
-		return;
+		return -ENOMEM;
 	}
 
 	if (!proc_create_single("statistics", 0444, jent_proc_dir,
-				jent_proc_statistics_show))
+				jent_proc_statistics_show)) {
 		pr_warn("jitterentropy: failed to create /proc/%s/statistics\n",
 			JENT_PROC_DIRNAME);
+		goto err;
+	}
 
 	if (!proc_create_single("version", 0444, jent_proc_dir,
-				jent_proc_version_show))
+				jent_proc_version_show)) {
 		pr_warn("jitterentropy: failed to create /proc/%s/version\n",
 			JENT_PROC_DIRNAME);
+		goto err;
+	}
 
-	/*
-	 * Group the effective-configuration files below config/. A failed
-	 * directory creation is non-fatal like every other file here; the
-	 * files below it are then skipped.
-	 */
+	/* Group the effective-configuration files below config/. */
 	config_dir = proc_mkdir("config", jent_proc_dir);
 	if (!config_dir) {
 		pr_warn("jitterentropy: failed to create /proc/%s/config\n",
 			JENT_PROC_DIRNAME);
-	} else {
-		for (i = 0; i < ARRAY_SIZE(jent_proc_config_files); i++) {
-			if (!proc_create_single(jent_proc_config_files[i].name,
-						0444, config_dir,
-						jent_proc_config_files[i].show))
-				pr_warn("jitterentropy: failed to create /proc/%s/config/%s\n",
-					JENT_PROC_DIRNAME,
-					jent_proc_config_files[i].name);
+		goto err;
+	}
+	for (i = 0; i < ARRAY_SIZE(jent_proc_config_files); i++) {
+		if (!proc_create_single(jent_proc_config_files[i].name,
+					0444, config_dir,
+					jent_proc_config_files[i].show)) {
+			pr_warn("jitterentropy: failed to create /proc/%s/config/%s\n",
+				JENT_PROC_DIRNAME,
+				jent_proc_config_files[i].name);
+			goto err;
 		}
 	}
 
@@ -267,17 +277,25 @@ void __init jent_proc_init(void)
 	if (!interfaces_dir) {
 		pr_warn("jitterentropy: failed to create /proc/%s/interfaces\n",
 			JENT_PROC_DIRNAME);
-	} else {
-		for (i = 0; i < ARRAY_SIZE(jent_proc_interfaces); i++) {
-			if (!proc_create_single_data(jent_proc_interfaces[i].name,
-						     0444, interfaces_dir,
-						     jent_proc_interface_show,
-						     (void *)&jent_proc_interfaces[i].enabled))
-				pr_warn("jitterentropy: failed to create /proc/%s/interfaces/%s\n",
-					JENT_PROC_DIRNAME,
-					jent_proc_interfaces[i].name);
+		goto err;
+	}
+	for (i = 0; i < ARRAY_SIZE(jent_proc_interfaces); i++) {
+		if (!proc_create_single_data(jent_proc_interfaces[i].name,
+					     0444, interfaces_dir,
+					     jent_proc_interface_show,
+					     (void *)&jent_proc_interfaces[i].enabled)) {
+			pr_warn("jitterentropy: failed to create /proc/%s/interfaces/%s\n",
+				JENT_PROC_DIRNAME,
+				jent_proc_interfaces[i].name);
+			goto err;
 		}
 	}
+
+	return 0;
+
+err:
+	jent_proc_exit();
+	return -ENOMEM;
 }
 
 void jent_proc_exit(void)

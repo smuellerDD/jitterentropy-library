@@ -25,8 +25,13 @@
  */
 extern struct proc_dir_entry *jent_proc_dir;
 
-/* Create/remove /proc/jitterentropy and the statistics file. Both are non-fatal. */
-void __init jent_proc_init(void);
+/*
+ * Create/remove /proc/jitterentropy and the files below it. A creation
+ * failure on a procfs-enabled kernel is returned as -ENOMEM after removing
+ * anything already created; with CONFIG_PROC_FS off the init succeeds and
+ * jent_proc_dir stays NULL.
+ */
+int __init jent_proc_init(void);
 void jent_proc_exit(void);
 
 /*

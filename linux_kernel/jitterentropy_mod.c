@@ -92,7 +92,9 @@ static int __init jent_mod_init(void)
 		return -EFAULT;
 	}
 
-	jent_proc_init();
+	ret = jent_proc_init();
+	if (ret)
+		return ret;
 
 	ret = jent_kcapi_init();
 	if (ret)
@@ -103,32 +105,38 @@ static int __init jent_mod_init(void)
 		goto err_crypto;
 
 	/*
-	 * Register the character device after all other fallible steps:
-	 * misc_register() makes /dev/jitterentropy openable by userspace
-	 * (e.g. udev) immediately, and misc_deregister() does not wait for
-	 * open files. If a later init step failed after the device went live,
-	 * an already-open file would keep pointing into a module that init
-	 * failure frees. The hwrng registration is safe to precede it as
-	 * hwrng_unregister() drains all readers before returning.
+	 * Register the debugfs test interface before the character device:
+	 * only one of the two userspace-visible interfaces can be the last
+	 * fallible init step, and unwinding the debugfs file is the safer of
+	 * the two — the debugfs proxy fails its file operations after
+	 * debugfs_remove_recursive(), and unlike /dev/jitterentropy (created
+	 * and potentially opened by udev immediately) nothing opens the test
+	 * interface automatically in the window before the unwind. Being
+	 * after jent_entropy_init_ex() also keeps its reads from racing the
+	 * library initialization.
 	 */
-	ret = jent_chardev_init();
+	ret = jent_testing_init();
 	if (ret)
 		goto err_hwrng;
 
 	/*
-	 * Register the debugfs test interface as the very last step: like the
-	 * character device, the file is visible to userspace immediately and
-	 * debugfs_remove_recursive() does not wait for open files, so it must
-	 * not be created while a later init step could still fail (an open
-	 * file would outlive the module memory freed on init failure). Being
-	 * after jent_entropy_init_ex() also keeps its reads from racing the
-	 * library initialization. jent_testing_init() itself cannot fail, so
-	 * no unwind is needed for it.
+	 * Register the character device as the very last step and after all
+	 * other fallible steps: misc_register() makes /dev/jitterentropy
+	 * openable by userspace (e.g. udev) immediately, and
+	 * misc_deregister() does not wait for open files. If a later init
+	 * step failed after the device went live, an already-open file would
+	 * keep pointing into a module that init failure frees. The hwrng
+	 * registration is safe to precede it as hwrng_unregister() drains all
+	 * readers before returning.
 	 */
-	jent_testing_init();
+	ret = jent_chardev_init();
+	if (ret)
+		goto err_testing;
 
 	return 0;
 
+err_testing:
+	jent_testing_exit();
 err_hwrng:
 	jent_hwrng_exit();
 err_crypto:
@@ -148,8 +156,8 @@ static void __exit jent_mod_exit(void)
 	 * jent_proc_exit() removes that directory recursively (a later
 	 * proc_remove() on an already-removed entry would act on freed memory).
 	 */
-	jent_testing_exit();
 	jent_chardev_exit();
+	jent_testing_exit();
 	jent_hwrng_exit();
 	jent_kcapi_exit();
 	jent_proc_exit();
