@@ -12,9 +12,12 @@
 /*
  * MODULE_ALIAS_CRYPTO() lives in crypto/algapi.h on kernels >= 6.4 and in
  * linux/crypto.h before; crypto/algapi.h includes linux/crypto.h, so this
- * single include covers the whole supported kernel range.
+ * single include covers the whole supported kernel range. Only needed for
+ * the crypto API alias emitted at the bottom of this file.
  */
+#ifdef CONFIG_EXTERNAL_JITTERENTROPY_KCAPI
 #include <crypto/algapi.h>
+#endif
 #include <linux/fips.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -132,10 +135,14 @@ MODULE_DESCRIPTION("Non-physical True Random Number Generator based on CPU Jitte
 /*
  * The crypto API name depends on the build mode (see jent_alg.base.cra_name
  * in jitterentropy_kcapi.c). Alias the matching name so the algorithm can be
- * auto-loaded on request via the kernel crypto API.
+ * auto-loaded on request via the kernel crypto API. Only emitted when the
+ * crypto API interface is compiled in: the alias must not advertise an
+ * algorithm this build does not register.
  */
-#ifdef CONFIG_BUILTIN_JITTERENTROPY
+#ifdef CONFIG_EXTERNAL_JITTERENTROPY_KCAPI
+# ifdef CONFIG_BUILTIN_JITTERENTROPY
 MODULE_ALIAS_CRYPTO("jitterentropy_rng");
-#else
+# else
 MODULE_ALIAS_CRYPTO("jitter_rng");
-#endif
+# endif
+#endif /* CONFIG_EXTERNAL_JITTERENTROPY_KCAPI */
