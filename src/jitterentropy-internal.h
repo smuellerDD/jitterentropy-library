@@ -74,11 +74,17 @@ extern "C" {
 
 #ifdef LINUX_KERNEL
 
-#define UINT32_MAX	(4294967295U)
-#if __LP64__
-# define UINT64_C(c)   c ## UL
-#else
-# define UINT64_C(c)   c ## ULL
+#ifndef UINT32_MAX
+# define UINT32_MAX	(4294967295U)
+#endif
+#ifndef UINT64_C
+/* #ifdef, not #if: kernel builds run with -Wundef and 32-bit targets do not
+ * define __LP64__ at all. */
+# ifdef __LP64__
+#  define UINT64_C(c)   c ## UL
+# else
+#  define UINT64_C(c)   c ## ULL
+# endif
 #endif
 
 /*
