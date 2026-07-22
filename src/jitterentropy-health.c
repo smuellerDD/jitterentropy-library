@@ -607,7 +607,18 @@ static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 
 void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 {
-	/* RCT with memory re-initialization to intermittent error */
+	/*
+	 * RCT with memory re-initialization to intermittent error.
+	 *
+	 * NOTE: this priming is currently ineffective. Every output block
+	 * starts with jent_random_data_one() setting rct_mem_ctr = 0, and the
+	 * first jent_rct_mem_insert() of a window then clears rct_mem_count
+	 * before any cutoff comparison sees it - so, unlike the RCT/APT/lag
+	 * duplication, no escalation state actually survives the reset. Making
+	 * it effective would change the health-test semantics (the window-
+	 * start reset in jent_rct_mem_insert() would need to spare a primed
+	 * value once); left as-is pending a maintainer decision.
+	 */
 	new_ec->rct_mem_count = old_ec->rct_mem_cutoff;
 }
 
