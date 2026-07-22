@@ -244,8 +244,10 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 * `flags_raw`: the effective flags value as a plain hexadecimal number (e.g.
   `0x00000060`), directly reusable as the `flags=` module parameter.
 
-* `osr`: the OSR module parameter value as a plain number (`0` selects the
-  default), directly reusable as the `osr=` module parameter.
+* `osr`: the effective OSR as a plain number, directly reusable as the `osr=`
+  module parameter. Reports the value the collectors actually run with: an
+  `osr=` request below the library minimum (including the default `0`) is
+  raised to that minimum.
 
 * `statistics`: module-wide statistics in JSON format. It currently reports the
   character-device instances (one Jitter RNG entropy collector is allocated per
