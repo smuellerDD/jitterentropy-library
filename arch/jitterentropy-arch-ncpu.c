@@ -48,6 +48,8 @@
 
 #ifdef LINUX_KERNEL
 
+#include <linux/cpumask.h>	/* num_online_cpus() */
+
 #define JENT_ARCH_NCPU_LINUX_KERNEL
 
 #else /* LINUX_KERNEL */
@@ -198,7 +200,13 @@ long jent_ncpu(void)
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 #error "Linux kernel does not support internal timer"
 #endif
-	return 1;
+	/*
+	 * Only consumed by the jent_status() JSON output in kernel builds: the
+	 * sole other user, the timer-less noise-source thread setup, is
+	 * compiled out (see the #error above), so reporting the real count
+	 * cannot enable that path.
+	 */
+	return (long)num_online_cpus();
 
 #else
 	/*
