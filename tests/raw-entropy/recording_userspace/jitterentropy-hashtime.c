@@ -21,6 +21,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -55,6 +56,24 @@
 #ifndef REPORT_COUNTER_TICKS
 #define REPORT_COUNTER_TICKS 1
 #endif
+
+/*
+ * Parse a complete numeric option value. A plain strtoul(str, NULL, 10) turns
+ * a typo (or a follow-up option consumed as value) into 0 and the tool would
+ * silently record with a configuration different from what was requested.
+ */
+static int parse_ulong(const char *str, unsigned long *val)
+{
+	char *endptr;
+
+	errno = 0;
+	*val = strtoul(str, &endptr, 10);
+	if (endptr == str || *endptr != '\0' || errno != 0) {
+		printf("Invalid numeric value \"%s\"\n", str);
+		return 1;
+	}
+	return 0;
+}
 
 enum jent_es {
 	jent_common,		/* Common entropy source */
@@ -256,17 +275,33 @@ int main(int argc, char * argv[])
 		return 1;
 	}
 
-	rounds = strtoul(argv[1], NULL, 10);
-	if (rounds >= UINT_MAX)
-		return 1;
-	argc--;
-	argv++;
+	{
+		char *endp;
 
-	repeats = strtoul(argv[1], NULL, 10);
-	if (repeats >= UINT_MAX)
-		return 1;
-	argc--;
-	argv++;
+		/*
+		 * Reject non-numeric input and zero: rounds feeds
+		 * calloc(rounds, ...), and calloc(0, ...) may legally return
+		 * NULL, which would be reported as an allocation failure (or
+		 * silently record empty data files).
+		 */
+		rounds = strtoul(argv[1], &endp, 10);
+		if (endp == argv[1] || *endp != '\0' ||
+		    rounds == 0 || rounds >= UINT_MAX) {
+			fprintf(stderr, "Invalid rounds value %s\n", argv[1]);
+			return 1;
+		}
+		argc--;
+		argv++;
+
+		repeats = strtoul(argv[1], &endp, 10);
+		if (endp == argv[1] || *endp != '\0' ||
+		    repeats == 0 || repeats >= UINT_MAX) {
+			fprintf(stderr, "Invalid repeats value %s\n", argv[1]);
+			return 1;
+		}
+		argc--;
+		argv++;
+	}
 
 	file = argv[1];
 	argc--;
@@ -299,8 +334,7 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
-			if (val >= UINT_MAX)
+			if (parse_ulong(argv[1], &val) || val >= UINT_MAX)
 				return 1;
 			osr = (unsigned int)val;
 		} else if (!strncmp(argv[1], "--loopcnt", 9)) {
@@ -313,8 +347,7 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
-			if (val >= UINT_MAX)
+			if (parse_ulong(argv[1], &val) || val >= UINT_MAX)
 				return 1;
 			loopcnt = (unsigned int)val;
 		} else if (!strncmp(argv[1], "--max-mem", 9)) {
@@ -327,7 +360,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				/* Allow to set no option */
@@ -406,7 +440,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				flags |= JENT_HASHLOOP_1;

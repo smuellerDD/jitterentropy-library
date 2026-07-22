@@ -19,10 +19,29 @@
 
 #include "jitterentropy.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+
+/*
+ * Parse a complete numeric option value. A plain strtoul(str, NULL, 10) turns
+ * a typo (or a follow-up option consumed as value) into 0 and the tool would
+ * silently record with a configuration different from what was requested.
+ */
+static int parse_ulong(const char *str, unsigned long *val)
+{
+	char *endptr;
+
+	errno = 0;
+	*val = strtoul(str, &endptr, 10);
+	if (endptr == str || *endptr != '\0' || errno != 0) {
+		printf("Invalid numeric value \"%s\"\n", str);
+		return 1;
+	}
+	return 0;
+}
 
 int main(int argc, char * argv[])
 {
@@ -39,9 +58,16 @@ int main(int argc, char * argv[])
 		return 1;
 	}
 
-	rounds = strtoull(argv[1], NULL, 10);
-	if (rounds >= ULLONG_MAX)
-		return 1;
+	{
+		char *endp;
+
+		/* Reject non-numeric input instead of treating it as 0. */
+		rounds = strtoull(argv[1], &endp, 10);
+		if (endp == argv[1] || *endp != '\0' || rounds >= ULLONG_MAX) {
+			fprintf(stderr, "Invalid rounds value %s\n", argv[1]);
+			return 1;
+		}
+	}
 	argc--;
 	argv++;
 
@@ -68,8 +94,7 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
-			if (val >= UINT_MAX)
+			if (parse_ulong(argv[1], &val) || val >= UINT_MAX)
 				return 1;
 			osr = (unsigned int)val;
 		} else if (!strncmp(argv[1], "--max-mem", 9)) {
@@ -82,7 +107,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				/* Allow to set no option */
@@ -161,7 +187,8 @@ int main(int argc, char * argv[])
 				return 1;
 			}
 
-			val = strtoul(argv[1], NULL, 10);
+			if (parse_ulong(argv[1], &val))
+				return 1;
 			switch (val) {
 			case 0:
 				flags |= JENT_HASHLOOP_1;
