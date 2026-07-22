@@ -227,39 +227,45 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 
 * `version`: the Jitter RNG library version (e.g. `3.7.1`).
 
-* `flags`: human-readable breakdown of the effective flags value shared by the
-  kernel interfaces (raw value, the state of every used `JENT_*` flag bit and
-  the decoded memory-size and hash-loop fields):
+* `config/`: a subdirectory grouping the effective runtime configuration
+  shared by the kernel interfaces:
 
-		flags:                       0x00000060
-		JENT_DISABLE_MEMORY_ACCESS:  off
-		JENT_FORCE_INTERNAL_TIMER:   off
-		JENT_DISABLE_INTERNAL_TIMER: off
-		JENT_FORCE_FIPS:             on
-		JENT_NTG1:                   on
-		JENT_CACHE_ALL:              off
-		max memory size:             auto (derived from cache size)
-		hash loop count:             default
+    * `config/flags`: human-readable breakdown of the effective flags value
+      (raw value, the state of every used `JENT_*` flag bit and the decoded
+      memory-size and hash-loop fields):
 
-* `flags_raw`: the effective flags value as a plain hexadecimal number (e.g.
-  `0x00000060`), directly reusable as the `flags=` module parameter.
+			flags:                       0x00000060
+			JENT_DISABLE_MEMORY_ACCESS:  off
+			JENT_FORCE_INTERNAL_TIMER:   off
+			JENT_DISABLE_INTERNAL_TIMER: off
+			JENT_FORCE_FIPS:             on
+			JENT_NTG1:                   on
+			JENT_CACHE_ALL:              off
+			max memory size:             auto (derived from cache size)
+			hash loop count:             default
 
-* `osr`: the effective OSR as a plain number, directly reusable as the `osr=`
-  module parameter. Reports the value the collectors actually run with: an
-  `osr=` request below the library minimum (including the default `0`) is
-  raised to that minimum.
+    * `config/flags_raw`: the effective flags value as a plain hexadecimal
+      number (e.g. `0x00000060`), directly reusable as the `flags=` module
+      parameter.
 
-* `ntg1`: plain `0`/`1` indicating whether AIS 20/31 NTG.1 compliant operation
-  is in effect.
+    * `config/osr`: the effective OSR as a plain number, directly reusable as
+      the `osr=` module parameter. Reports the value the collectors actually
+      run with: an `osr=` request below the library minimum (including the
+      default `0`) is raised to that minimum.
 
-* `fips`: plain `0`/`1` indicating whether FIPS compliant operation is in
-  effect - when the `JENT_FORCE_FIPS` flag is set, when the kernel itself runs
-  in FIPS mode (`fips=1` kernel command line), or when NTG.1 mode is enabled
-  (NTG.1 implies FIPS operation).
+    * `config/ntg1`: plain `0`/`1` indicating whether AIS 20/31 NTG.1
+      compliant operation is in effect.
 
-* `kcapi`, `hwrng`, `chardev`, `testing`: plain `0`/`1` indicating whether the
-  respective optional interface (crypto API, hwrng, character device, debugfs
-  test interface) was compiled into this module build (the
+    * `config/fips`: plain `0`/`1` indicating whether FIPS compliant operation
+      is in effect - when the `JENT_FORCE_FIPS` flag is set, when the kernel
+      itself runs in FIPS mode (`fips=1` kernel command line), or when NTG.1
+      mode is enabled (NTG.1 implies FIPS operation).
+
+* `interfaces/`: a subdirectory grouping the compile-time interface
+  availability of this module build. `interfaces/kcapi`, `interfaces/hwrng`,
+  `interfaces/chardev` and `interfaces/testing` each report a plain `0`/`1`
+  indicating whether the respective optional interface (crypto API, hwrng,
+  character device, debugfs test interface) was compiled in (the
   `CONFIG_EXTERNAL_JITTERENTROPY_*` options in `Kbuild.config`).
 
 * `statistics`: module-wide statistics in JSON format. It currently reports the

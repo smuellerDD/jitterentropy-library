@@ -27,8 +27,9 @@ extern unsigned int flags;
 extern unsigned int osr;
 
 /*
- * Machine-readable variants reported via /proc/jitterentropy/flags_raw and
- * /proc/jitterentropy/osr: the plain values without any decoration, directly
+ * Machine-readable variants reported via /proc/jitterentropy/config/flags_raw
+ * and /proc/jitterentropy/config/osr: the plain values without any decoration,
+ * directly
  * reusable as the flags= and osr= module parameters (kernel parameter parsing
  * accepts the 0x prefix).
  */
@@ -41,7 +42,7 @@ static int jent_proc_flags_raw_show(struct seq_file *m, void *v)
 
 /*
  * Compile-time presence of the optional kernel interfaces, reported as plain
- * 0/1 via /proc/jitterentropy/{kcapi,hwrng,chardev,testing} so what this
+ * 0/1 via /proc/jitterentropy/interfaces/{kcapi,hwrng,chardev,testing} so what this
  * module build provides can be checked without knowing its Kbuild.config.
  */
 static const struct {
@@ -66,8 +67,8 @@ static int jent_proc_interface_show(struct seq_file *m, void *v)
 }
 
 /*
- * Quick-check mode indicators reported via /proc/jitterentropy/ntg1 and
- * /proc/jitterentropy/fips as plain 0/1. They report the modes the
+ * Quick-check mode indicators reported via /proc/jitterentropy/config/ntg1
+ * and /proc/jitterentropy/config/fips as plain 0/1. They report the modes the
  * collectors actually run with (see jent_entropy_collector_alloc_internal()):
  * FIPS compliant operation is in effect when the JENT_FORCE_FIPS flag is set,
  * when the kernel itself runs in FIPS mode, or when NTG.1 mode is enabled
@@ -104,7 +105,7 @@ static int jent_proc_osr_show(struct seq_file *m, void *v)
 
 /*
  * Human-readable breakdown of the effective flags value, reported via
- * /proc/jitterentropy/flags. Only the flag bits with a meaning in this
+ * /proc/jitterentropy/config/flags. Only the flag bits with a meaning in this
  * library version are listed (JENT_DISABLE_STIR and JENT_DISABLE_UNBIAS are
  * unused).
  */
@@ -204,8 +205,24 @@ static int jent_proc_statistics_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+/*
+ * The effective-configuration files, grouped below
+ * /proc/jitterentropy/config/.
+ */
+static const struct {
+	const char *name;
+	int (*show)(struct seq_file *m, void *v);
+} jent_proc_config_files[] = {
+	{ "flags",	jent_proc_flags_show },
+	{ "flags_raw",	jent_proc_flags_raw_show },
+	{ "osr",	jent_proc_osr_show },
+	{ "ntg1",	jent_proc_ntg1_show },
+	{ "fips",	jent_proc_fips_show },
+};
+
 void __init jent_proc_init(void)
 {
+	struct proc_dir_entry *config_dir, *interfaces_dir;
 	unsigned int i;
 
 	jent_proc_dir = proc_mkdir(JENT_PROC_DIRNAME, NULL);
@@ -225,39 +242,41 @@ void __init jent_proc_init(void)
 		pr_warn("jitterentropy: failed to create /proc/%s/version\n",
 			JENT_PROC_DIRNAME);
 
-	if (!proc_create_single("flags", 0444, jent_proc_dir,
-				jent_proc_flags_show))
-		pr_warn("jitterentropy: failed to create /proc/%s/flags\n",
+	/*
+	 * Group the effective-configuration files below config/. A failed
+	 * directory creation is non-fatal like every other file here; the
+	 * files below it are then skipped.
+	 */
+	config_dir = proc_mkdir("config", jent_proc_dir);
+	if (!config_dir) {
+		pr_warn("jitterentropy: failed to create /proc/%s/config\n",
 			JENT_PROC_DIRNAME);
+	} else {
+		for (i = 0; i < ARRAY_SIZE(jent_proc_config_files); i++) {
+			if (!proc_create_single(jent_proc_config_files[i].name,
+						0444, config_dir,
+						jent_proc_config_files[i].show))
+				pr_warn("jitterentropy: failed to create /proc/%s/config/%s\n",
+					JENT_PROC_DIRNAME,
+					jent_proc_config_files[i].name);
+		}
+	}
 
-	if (!proc_create_single("flags_raw", 0444, jent_proc_dir,
-				jent_proc_flags_raw_show))
-		pr_warn("jitterentropy: failed to create /proc/%s/flags_raw\n",
+	/* Group the compiled-in interface indicators below interfaces/. */
+	interfaces_dir = proc_mkdir("interfaces", jent_proc_dir);
+	if (!interfaces_dir) {
+		pr_warn("jitterentropy: failed to create /proc/%s/interfaces\n",
 			JENT_PROC_DIRNAME);
-
-	if (!proc_create_single("osr", 0444, jent_proc_dir,
-				jent_proc_osr_show))
-		pr_warn("jitterentropy: failed to create /proc/%s/osr\n",
-			JENT_PROC_DIRNAME);
-
-	if (!proc_create_single("ntg1", 0444, jent_proc_dir,
-				jent_proc_ntg1_show))
-		pr_warn("jitterentropy: failed to create /proc/%s/ntg1\n",
-			JENT_PROC_DIRNAME);
-
-	if (!proc_create_single("fips", 0444, jent_proc_dir,
-				jent_proc_fips_show))
-		pr_warn("jitterentropy: failed to create /proc/%s/fips\n",
-			JENT_PROC_DIRNAME);
-
-	for (i = 0; i < ARRAY_SIZE(jent_proc_interfaces); i++) {
-		if (!proc_create_single_data(jent_proc_interfaces[i].name,
-					     0444, jent_proc_dir,
-					     jent_proc_interface_show,
-					     (void *)&jent_proc_interfaces[i].enabled))
-			pr_warn("jitterentropy: failed to create /proc/%s/%s\n",
-				JENT_PROC_DIRNAME,
-				jent_proc_interfaces[i].name);
+	} else {
+		for (i = 0; i < ARRAY_SIZE(jent_proc_interfaces); i++) {
+			if (!proc_create_single_data(jent_proc_interfaces[i].name,
+						     0444, interfaces_dir,
+						     jent_proc_interface_show,
+						     (void *)&jent_proc_interfaces[i].enabled))
+				pr_warn("jitterentropy: failed to create /proc/%s/interfaces/%s\n",
+					JENT_PROC_DIRNAME,
+					jent_proc_interfaces[i].name);
+		}
 	}
 }
 
