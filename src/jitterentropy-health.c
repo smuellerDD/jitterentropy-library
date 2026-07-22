@@ -634,7 +634,7 @@ void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 	 * duplication, no escalation state actually survives the reset. Making
 	 * it effective would change the health-test semantics (the window-
 	 * start reset in jent_rct_mem_insert() would need to spare a primed
-	 * value once); left as-is pending a maintainer decision.
+	 * value once).
 	 */
 	new_ec->rct_mem_count = old_ec->rct_mem_cutoff;
 }
