@@ -21,7 +21,17 @@
 #include "jitterentropy-base.h"
 #include "jitterentropy-internal.h"
 
-#ifndef LINUX_KERNEL
+#ifdef LINUX_KERNEL
+/*
+ * Do not rely on transitive includes for the string helpers: snprintf() and
+ * strlen()/memcpy() live in <linux/kernel.h> (which pulls in the sprintf
+ * declarations across the supported kernel range) and <linux/string.h>. This
+ * file is not part of the -O0 entropy core, so the heavier headers are safe
+ * here.
+ */
+#include <linux/kernel.h>
+#include <linux/string.h>
+#else
 #include <stdio.h>
 #endif
 
@@ -48,7 +58,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	/* needed as plain snprintf to make jent_add_to_status len calculation usable */
 	snprintf(buf, buflen, "{\n");
 
-	jent_add_to_status("\t\"version\": \"%u.%u.%u\"",
+	jent_add_to_status("\t\"version\": \"%d.%d.%d\"",
 			   JENT_MAJVERSION, JENT_MINVERSION, JENT_PATCHLEVEL)
 
 	if (!ec) {
