@@ -561,6 +561,14 @@ static struct rand_data
 	uint32_t memsize = 0;
 
 	/*
+	 * Enforce the invariants of the compile-time tunable OSR bounds: the
+	 * health-test lookup tables are indexed with osr - 1, and an empty
+	 * [JENT_MIN_OSR, JENT_MAX_OSR] range would make every allocation fail.
+	 */
+	BUILD_BUG_ON(JENT_MIN_OSR < 1);
+	BUILD_BUG_ON(JENT_MIN_OSR > JENT_MAX_OSR);
+
+	/*
 	 * Requesting disabling and forcing of internal timer
 	 * makes no sense.
 	 */
