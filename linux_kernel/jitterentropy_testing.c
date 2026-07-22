@@ -17,6 +17,9 @@
  * interface-only JENT_IOCLOOPCNT ioctl, overriding the loop count applied to
  * the raw noise measurements of that instance.
  *
+ * On a locked-down kernel the interface is not created, and opens of an
+ * already-created file are refused once lockdown is raised at runtime.
+ *
  * Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
  */
 
@@ -28,6 +31,7 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
+#include <linux/security.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
@@ -50,6 +54,21 @@ static DEFINE_MUTEX(jent_testing_read_lock);
 #define JENT_TEST_MEMACCLOOP (1<<16)
 
 static struct dentry *jent_raw_debugfs_root = NULL;
+
+/*
+ * The raw noise measurements expose the timing behavior of the kernel and are
+ * a pure test vehicle, so the interface has no business on a locked-down
+ * kernel: do not create it when the kernel is already locked down at module
+ * load, and refuse opens if lockdown was raised afterwards (lockdown can be
+ * tightened at runtime, e.g. via /sys/kernel/security/lockdown, but never
+ * relaxed). LOCKDOWN_DEBUGFS is the reason the debugfs core itself uses to
+ * gate debugfs files, and it is part of the integrity level, so the interface
+ * disappears for both lockdown=integrity and lockdown=confidentiality.
+ */
+static bool jent_testing_locked_down(void)
+{
+	return security_locked_down(LOCKDOWN_DEBUGFS) != 0;
+}
 
 /*
  * The tester can define the OSR as well as the flags used to perform the
@@ -158,6 +177,16 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 	struct jent_testing_ctx *ctx;
 	unsigned int osr;
 	unsigned int flags;
+
+	/*
+	 * The file only exists if the kernel was not locked down at module
+	 * load; re-check here to also cover lockdown raised at runtime after
+	 * the file was created. The debugfs proxy performs the same check on
+	 * open for fops carrying an ioctl handler, but do not rely on that
+	 * implementation detail.
+	 */
+	if (jent_testing_locked_down())
+		return -EPERM;
 
 	ctx = kvzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -483,6 +512,11 @@ static const struct file_operations jent_raw_hires_fops = {
 
 void __init jent_testing_init(void)
 {
+	if (jent_testing_locked_down()) {
+		pr_info("jitterentropy: kernel is locked down, not exposing the raw entropy test interface\n");
+		return;
+	}
+
 	jent_raw_debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
 
 	/*
