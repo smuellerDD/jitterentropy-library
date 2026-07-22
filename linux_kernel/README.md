@@ -249,6 +249,14 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
   `osr=` request below the library minimum (including the default `0`) is
   raised to that minimum.
 
+* `ntg1`: plain `0`/`1` indicating whether AIS 20/31 NTG.1 compliant operation
+  is in effect.
+
+* `fips`: plain `0`/`1` indicating whether FIPS compliant operation is in
+  effect - when the `JENT_FORCE_FIPS` flag is set, when the kernel itself runs
+  in FIPS mode (`fips=1` kernel command line), or when NTG.1 mode is enabled
+  (NTG.1 implies FIPS operation).
+
 * `statistics`: module-wide statistics in JSON format. It currently reports the
   character-device instances (one Jitter RNG entropy collector is allocated per
   `open()` of `/dev/jitterentropy`):
