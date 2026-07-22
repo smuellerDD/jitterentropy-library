@@ -426,10 +426,10 @@ struct rand_data
 	 * jent_health_failure_reset() so the totals span the instance's whole
 	 * lifetime.
 	 *
-	 * read_invocations counts caller read requests: every jent_read_entropy()
-	 * call increments it, and jent_read_entropy_safe() decrements it once per
-	 * health-test reinitialization so that a single request still maps to one
-	 * invocation regardless of how many internal retries it takes.
+	 * read_invocations counts caller read requests: jent_read_entropy()
+	 * increments it only on success, so a jent_read_entropy_safe() request
+	 * maps to one invocation regardless of how many internal health-test
+	 * retries it takes (failed attempts never count).
 	 * bytes_output counts the random bytes actually delivered to callers.
 	 */
 	uint64_t read_invocations;
