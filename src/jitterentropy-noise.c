@@ -600,7 +600,14 @@ void jent_random_data(struct rand_data *ec)
 	switch (ec->startup_state) {
 	case jent_startup_memory:
 		jent_random_data_one(ec, jent_measure_jitter_ntg1_memaccess);
-		ec->startup_state--;
+		/*
+		 * Assign the successor state explicitly instead of
+		 * decrementing: a decrement based on the state observed
+		 * before jent_random_data_one() could move the state out of
+		 * the valid enum range if a reentrant path (e.g. the RCT-mem
+		 * recovery loop) advanced it in the meantime.
+		 */
+		ec->startup_state = jent_startup_sha3;
 
 		/*
 		 * Initialize the health tests as we fall through to
@@ -613,7 +620,7 @@ void jent_random_data(struct rand_data *ec)
 		fallthrough;
 	case jent_startup_sha3:
 		jent_random_data_one(ec, jent_measure_jitter_ntg1_sha3);
-		ec->startup_state--;
+		ec->startup_state = jent_startup_completed;
 
 		/*
 		 * Initialize the health tests as we fall through to
