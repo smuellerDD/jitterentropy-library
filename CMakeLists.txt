@@ -1,8 +1,20 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Derive the version from jitterentropy.h (the single source of truth, as the
+# Makefile does) so the pkg-config / CMake package files cannot drift from the
+# library version.
+foreach(_jent_comp MAJVERSION MINVERSION PATCHLEVEL)
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/jitterentropy.h" _jent_line
+         REGEX "^#define[ \t]+JENT_${_jent_comp}[ \t]+[0-9]+")
+    string(REGEX MATCH "[0-9]+" JENT_${_jent_comp} "${_jent_line}")
+    if(NOT DEFINED JENT_${_jent_comp} OR JENT_${_jent_comp} STREQUAL "")
+        message(FATAL_ERROR "Cannot parse JENT_${_jent_comp} from jitterentropy.h")
+    endif()
+endforeach()
+
 project(jitterentropy
     LANGUAGES C
-    VERSION 3.7.0
+    VERSION ${JENT_MAJVERSION}.${JENT_MINVERSION}.${JENT_PATCHLEVEL}
 )
 set(CMAKE_C_STANDARD 11)
 
@@ -99,7 +111,12 @@ endif()
 file(GLOB JITTER_SRC "src/*.c" "arch/*.c")
 add_library(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE ${JITTER_SRC})
-set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER "jitterentropy.h")
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    PUBLIC_HEADER "jitterentropy.h"
+    # Match the Makefile: libjitterentropy.so.<maj>.<min>.<patch> with
+    # SONAME libjitterentropy.so.<maj>.
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR})
 target_compile_options(${PROJECT_NAME} PRIVATE ${JITTER_C_FLAGS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${JITTER_LINKER_FLAGS})
 install(
