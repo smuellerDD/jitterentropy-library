@@ -125,6 +125,9 @@ static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
 }
 
 /*
+ * Compiled only for the backends that use it, so the other platforms do not
+ * carry dead code (and clang's -Wunused-function noise) around.
+ *
  * x86 data-cache discovery via CPUID leaf 4 (deterministic cache parameters,
  * Intel SDM Vol. 2A; also supported by modern AMD CPUs), shared by every x86
  * backend that can issue CPUID. The instruction is issued through the supplied
@@ -141,6 +144,9 @@ static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
  *   ECX         S = number of sets - 1
  * Total size = (W + 1) * (P + 1) * (L + 1) * (S + 1).
  */
+#if defined(JENT_ARCH_CACHE_BSD_CPUID) || \
+    (defined(JENT_ARCH_CACHE_LINUX_KERNEL) && defined(CONFIG_X86))
+
 typedef int (*jent_cpuid_count_t)(unsigned int leaf, unsigned int subleaf,
 				  unsigned int *eax, unsigned int *ebx,
 				  unsigned int *ecx, unsigned int *edx);
@@ -197,6 +203,10 @@ static inline uint32_t jent_cache_size_roundup_cpuid(jent_cpuid_count_t cpuid,
 	/* smallest power of 2 strictly greater than the summed cache size */
 	return cache_size + 1;
 }
+
+#endif /* JENT_ARCH_CACHE_BSD_CPUID || (LINUX_KERNEL && CONFIG_X86) */
+
+#if defined(JENT_ARCH_CACHE_LINUX_KERNEL) && defined(CONFIG_ARM64)
 
 /*
  * AArch64 data-cache discovery via the cache ID registers, shared by any
@@ -262,6 +272,8 @@ static inline uint32_t jent_cache_size_roundup_arm64(uint64_t clidr, int ccidx,
 	/* smallest power of 2 strictly greater than the summed cache size */
 	return cache_size + 1;
 }
+
+#endif /* JENT_ARCH_CACHE_LINUX_KERNEL && CONFIG_ARM64 */
 
 #if defined(JENT_ARCH_CACHE_LINUX) || defined(JENT_ARCH_CACHE_APPLE)
 
