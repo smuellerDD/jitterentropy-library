@@ -106,6 +106,7 @@ install-static:
 clean:
 	@- $(RM) $(NAME)
 	@- $(RM) $(OBJS)
+	@- $(RM) $(addprefix $(SRCDIR)/,$(C_OBJS)) $(addprefix $(ARCHDIR)/,$(C_OBJS))
 	@- $(RM) lib$(NAME).so*
 	@- $(RM) lib$(NAME).a
 	@- $(RM) $(analyze_plists)
