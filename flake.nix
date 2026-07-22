@@ -28,6 +28,59 @@
           };
         };
 
+      # Android build of the userspace library via ndk-build, verifying
+      # arch/android/Android.mk against the real NDK toolchain. The NDK is
+      # unfree, so a dedicated nixpkgs instance accepts its license for this
+      # output only; every other output stays on the unmodified package set.
+      # APP_PLATFORM=android-30 is the floor for the C11 <threads.h> that the
+      # internal-timer thread helper uses on Linux/bionic.
+      androidFor = system:
+        let
+          pkgsAndroid = import nixpkgs {
+            inherit system;
+            config = {
+              allowUnfree = true;
+              android_sdk.accept_license = true;
+            };
+          };
+          ndk = (pkgsAndroid.androidenv.composeAndroidPackages {
+            includeNDK = true;
+          }).ndk-bundle;
+        in pkgsAndroid.stdenv.mkDerivation {
+          pname = "jitterentropy-android";
+          version = "3.7.1";
+          src = self;
+          nativeBuildInputs = [ ndk ];
+          dontConfigure = true;
+
+          buildPhase = ''
+            runHook preBuild
+            ndk-build \
+              NDK_PROJECT_PATH=null \
+              APP_BUILD_SCRIPT=$(pwd)/arch/android/Android.mk \
+              APP_PLATFORM=android-30 \
+              APP_ABI="arm64-v8a x86_64" \
+              APP_OPTIM=release \
+              NDK_OUT=$TMPDIR/obj \
+              NDK_LIBS_OUT=$TMPDIR/libs \
+              -j"$NIX_BUILD_CORES" V=1
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/lib
+            cp -r $TMPDIR/libs/* $out/lib/
+            runHook postInstall
+          '';
+
+          meta = {
+            description =
+              "Jitter RNG userspace library built with the Android NDK";
+            license = lib.licenses.bsd3;
+          };
+        };
+
       # Out-of-tree kernel module (jitter_rng.ko) built against a given kernel.
       # The with* arguments mirror the CONFIG_EXTERNAL_JITTERENTROPY_* options
       # in linux_kernel/Kbuild.config and are passed on the make command line,
@@ -340,7 +393,11 @@
           # selection is tunable via .override { withChardev, withHwrng,
           # withTestInterface }.
           jitterentropy-module = moduleFor pkgs pkgs.linuxPackages.kernel;
-        } // isosFor system pkgs);
+        } // isosFor system pkgs
+          # The NDK host toolchain in nixpkgs is x86_64-linux only.
+          // lib.optionalAttrs (system == "x86_64-linux") {
+            android = androidFor system;
+          });
 
       # `nix flake check` boots every VM and runs its assertions. Individual
       # VMs can be run with e.g. `nix build .#checks.x86_64-linux.vm-linux_6_6`.
