@@ -23,6 +23,12 @@ NONIID_DATA="$(for i in $ENTROPYDATA_DIR/jent-raw-noise_hashloop_*; do basename 
 # Code only after this line -- do not change               #
 ############################################################
 
+diagrammain='Hash Loop Entropy Rate'
+if [ -f $ENTROPYDATA_DIR/jent-commonop-testing ]
+then
+	diagrammain='Jitter RNG Entropy Rate'
+fi
+
 . ./processdata_helper.sh
 
 size=0
@@ -32,9 +38,9 @@ min_pair_deterministic=""
 min_triple_deterministic=""
 while [ $size -le 7 ]
 do
-	det=$(grep H_original $RESULTS_DIR/jent-raw-noise_hashloop_${size}.minentropy_FF_8bits.txt | grep min | cut -f2 -d":")
+	det=$(grep H_original $RESULTS_DIR/jent-raw-noise_hashloop_${size}-0001.minentropy_FF_8bits.txt | grep min | cut -f2 -d":")
 
-	tmp_det=$(Rscript --vanilla processdata_minentropy.r $ENTROPYDATA_DIR/jent-raw-noise_hashloop_${size}*.data 2>/dev/null| cut -d " " -f 2)
+	tmp_det=$(Rscript --vanilla processdata_minentropy.r $ENTROPYDATA_DIR/jent-raw-noise_hashloop_${size}-0001.data 2>/dev/null| cut -d " " -f 2)
 
 	min_det=$(echo $tmp_det | cut -d " " -f 1)
 
@@ -68,4 +74,4 @@ echo $deterministic > $RESULTS_DIR/minentropy_collected_hashloop
 echo $min_deterministic >> $RESULTS_DIR/minentropy_collected_hashloop
 echo $min_pair_deterministic >> $RESULTS_DIR/minentropy_collected_hashloop
 echo $min_triple_deterministic >> $RESULTS_DIR/minentropy_collected_hashloop
-Rscript --vanilla processdata_hashloop.r $RESULTS_DIR/minentropy_collected_hashloop
+Rscript --vanilla processdata_hashloop.r "$diagrammain" $RESULTS_DIR/minentropy_collected_hashloop

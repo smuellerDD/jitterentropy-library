@@ -38,12 +38,25 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
 * `invoke_testing_memloop.sh`: This test tool initializes the Jitter RNG with
   `JENT_NTG1` to obtain the BSI NTG.1 behavior. Its analysis tool is
   `validation-runtime/processdata_memloop.sh`. See [NTG.1 Raw Noise Sources] for
-  details.
+  details. NOTE: This tool may need to be invoked with root permissions as it
+  attempts to allocate up to 512MB of mlock'ed memory (which typically exceeds
+  the ulimit for a normal user).
   
 * `invoke_testing_hashloop.sh`: This test tool initializes the Jitter RNG with
   `JENT_NTG1` to obtain the BSI NTG.1 behavior. Its analysis tool is
   `validation-runtime/processdata_hashloop.sh`. See [NTG.1 Raw Noise Sources] for
   details.
+    
+* `invoke_testing_commonop.sh`: This test tool initializes the Jitter RNG with
+  `JENT_NTG1` to obtain the BSI NTG.1 / SP800-90B behavior. It analyzes,
+  however, the Jitter RNG common operation with the different hashloop / memory
+  size options. Its analysis tools are
+  `validation-runtime/processdata_hashloop.sh` and
+  `validation-runtime/processdata_memloop.sh`. The goal of the test is to
+  analyze the common runtime behavior depending on the selected parameters for
+  the hashloop and memory size. NOTE: This tool may need to be invoked with root
+  permissions as it attempts to allocate up to 512MB of mlock'ed memory (which
+  typically exceeds the ulimit for a normal user).
 
 ## Recording of Raw Entropy Data
 
