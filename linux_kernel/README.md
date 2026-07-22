@@ -222,6 +222,19 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 
 * `version`: the Jitter RNG library version (e.g. `3.7.1`).
 
+* `flags`: human-readable breakdown of the effective flags value shared by the
+  kernel interfaces (raw value, the state of every used `JENT_*` flag bit and
+  the decoded memory-size and hash-loop fields):
+
+		flags:                       0x00000060
+		JENT_DISABLE_MEMORY_ACCESS:  off
+		JENT_FORCE_INTERNAL_TIMER:   off
+		JENT_DISABLE_INTERNAL_TIMER: off
+		JENT_FORCE_FIPS:             on
+		JENT_NTG1:                   on
+		JENT_CACHE_ALL:              off
+		max memory size:             auto (derived from cache size)
+		hash loop count:             default
 
 * `statistics`: module-wide statistics in JSON format. It currently reports the
   character-device instances (one Jitter RNG entropy collector is allocated per
