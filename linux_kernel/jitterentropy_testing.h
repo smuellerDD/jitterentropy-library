@@ -9,7 +9,9 @@
 #define _JITTERENTROPY_TESTING_H
 
 #ifdef CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
-void jent_testing_init(void);
+#include <linux/init.h>
+
+void __init jent_testing_init(void);
 void jent_testing_exit(void);
 #else /* CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE */
 static inline void jent_testing_init(void) { }

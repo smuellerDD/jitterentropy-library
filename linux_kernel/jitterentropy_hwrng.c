@@ -18,6 +18,7 @@
  */
 
 #include <linux/hw_random.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -163,7 +164,7 @@ static int jent_hwrng_proc_status_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-int jent_hwrng_init(void)
+int __init jent_hwrng_init(void)
 {
 	int ret;
 

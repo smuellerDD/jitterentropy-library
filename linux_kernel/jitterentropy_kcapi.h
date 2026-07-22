@@ -10,7 +10,9 @@
 
 #ifdef CONFIG_EXTERNAL_JITTERENTROPY_KCAPI
 
-int jent_kcapi_init(void);
+#include <linux/init.h>
+
+int __init jent_kcapi_init(void);
 void jent_kcapi_exit(void);
 
 #else /* CONFIG_EXTERNAL_JITTERENTROPY_KCAPI */

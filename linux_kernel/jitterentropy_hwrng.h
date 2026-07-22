@@ -10,7 +10,9 @@
 
 #ifdef CONFIG_EXTERNAL_JITTERENTROPY_HWRNG
 
-int jent_hwrng_init(void);
+#include <linux/init.h>
+
+int __init jent_hwrng_init(void);
 void jent_hwrng_exit(void);
 
 #else /* CONFIG_EXTERNAL_JITTERENTROPY_HWRNG */
