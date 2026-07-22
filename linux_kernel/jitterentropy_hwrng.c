@@ -64,8 +64,18 @@ extern unsigned int flags;
  */
 static unsigned int hwrng_quality = 0;
 module_param(hwrng_quality, uint, S_IRUSR | S_IRGRP | S_IROTH);
+/*
+ * The promotion of quality 0 exists only since kernel 6.2, so only builds for
+ * those kernels carry the hint - on older kernels it would describe behavior
+ * the running kernel does not have.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
 MODULE_PARM_DESC(hwrng_quality,
-		 "Jitter RNG hwrng entropy quality (bits per 1024 bits, 0..1024; on kernels >= 6.2 the hw_random core promotes 0 to rng_core.default_quality)");
+		 "Jitter RNG hwrng entropy quality (bits per 1024 bits, 0..1024; the hw_random core promotes 0 to rng_core.default_quality)");
+#else
+MODULE_PARM_DESC(hwrng_quality,
+		 "Jitter RNG hwrng entropy quality (bits per 1024 bits, 0..1024; 0 registers without crediting entropy to the random pool)");
+#endif
 
 /* State backing the single hwrng instance. */
 struct jent_hwrng_ctx {
