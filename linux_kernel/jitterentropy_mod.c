@@ -42,16 +42,40 @@ unsigned int osr = 0;
 int flags = 0;
 unsigned int verbose = 0;
 
+/*
+ * Shortcut parameters for common operation modes. They are folded into the
+ * shared flags value in jent_mod_init(), so the effective configuration is
+ * visible in the flags sysfs file; the numeric flag bits do not need to be
+ * known to request the modes.
+ */
+static bool ntg1 = false;
+static bool force_fips = false;
+
 module_param(osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(osr, "Jitter RNG OSR parameter");
 module_param(flags, int, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(flags, "Jitter RNG flags parameter");
 module_param(verbose, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(verbose, "Jitter RNG verbose logging");
+module_param(ntg1, bool, S_IRUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(ntg1, "Enable AIS 20/31 NTG.1 compliant operation (shortcut for the JENT_NTG1 bit in flags)");
+module_param(force_fips, bool, S_IRUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(force_fips, "Force FIPS compliant operation (shortcut for the JENT_FORCE_FIPS bit in flags)");
 
 static int __init jent_mod_init(void)
 {
 	int ret = 0;
+
+	/*
+	 * Fold the shortcut parameters into the shared flags value before any
+	 * user of it runs: the interfaces (crypto API, hwrng, character
+	 * device) allocate their collectors from flags at open/instantiation
+	 * time, and the sysfs flags file then reports the effective value.
+	 */
+	if (ntg1)
+		flags |= JENT_NTG1;
+	if (force_fips)
+		flags |= JENT_FORCE_FIPS;
 
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
