@@ -154,6 +154,8 @@ static int getrawentropy(const struct opts *opts)
 	size_t requested = opts->samples * DATASIZE;
 	lrngval_t leftover = 0;
 	uint8_t leftover_present = 0;
+	/* Bytes of a partial record carried over from the previous read(). */
+	size_t fill = 0;
 	uint8_t *buffer_p, buffer[BUFFER_SIZE];
 	ssize_t ret;
 	int fd = -1;
@@ -225,7 +227,15 @@ static int getrawentropy(const struct opts *opts)
 
 		buffer_p = buffer;
 
-		ret = read(fd, buffer_p, gather);
+		/*
+		 * Append to any partial record carried over from the previous
+		 * iteration: a read() delivering a byte count that is not a
+		 * record multiple (a pipe, or --debugfs-file pointing at an
+		 * odd-sized regular file) would otherwise drop the trailing
+		 * bytes and misalign - and thereby garble - every subsequently
+		 * decoded value.
+		 */
+		ret = read(fd, buffer + fill, gather - fill);
 		if (ret < 0) {
 			ret = -errno;
 			goto out;
@@ -243,7 +253,9 @@ static int getrawentropy(const struct opts *opts)
 			goto out;
 		}
 
-		for (i = 0; i < ret / (DATASIZE); i++) {
+		fill += (size_t)ret;
+
+		for (i = 0; i < fill / (DATASIZE); i++) {
 			lrngval_t val;
 
 			memcpy(&val, buffer_p, DATASIZE);
@@ -277,6 +289,10 @@ static int getrawentropy(const struct opts *opts)
 			if (requested == 0)
 				break;
 		}
+
+		/* Carry a trailing partial record to the next iteration. */
+		fill -= (size_t)(buffer_p - buffer);
+		memmove(buffer, buffer_p, fill);
 	}
 
 	ret = 0;
