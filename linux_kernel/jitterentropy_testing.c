@@ -155,17 +155,12 @@ struct jent_testing_ctx {
 static int jent_testing_open(struct inode *inode, struct file *file)
 {
 	struct jent_testing_ctx *ctx;
+	unsigned int osr;
+	int flags;
 
 	ctx = kvzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
-
-	if (testing_flags & (JENT_TEST_HASHLOOP))
-		ctx->measure_jitter = jent_measure_jitter_ntg1_sha3;
-	else if (testing_flags & (JENT_TEST_MEMACCLOOP))
-		ctx->measure_jitter = jent_measure_jitter_ntg1_memaccess;
-	else
-		ctx->measure_jitter = jent_measure_jitter;
 
 	/* Serialize the jent_testing_log() bookkeeping. */
 	if (mutex_lock_interruptible(&jent_testing_read_lock)) {
@@ -174,13 +169,29 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 	}
 
 	/*
+	 * Snapshot the runtime-writable module parameters once: a concurrent
+	 * sysfs write between separate reads could otherwise pair a
+	 * measurement routine with a collector allocated from different
+	 * flags.
+	 */
+	flags = testing_flags;
+	osr = testing_osr;
+
+	if (flags & (JENT_TEST_HASHLOOP))
+		ctx->measure_jitter = jent_measure_jitter_ntg1_sha3;
+	else if (flags & (JENT_TEST_MEMACCLOOP))
+		ctx->measure_jitter = jent_measure_jitter_ntg1_memaccess;
+	else
+		ctx->measure_jitter = jent_measure_jitter;
+
+	/*
 	 * Allocate the collector without the startup entropy collection and
 	 * its health-test reset ladder (mirroring the userspace recording
 	 * tools): the startup could silently escalate OSR, memory size and
 	 * hash loop count, but the recorded raw data must correspond exactly
 	 * to the requested testing_osr/testing_flags.
 	 */
-	ctx->ec = jent_entropy_collector_alloc_raw(testing_osr, testing_flags);
+	ctx->ec = jent_entropy_collector_alloc_raw(osr, flags);
 	if (!ctx->ec) {
 		mutex_unlock(&jent_testing_read_lock);
 		/*
