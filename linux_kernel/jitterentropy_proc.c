@@ -14,6 +14,7 @@
 #include <linux/types.h>
 
 #include "jitterentropy.h"
+#include "jitterentropy-internal.h"	/* JENT_MIN_OSR */
 #include "jitterentropy_proc.h"
 
 struct proc_dir_entry *jent_proc_dir;
@@ -40,7 +41,13 @@ static int jent_proc_flags_raw_show(struct seq_file *m, void *v)
 
 static int jent_proc_osr_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%u\n", osr);
+	/*
+	 * Report the OSR the collectors actually run with: the library raises
+	 * any request below JENT_MIN_OSR - including the 0 select-the-default
+	 * parameter value - to that minimum (see
+	 * ensure_osr_is_at_least_minimal()).
+	 */
+	seq_printf(m, "%u\n", osr < JENT_MIN_OSR ? JENT_MIN_OSR : osr);
 
 	return 0;
 }
