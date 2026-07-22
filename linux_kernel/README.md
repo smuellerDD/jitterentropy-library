@@ -53,6 +53,30 @@ Compilation:
 
 3. Insert the compiled Linux kernel `jitter_rng.ko`
 
+### Module Parameters
+
+The module offers the following load-time parameters:
+
+* `osr`: OSR applied to all Jitter RNG instances (0 selects the default).
+
+* `flags`: numeric flags value applied to all Jitter RNG instances, using the
+  `JENT_*` flag bits from `jitterentropy.h`.
+
+* `ntg1`: boolean shortcut enabling AIS 20/31 NTG.1 compliant operation
+  without knowing the numeric value of the `JENT_NTG1` flag bit. Equivalent to
+  setting that bit in `flags`.
+
+* `force_fips`: boolean shortcut forcing FIPS compliant operation without
+  knowing the numeric value of the `JENT_FORCE_FIPS` flag bit. Equivalent to
+  setting that bit in `flags`.
+
+* `verbose`: enable verbose logging.
+
+The shortcut parameters are folded into `flags` during module initialization,
+so reading the `flags` sysfs file reports the effective configuration. Example:
+
+	insmod jitter_rng.ko ntg1=1 osr=3
+
 ## Build in Tree
 
 When the use of the Jitter RNG as a kernel module is insufficient, e.g. when its
