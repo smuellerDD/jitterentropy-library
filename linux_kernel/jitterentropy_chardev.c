@@ -42,7 +42,7 @@
  * parameters of the same name (see jitterentropy_mod.c).
  */
 extern unsigned int osr;
-extern int flags;
+extern unsigned int flags;
 
 /*
  * Largest chunk handed to jent_read_entropy_safe() in one iteration. The

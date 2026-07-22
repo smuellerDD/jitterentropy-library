@@ -66,15 +66,15 @@ static struct dentry *jent_raw_debugfs_root = NULL;
  * 5. Go back to step 3 and attempt testing with yet other parameters.
  */
 static unsigned int testing_osr = 0;
-static int testing_flags = 0;
+static unsigned int testing_flags = 0;
 
 module_param(testing_osr, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(testing_osr, "Jitter RNG testing OSR parameter");
-module_param(testing_flags, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+module_param(testing_flags, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(testing_flags, "Jitter RNG testing flags parameter");
 
 static unsigned int logged_osr = 0xffffffff;
-static int logged_flags = 0xffffffff;
+static unsigned int logged_flags = 0xffffffff;
 
 /*
  * Verbose logging switch, configurable via the module parameter of the same
@@ -157,7 +157,7 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 {
 	struct jent_testing_ctx *ctx;
 	unsigned int osr;
-	int flags;
+	unsigned int flags;
 
 	ctx = kvzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
