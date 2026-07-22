@@ -70,6 +70,11 @@ The module offers the following load-time parameters:
   knowing the numeric value of the `JENT_FORCE_FIPS` flag bit. Equivalent to
   setting that bit in `flags`.
 
+* `cache_all`: boolean shortcut deriving the memory access region from the
+  size of all caches instead of only the L1 cache, without knowing the numeric
+  value of the `JENT_CACHE_ALL` flag bit. Equivalent to setting that bit in
+  `flags`.
+
 * `verbose`: enable verbose logging.
 
 The shortcut parameters are folded into `flags` during module initialization,

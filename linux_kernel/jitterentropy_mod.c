@@ -50,6 +50,7 @@ unsigned int verbose = 0;
  */
 static bool ntg1 = false;
 static bool force_fips = false;
+static bool cache_all = false;
 
 module_param(osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(osr, "Jitter RNG OSR parameter");
@@ -61,6 +62,8 @@ module_param(ntg1, bool, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(ntg1, "Enable AIS 20/31 NTG.1 compliant operation (shortcut for the JENT_NTG1 bit in flags)");
 module_param(force_fips, bool, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(force_fips, "Force FIPS compliant operation (shortcut for the JENT_FORCE_FIPS bit in flags)");
+module_param(cache_all, bool, S_IRUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(cache_all, "Derive the memory access region from the size of all caches instead of L1 only (shortcut for the JENT_CACHE_ALL bit in flags)");
 
 static int __init jent_mod_init(void)
 {
@@ -76,6 +79,8 @@ static int __init jent_mod_init(void)
 		flags |= JENT_NTG1;
 	if (force_fips)
 		flags |= JENT_FORCE_FIPS;
+	if (cache_all)
+		flags |= JENT_CACHE_ALL;
 
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
