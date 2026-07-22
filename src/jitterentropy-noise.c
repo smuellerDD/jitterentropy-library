@@ -558,6 +558,7 @@ static void jent_random_data_one(
 				       uint64_t *ret_current_delta))
 {
 	unsigned int safety_factor = 0, ctr = 0;
+	uint64_t nosr;
 
 	if (ec->is_fips_enabled)
 		safety_factor = ENTROPY_SAFETY_FACTOR;
@@ -565,15 +566,23 @@ static void jent_random_data_one(
 	/* RCT with memory: start a new iteration loop */
 	ec->rct_mem_ctr = 0;
 
-	/* Obtain number of loop iterations */
-	ec->rct_mem_nosr = (unsigned short)
-		JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(ec->osr, safety_factor);
-
-	/* Safety measure against wrapping */
-	if (ec->rct_mem_nosr < DATA_SIZE_BITS) {
+	/*
+	 * Obtain number of loop iterations.
+	 *
+	 * Safety measure against wrapping: compute in 64 bits and verify the
+	 * count fits the unsigned short window counters and covers at least
+	 * one output block. With the default JENT_MAX_OSR of 20 this cannot
+	 * trigger, but JENT_MAX_OSR is a compile-time tunable and a truncated
+	 * count would silently shrink the RCT-with-memory window below what
+	 * the cutoff tables assume, disabling the health test.
+	 */
+	nosr = JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR((uint64_t)ec->osr,
+						     safety_factor);
+	if (nosr > USHRT_MAX || nosr < DATA_SIZE_BITS) {
 		ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
 		return;
 	}
+	ec->rct_mem_nosr = (unsigned short)nosr;
 
 	/* Entropy collection loop */
 	while (!jent_health_failure(ec)) {
