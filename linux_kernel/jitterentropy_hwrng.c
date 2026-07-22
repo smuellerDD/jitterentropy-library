@@ -119,7 +119,7 @@ static struct hwrng jent_hwrng = {
 
 /*
  * Status of the global hwrng Jitter RNG instance, exported read-only as
- * /proc/jitter_rng/hwrng_status. Reading it emits the JSON status string
+ * /proc/jitterentropy/hwrng_status. Reading it emits the JSON status string
  * produced by jent_status() (version, health-test state, runtime environment
  * and configuration) for the single instance backing /dev/hwrng.
  */

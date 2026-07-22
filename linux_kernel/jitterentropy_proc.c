@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause */
 /*
- * Shared /proc/jitter_rng directory and statistics file for the Jitter RNG
+ * Shared /proc/jitterentropy directory and statistics file for the Jitter RNG
  * kernel interfaces.
  *
  * Copyright (C) 2026, Stephan Mueller <smueller@chronox.de>
@@ -18,7 +18,7 @@
 
 struct proc_dir_entry *jent_proc_dir;
 
-/* Library version reported via /proc/jitter_rng/version. */
+/* Library version reported via /proc/jitterentropy/version. */
 static int jent_proc_version_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%u.%u.%u\n", JENT_MAJVERSION, JENT_MINVERSION,
@@ -27,7 +27,7 @@ static int jent_proc_version_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-/* Statistics reported via /proc/jitter_rng/statistics. */
+/* Statistics reported via /proc/jitterentropy/statistics. */
 static atomic_t jent_open_instances = ATOMIC_INIT(0);
 static atomic64_t jent_cumulative_opens = ATOMIC64_INIT(0);
 
