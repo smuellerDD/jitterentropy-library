@@ -150,7 +150,7 @@
           # JSON status to the kernel log; only useful on test systems like
           # these images.
           boot.extraModprobeConfig = ''
-            options jitter_rng verbose=1
+            options jitter_rng verbose=1 ntg1=1 cache_all=1
           '';
           environment.systemPackages = [
             (toolsFor pkgs)
