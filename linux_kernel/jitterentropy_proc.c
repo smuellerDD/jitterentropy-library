@@ -40,6 +40,32 @@ static int jent_proc_flags_raw_show(struct seq_file *m, void *v)
 }
 
 /*
+ * Compile-time presence of the optional kernel interfaces, reported as plain
+ * 0/1 via /proc/jitterentropy/{kcapi,hwrng,chardev,testing} so what this
+ * module build provides can be checked without knowing its Kbuild.config.
+ */
+static const struct {
+	const char *name;
+	unsigned int enabled;
+} jent_proc_interfaces[] = {
+	{ "kcapi",	IS_ENABLED(CONFIG_EXTERNAL_JITTERENTROPY_KCAPI) },
+	{ "hwrng",	IS_ENABLED(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG) },
+	{ "chardev",	IS_ENABLED(CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV) },
+	{ "testing",
+	  IS_ENABLED(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE) },
+};
+
+/* Shared show routine; m->private points at the table entry's value. */
+static int jent_proc_interface_show(struct seq_file *m, void *v)
+{
+	const unsigned int *enabled = m->private;
+
+	seq_printf(m, "%u\n", *enabled);
+
+	return 0;
+}
+
+/*
  * Quick-check mode indicators reported via /proc/jitterentropy/ntg1 and
  * /proc/jitterentropy/fips as plain 0/1. They report the modes the
  * collectors actually run with (see jent_entropy_collector_alloc_internal()):
@@ -180,6 +206,8 @@ static int jent_proc_statistics_show(struct seq_file *m, void *v)
 
 void __init jent_proc_init(void)
 {
+	unsigned int i;
+
 	jent_proc_dir = proc_mkdir(JENT_PROC_DIRNAME, NULL);
 	if (!jent_proc_dir) {
 		pr_warn("jitterentropy: failed to create /proc/%s\n",
@@ -221,6 +249,16 @@ void __init jent_proc_init(void)
 				jent_proc_fips_show))
 		pr_warn("jitterentropy: failed to create /proc/%s/fips\n",
 			JENT_PROC_DIRNAME);
+
+	for (i = 0; i < ARRAY_SIZE(jent_proc_interfaces); i++) {
+		if (!proc_create_single_data(jent_proc_interfaces[i].name,
+					     0444, jent_proc_dir,
+					     jent_proc_interface_show,
+					     (void *)&jent_proc_interfaces[i].enabled))
+			pr_warn("jitterentropy: failed to create /proc/%s/%s\n",
+				JENT_PROC_DIRNAME,
+				jent_proc_interfaces[i].name);
+	}
 }
 
 void jent_proc_exit(void)
