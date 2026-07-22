@@ -9,7 +9,7 @@
       lib = nixpkgs.lib;
 
       # VMs run under QEMU on the host architecture.
-      systems = [ "x86_64-linux" "aarch64-linux" ];
+      systems = [ "x86_64-linux" "aarch64-linux" "i686-linux" ];
       forAllSystems = f: lib.genAttrs systems (system: f system);
 
       # Userspace library and tools, built with the project's CMake build.
