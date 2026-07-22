@@ -6,8 +6,9 @@
  * RNG: each open allocates a dedicated Jitter RNG instance, each read drives
  * its measure_jitter operation and returns one u64 per measurement holding
  * the time delta as consumed by the health tests and the entropy pool (i.e.
- * including the division by the common timer GCD). This mirrors the user
- * space recording logic in
+ * including the division by the common timer GCD). Read sizes must be a
+ * multiple of the u64 sample size; any other size is rejected with -EINVAL.
+ * This mirrors the user space recording logic in
  * tests/raw-entropy/recording_userspace/jitterentropy-hashtime.c.
  *
  * The file also implements the JENT_IOCSTATUS ioctl known from the character
@@ -235,7 +236,7 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 					 size_t nbytes, loff_t *ppos)
 {
 	struct jent_testing_ctx *ctx = file->private_data;
-	struct rand_data *ec = ctx->ec;
+	struct rand_data *ec;
 	u64 *tmp = NULL;
 	u64 loop_cnt;
 	ssize_t ret = 0;
@@ -243,11 +244,31 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 				       uint64_t loop_cnt,
-				       uint64_t *ret_current_delta) =
-		ctx->measure_jitter;
+				       uint64_t *ret_current_delta);
+
+	/* Defense in depth, matching the ioctl handler: open() sets this. */
+	if (!ctx)
+		return -EFAULT;
+
+	ec = ctx->ec;
+	measure_jitter = ctx->measure_jitter;
 
 	if (!nbytes)
 		return 0;
+
+	/*
+	 * The interface delivers whole u64 time stamp samples only: reject
+	 * requests that are not a multiple of the sample size. A request
+	 * smaller than one sample would fall through the loop below and
+	 * return 0, which reads as EOF on an endless stream (e.g. dd with
+	 * bs < 8 would record nothing and report success); a trailing
+	 * partial sample would be silently dropped as a short read. This
+	 * also catches a recording tool built for the u32 sample format of
+	 * the vanilla kernel test interface loudly instead of letting it
+	 * record garbled data.
+	 */
+	if (nbytes % sizeof(u64))
+		return -EINVAL;
 
 	/* Only one extract session may run at a time. */
 	if (mutex_lock_interruptible(&jent_testing_read_lock))
