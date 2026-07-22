@@ -45,7 +45,7 @@ static inline uint64_t jent_gcd64(uint64_t a, uint64_t b)
 	while (b != 0) {
 		uint64_t r;
 
-		r = a % b;
+		r = jent_umod64(a, b);
 
 		a = b;
 		b = r;
