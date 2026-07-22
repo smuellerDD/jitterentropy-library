@@ -188,7 +188,10 @@ if(EXTERNAL_CRYPTO)
     target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBCRYPTO_LIBRARY})
 endif()
 
-if(INTERNAL_TIMER AND NOT ${ANDROID})
+# Note: "NOT ANDROID", not "NOT ${ANDROID}" - with ANDROID undefined the
+# expansion would leave "AND NOT" with no operand, which CMake evaluates to
+# false, silently dropping the pthread link dependency on every regular build.
+if(INTERNAL_TIMER AND NOT ANDROID)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
         target_link_libraries(${PROJECT_NAME} PUBLIC pthread)
     endif()
