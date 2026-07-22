@@ -485,14 +485,18 @@ void __init jent_testing_init(void)
 {
 	jent_raw_debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
 
-	debugfs_create_file_unsafe("jent_raw_hires", 0400,
-				   jent_raw_debugfs_root, NULL,
-				   &jent_raw_hires_fops);
+	/*
+	 * Use the proxied variant: the fops do not implement the
+	 * debugfs_file_get()/debugfs_file_put() protocol that the _unsafe
+	 * variant requires, so only the proxy protects a reader against a
+	 * concurrent debugfs_remove_recursive() from jent_testing_exit().
+	 */
+	debugfs_create_file("jent_raw_hires", 0400,
+			    jent_raw_debugfs_root, NULL,
+			    &jent_raw_hires_fops);
 }
-EXPORT_SYMBOL(jent_testing_init);
 
 void jent_testing_exit(void)
 {
 	debugfs_remove_recursive(jent_raw_debugfs_root);
 }
-EXPORT_SYMBOL(jent_testing_exit);
