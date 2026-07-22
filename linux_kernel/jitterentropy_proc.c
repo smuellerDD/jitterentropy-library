@@ -19,10 +19,31 @@
 struct proc_dir_entry *jent_proc_dir;
 
 /*
- * The effective flags value shared by the kernel interfaces, including the
- * folded-in shortcut parameters (see jitterentropy_mod.c).
+ * The effective flags and OSR values shared by the kernel interfaces,
+ * including the folded-in shortcut parameters (see jitterentropy_mod.c).
  */
 extern unsigned int flags;
+extern unsigned int osr;
+
+/*
+ * Machine-readable variants reported via /proc/jitterentropy/flags_raw and
+ * /proc/jitterentropy/osr: the plain values without any decoration, directly
+ * reusable as the flags= and osr= module parameters (kernel parameter parsing
+ * accepts the 0x prefix).
+ */
+static int jent_proc_flags_raw_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "0x%08x\n", flags);
+
+	return 0;
+}
+
+static int jent_proc_osr_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%u\n", osr);
+
+	return 0;
+}
 
 /*
  * Human-readable breakdown of the effective flags value, reported via
@@ -148,6 +169,16 @@ void __init jent_proc_init(void)
 	if (!proc_create_single("flags", 0444, jent_proc_dir,
 				jent_proc_flags_show))
 		pr_warn("jitterentropy: failed to create /proc/%s/flags\n",
+			JENT_PROC_DIRNAME);
+
+	if (!proc_create_single("flags_raw", 0444, jent_proc_dir,
+				jent_proc_flags_raw_show))
+		pr_warn("jitterentropy: failed to create /proc/%s/flags_raw\n",
+			JENT_PROC_DIRNAME);
+
+	if (!proc_create_single("osr", 0444, jent_proc_dir,
+				jent_proc_osr_show))
+		pr_warn("jitterentropy: failed to create /proc/%s/osr\n",
 			JENT_PROC_DIRNAME);
 }
 
