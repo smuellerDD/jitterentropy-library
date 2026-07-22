@@ -573,6 +573,7 @@ static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 		 * wasted.
 		 */
 		if (!ec->in_recovery) {
+			enum jent_startup_state saved_state = ec->startup_state;
 			unsigned int i;
 
 			/*
@@ -581,8 +582,24 @@ static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 			 */
 			ec->rct_mem_count = 0;
 			ec->in_recovery = 1;
+
+			/*
+			 * The recovery loop may fire while an outer
+			 * jent_random_data() invocation is still inside a
+			 * FIPS/NTG.1 startup stage. Park the state machine in
+			 * the completed state for the recursive calls: they
+			 * would otherwise re-run the startup stages and
+			 * advance startup_state underneath the outer
+			 * invocation, whose subsequent stale-state decrement
+			 * would push startup_state below
+			 * jent_startup_completed - and the startup loop in
+			 * _jent_entropy_collector_alloc() would then never
+			 * terminate.
+			 */
+			ec->startup_state = jent_startup_completed;
 			for (i = 0; i < JENT_RCT_MEM_RECOVERY_LOOP_CNT; i++)
 				jent_random_data(ec);
+			ec->startup_state = saved_state;
 			ec->in_recovery = 0;
 
 			/*
