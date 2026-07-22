@@ -257,6 +257,11 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
   in FIPS mode (`fips=1` kernel command line), or when NTG.1 mode is enabled
   (NTG.1 implies FIPS operation).
 
+* `kcapi`, `hwrng`, `chardev`, `testing`: plain `0`/`1` indicating whether the
+  respective optional interface (crypto API, hwrng, character device, debugfs
+  test interface) was compiled into this module build (the
+  `CONFIG_EXTERNAL_JITTERENTROPY_*` options in `Kbuild.config`).
+
 * `statistics`: module-wide statistics in JSON format. It currently reports the
   character-device instances (one Jitter RNG entropy collector is allocated per
   `open()` of `/dev/jitterentropy`):
