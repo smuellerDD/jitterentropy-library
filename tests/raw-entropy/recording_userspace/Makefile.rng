@@ -25,9 +25,17 @@ JENT_DIR := jitterentropy
 JENT_SRCS := $(wildcard $(JENT_DIR)/src/*.c) $(wildcard $(JENT_DIR)/arch/*.c)
 
 NAME := jitterentropy-rng
+
+# Compile all objects into a local directory. Emitting them next to the
+# library sources (through the jitterentropy symlink) would leave objects
+# built with this tool's flags inside src/ and arch/, which the library's
+# own Makefile then silently picks up via VPATH - e.g. linking a
+# libjitterentropy without JENT_CONF_ENABLE_INTERNAL_TIMER support.
+OBJDIR := obj-rng
 C_SRCS := $(JENT_SRCS) jitterentropy-rng.c
-C_OBJS := ${C_SRCS:.c=.o}
-OBJS := $(C_OBJS)
+OBJS := $(addprefix $(OBJDIR)/,$(notdir $(C_SRCS:.c=.o)))
+
+vpath %.c $(JENT_DIR)/src $(JENT_DIR)/arch
 
 INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src
 LIBRARY_DIRS :=
@@ -44,8 +52,14 @@ all: $(NAME)
 $(NAME): $(OBJS)
 	$(CC) $(OBJS) -o $(NAME) $(LDFLAGS)
 
+$(OBJDIR)/%.o: %.c | $(OBJDIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
 clean:
 	@- $(RM) $(NAME)
-	@- $(RM) $(OBJS)
+	@- $(RM) -r $(OBJDIR)
 
 distclean: clean
