@@ -6,8 +6,6 @@
  */
 
 
-#include <crypto/hash.h>
-#include <crypto/sha3.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -15,7 +13,6 @@
 #include <linux/ratelimit.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/time.h>
 #include <crypto/internal/rng.h>
 
 #include "jitterentropy.h"
