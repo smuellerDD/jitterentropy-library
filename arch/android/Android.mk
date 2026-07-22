@@ -16,19 +16,20 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE    := jitterentropy
-LOCAL_CFLAGS    := -O0 -DCRYPTO_CPU_JITTERENTROPY_STAT
-LOCAL_SRC_FILES := jitterentropy-base.c jitterentropy-stat.c jitterentropy-foldtime.c
+JENT_ROOT := $(LOCAL_PATH)/../..
 
-# compile into a shared library that can be pulled into an APK
-LOCAL_STATIC_LIBRARIES := android_native_app_glue
+LOCAL_MODULE := jitterentropy
+
+# The entropy collection core must not be optimized (see the __OPTIMIZE__
+# guard in src/jitterentropy-base.c). Bionic ships pthreads inside libc, so
+# the internal timer needs no extra link library on Android.
+LOCAL_CFLAGS := -O0 -DJENT_CONF_ENABLE_INTERNAL_TIMER
+
+LOCAL_C_INCLUDES := $(JENT_ROOT) $(JENT_ROOT)/src $(JENT_ROOT)/arch
+
+# The library consists of all core sources in src/ plus the OS/architecture
+# helpers in arch/ (the same set the Makefile and CMakeLists.txt build).
+LOCAL_SRC_FILES := $(patsubst $(LOCAL_PATH)/%,%,\
+	$(wildcard $(JENT_ROOT)/src/*.c $(JENT_ROOT)/arch/*.c))
+
 include $(BUILD_SHARED_LIBRARY)
-$(call import-module,android/native_app_glue)
-
-# compilation of a standalone-binary that must be manually moved to
-# Android /data partition for execution.
-#include $(BUILD_EXECUTABLE)
-
-# compilation of the CPU Jitter RNG app
-#LOCAL_SRC_FILES := jitterentropy-base.c jitterentropy-main-user.c
-
