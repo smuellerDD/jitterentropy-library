@@ -102,7 +102,13 @@
  * mirrors the dispatch priority in jent_zalloc() below: the crypto libraries
  * take precedence over the OS mlock paths.
  */
-#if defined(LIBGCRYPT) || defined(OPENSSL)
+#if defined(JENT_ARCH_MEM_LINUX_KERNEL)
+  /*
+   * Kernel memory is never paged out to swap, does not appear in user space
+   * core dumps and is wiped on free via kvfree_sensitive().
+   */
+# define JENT_MEM_SECURE
+#elif defined(LIBGCRYPT) || defined(OPENSSL)
 # define JENT_MEM_SECURE
 #elif defined(AWSLC)
   /* AWS-LC memory is wiped but not locked; not advertised as secure. */
@@ -122,7 +128,9 @@ int jent_secure_memory_supported(void)
 
 void jent_memset_secure(void *s, size_t n)
 {
-#if defined(AWSLC) || defined(OPENSSL)
+#if defined(JENT_ARCH_MEM_LINUX_KERNEL)
+	memzero_explicit(s, n);
+#elif defined(AWSLC) || defined(OPENSSL)
 	OPENSSL_cleanse(s, n);
 #elif defined(JENT_ARCH_MEM_WINDOWS)
 	SecureZeroMemory(s, n);
