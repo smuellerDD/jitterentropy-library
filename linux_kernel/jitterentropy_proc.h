@@ -12,6 +12,7 @@
 #ifndef _JITTERENTROPY_PROC_H
 #define _JITTERENTROPY_PROC_H
 
+#include <linux/init.h>
 #include <linux/proc_fs.h>
 
 /* Name of the shared /proc directory. */
@@ -25,7 +26,7 @@
 extern struct proc_dir_entry *jent_proc_dir;
 
 /* Create/remove /proc/jitterentropy and the statistics file. Both are non-fatal. */
-void jent_proc_init(void);
+void __init jent_proc_init(void);
 void jent_proc_exit(void);
 
 /*

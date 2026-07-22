@@ -17,6 +17,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
@@ -388,7 +389,7 @@ static struct miscdevice jent_chardev_misc = {
 	.mode	= 0444,
 };
 
-int jent_chardev_init(void)
+int __init jent_chardev_init(void)
 {
 	int ret = misc_register(&jent_chardev_misc);
 

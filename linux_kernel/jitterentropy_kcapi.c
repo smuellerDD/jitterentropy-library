@@ -8,6 +8,7 @@
 
 #include <crypto/hash.h>
 #include <crypto/sha3.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -201,7 +202,7 @@ static struct rng_alg jent_alg = {
 	}
 };
 
-int jent_kcapi_init(void)
+int __init jent_kcapi_init(void)
 {
 	return crypto_register_rng(&jent_alg);
 }

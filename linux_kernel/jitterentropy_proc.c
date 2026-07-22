@@ -7,6 +7,7 @@
  */
 
 #include <linux/atomic.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
@@ -59,7 +60,7 @@ static int jent_proc_statistics_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-void jent_proc_init(void)
+void __init jent_proc_init(void)
 {
 	jent_proc_dir = proc_mkdir(JENT_PROC_DIRNAME, NULL);
 	if (!jent_proc_dir) {

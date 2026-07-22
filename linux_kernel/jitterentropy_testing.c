@@ -21,6 +21,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/fs.h>
+#include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -447,7 +448,7 @@ static const struct file_operations jent_raw_hires_fops = {
 
 /******************************* Initialization *******************************/
 
-void jent_testing_init(void)
+void __init jent_testing_init(void)
 {
 	jent_raw_debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
 

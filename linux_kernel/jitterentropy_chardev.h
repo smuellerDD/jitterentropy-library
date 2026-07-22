@@ -10,7 +10,9 @@
 
 #ifdef CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV
 
-int jent_chardev_init(void);
+#include <linux/init.h>
+
+int __init jent_chardev_init(void);
 void jent_chardev_exit(void);
 
 #else /* CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV */
