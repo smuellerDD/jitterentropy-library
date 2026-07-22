@@ -66,7 +66,9 @@
  *                      madvise(MADV_NOCORE) on FreeBSD, best effort. With
  *                      JENT_CONF_RELAX_MLOCK only the mlock failure is
  *                      tolerated; the layout is unchanged.
- *   - Linux Kernel  -> kvmalloc + jent_memset_secure
+ *   - Linux Kernel  -> kvmalloc + kvfree_sensitive; counts as secure since
+ *                      kernel memory is never paged out to swap, does not
+ *                      appear in user space core dumps and is wiped on free
  *   - other         -> plain malloc
  *
  * Whether the active path provides locked / wiped memory is reported at
