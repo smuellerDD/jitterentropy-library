@@ -108,7 +108,10 @@ if(STACK_PROTECTOR)
     endif()
 endif()
 
-file(GLOB JITTER_SRC "src/*.c" "arch/*.c")
+# CONFIGURE_DEPENDS: re-evaluate the glob on every build so an added/removed
+# source file cannot silently produce an archive with missing objects from a
+# stale configure.
+file(GLOB JITTER_SRC CONFIGURE_DEPENDS "src/*.c" "arch/*.c")
 add_library(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE ${JITTER_SRC})
 set_target_properties(${PROJECT_NAME} PROPERTIES
