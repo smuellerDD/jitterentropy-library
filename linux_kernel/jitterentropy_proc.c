@@ -18,6 +18,72 @@
 
 struct proc_dir_entry *jent_proc_dir;
 
+/*
+ * The effective flags value shared by the kernel interfaces, including the
+ * folded-in shortcut parameters (see jitterentropy_mod.c).
+ */
+extern unsigned int flags;
+
+/*
+ * Human-readable breakdown of the effective flags value, reported via
+ * /proc/jitterentropy/flags. Only the flag bits with a meaning in this
+ * library version are listed (JENT_DISABLE_STIR and JENT_DISABLE_UNBIAS are
+ * unused).
+ */
+static const struct {
+	unsigned int bit;
+	const char *label;	/* Column label including the colon. */
+} jent_proc_flags_bits[] = {
+	{ JENT_DISABLE_MEMORY_ACCESS,	"JENT_DISABLE_MEMORY_ACCESS:" },
+	{ JENT_FORCE_INTERNAL_TIMER,	"JENT_FORCE_INTERNAL_TIMER:" },
+	{ JENT_DISABLE_INTERNAL_TIMER,	"JENT_DISABLE_INTERNAL_TIMER:" },
+	{ JENT_FORCE_FIPS,		"JENT_FORCE_FIPS:" },
+	{ JENT_NTG1,			"JENT_NTG1:" },
+	{ JENT_CACHE_ALL,		"JENT_CACHE_ALL:" },
+};
+
+static int jent_proc_flags_show(struct seq_file *m, void *v)
+{
+	unsigned int memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
+	unsigned int hashloop = JENT_FLAGS_TO_HASHLOOP(flags);
+	unsigned int i;
+
+	seq_printf(m, "%-29s0x%08x\n", "flags:", flags);
+
+	for (i = 0; i < ARRAY_SIZE(jent_proc_flags_bits); i++)
+		seq_printf(m, "%-29s%s\n", jent_proc_flags_bits[i].label,
+			   flags & jent_proc_flags_bits[i].bit ? "on" : "off");
+
+	/*
+	 * The memory size field encodes 1 kB << (field - 1); field 0 selects
+	 * the automatic cache-size-derived default (see jent_memsize()).
+	 */
+	if (!memsize)
+		seq_printf(m, "%-29sauto (derived from cache size)\n",
+			   "max memory size:");
+	else if (memsize <= 10)
+		seq_printf(m, "%-29s%u kB\n", "max memory size:",
+			   1U << (memsize - 1));
+	else if (memsize <= JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX))
+		seq_printf(m, "%-29s%u MB\n", "max memory size:",
+			   1U << (memsize - 11));
+	else
+		seq_printf(m, "%-29sinvalid (%u)\n", "max memory size:",
+			   memsize);
+
+	/*
+	 * The hash loop field encodes 1 << field iterations; field 0 selects
+	 * the built-in default (see jent_hashloop_cnt()).
+	 */
+	if (!hashloop)
+		seq_printf(m, "%-29sdefault\n", "hash loop count:");
+	else
+		seq_printf(m, "%-29s%u\n", "hash loop count:",
+			   1U << hashloop);
+
+	return 0;
+}
+
 /* Library version reported via /proc/jitterentropy/version. */
 static int jent_proc_version_show(struct seq_file *m, void *v)
 {
@@ -77,6 +143,11 @@ void __init jent_proc_init(void)
 	if (!proc_create_single("version", 0444, jent_proc_dir,
 				jent_proc_version_show))
 		pr_warn("jitterentropy: failed to create /proc/%s/version\n",
+			JENT_PROC_DIRNAME);
+
+	if (!proc_create_single("flags", 0444, jent_proc_dir,
+				jent_proc_flags_show))
+		pr_warn("jitterentropy: failed to create /proc/%s/flags\n",
 			JENT_PROC_DIRNAME);
 }
 
