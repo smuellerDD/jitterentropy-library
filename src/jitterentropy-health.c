@@ -645,13 +645,18 @@ static void jent_rct_init(struct rand_data *ec, unsigned short safety)
 void jent_rct_duplicate(struct rand_data *new_ec)
 {
 	/*
-	 * RCT re-initialization to intermittent error: As during a reset,
-	 * the OSR is updated and the OSR is at the same time the cutoff for
-	 * the RCT, we re-initialize the new RCT to the intermittent error
-	 * value based on the new OSR.
+	 * RCT re-initialization to intermittent error: prime the new RCT with
+	 * the intermittent cutoff established by jent_rct_init() for the new
+	 * collector, so a continuing streak of stuck values escalates to the
+	 * permanent error instead of restarting from zero.
+	 *
+	 * Use the collector's rct_cutoff member instead of recomputing it via
+	 * JENT_HEALTH_RCT_INTERMITTENT_CUTOFF: in NTG.1 mode the cutoffs carry
+	 * the 8-fold safety divisor, and the undivided value would already
+	 * exceed rct_cutoff_permanent, turning the first stuck measurement
+	 * after the reallocation into a spurious permanent failure.
 	 */
-	new_ec->rct_count =
-		(unsigned int)(JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(new_ec->osr));
+	new_ec->rct_count = (unsigned int)new_ec->rct_cutoff;
 }
 
 /**
