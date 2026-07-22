@@ -148,7 +148,7 @@ extern "C" {
 				 memory access? By default it is only the L1
 				 cache size. */
 
-#ifdef LINUX_KERNEL
+#if defined(LINUX_KERNEL) && !defined(UINT32_C)
 #define UINT32_C(c)	c ## U
 #endif
 
