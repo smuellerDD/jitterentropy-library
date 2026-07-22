@@ -63,7 +63,7 @@ static inline uint64_t rol64(uint64_t x, unsigned int n)
 
 /*********************************** Keccak ***********************************/
 /* state[x + y*5] */
-#define A(x, y) (x + 5 * y)
+#define A(x, y) ((x) + 5 * (y))
 
 static inline void jent_keccakp_theta(uint64_t s[25])
 {
@@ -120,7 +120,7 @@ static inline void jent_keccakp_rho(uint64_t s[25])
 	/* Step 1 */
 	/* s[A(0, 0)] = s[A(0, 0)]; */
 
-#define RHO_ROL(t)	(((t + 1) * (t + 2) / 2) % 64)
+#define RHO_ROL(t)	((((t) + 1) * ((t) + 2) / 2) % 64)
 	/* Step 3 */
 	s[A(1, 0)] = rol64(s[A(1, 0)], RHO_ROL(0));
 	s[A(0, 2)] = rol64(s[A(0, 2)], RHO_ROL(1));
