@@ -25,7 +25,7 @@
  * same name (see jitterentropy_mod.c).
  */
 extern unsigned int osr;
-extern int flags;
+extern unsigned int flags;
 extern unsigned int verbose;
 
 /***************************************************************************

@@ -39,7 +39,7 @@
  * jitterentropy_kcapi.c and jitterentropy_testing.c).
  */
 unsigned int osr = 0;
-int flags = 0;
+unsigned int flags = 0;
 unsigned int verbose = 0;
 
 /*
@@ -53,7 +53,7 @@ static bool force_fips = false;
 
 module_param(osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(osr, "Jitter RNG OSR parameter");
-module_param(flags, int, S_IRUSR | S_IRGRP | S_IROTH);
+module_param(flags, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(flags, "Jitter RNG flags parameter");
 module_param(verbose, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(verbose, "Jitter RNG verbose logging");

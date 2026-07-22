@@ -39,7 +39,7 @@
  * the same name (see jitterentropy_mod.c).
  */
 extern unsigned int osr;
-extern int flags;
+extern unsigned int flags;
 
 /*
  * Entropy quality declared to the hw_random framework, expressed as the number
