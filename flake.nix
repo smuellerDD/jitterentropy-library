@@ -230,6 +230,15 @@
             imports = [ (machineFor kernelPackages) ];
             boot.kernelParams = [ "clocksource=tsc" "tsc=reliable" ];
             virtualisation.qemu.options = [ "-cpu" "host" ];
+            # The O_NONBLOCK test needs a poller that runs while a concurrent
+            # reader holds the instance lock. On one vCPU that requires the
+            # kernel to preempt the lock holder inside the locked section;
+            # non-preemptible kernel builds (5.10, plain PREEMPT_VOLUNTARY)
+            # only reschedule at the reader's cond_resched() after unlock, so
+            # the poller would always find the lock free and never see
+            # EAGAIN. A second vCPU makes the contention real concurrency,
+            # independent of the kernel's preemption model.
+            virtualisation.cores = 2;
           };
 
           testScript = ''
