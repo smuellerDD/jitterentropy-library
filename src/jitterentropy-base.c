@@ -577,17 +577,6 @@ static struct rand_data
 		return NULL;
 
 	/*
-	 * The FIPS / NTG.1 startup samples the memory-access noise source as
-	 * an independent stage (startup_state jent_startup_memory). Without
-	 * the memory region every startup sample is stuck, so the allocation
-	 * could only fail after burning through the entire health-test reset
-	 * ladder. Reject the contradictory combination immediately.
-	 */
-	if ((flags & JENT_DISABLE_MEMORY_ACCESS) &&
-	    ((flags & (JENT_NTG1 | JENT_FORCE_FIPS)) || jent_fips_enabled()))
-		return NULL;
-
-	/*
 	 * Ensure over sampling rate is not too low.
 	 */
 	osr = ensure_osr_is_at_least_minimal(osr);
@@ -721,8 +710,28 @@ err:
 static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 						       unsigned int flags)
 {
-	struct rand_data *ec = jent_entropy_collector_alloc_internal(osr,
-								     flags);
+	struct rand_data *ec;
+
+	/*
+	 * The FIPS / NTG.1 startup samples the memory-access noise source as
+	 * an independent stage (startup_state jent_startup_memory). Without
+	 * the memory region every startup sample is stuck, so the allocation
+	 * could only fail after burning through the entire health-test reset
+	 * ladder below. Reject the contradictory combination immediately.
+	 *
+	 * This check must not live in jent_entropy_collector_alloc_internal():
+	 * the test-only collectors (jent_time_entropy_init(), the kernel raw
+	 * test interface, the raw-entropy recording tools) are allocated there
+	 * directly and never run the startup ladder, and jent_time_entropy_init()
+	 * always ORs in JENT_FORCE_FIPS for its test instance - rejecting the
+	 * combination there would make jent_entropy_init_ex() fail for every
+	 * caller using JENT_DISABLE_MEMORY_ACCESS.
+	 */
+	if ((flags & JENT_DISABLE_MEMORY_ACCESS) &&
+	    ((flags & (JENT_NTG1 | JENT_FORCE_FIPS)) || jent_fips_enabled()))
+		return NULL;
+
+	ec = jent_entropy_collector_alloc_internal(osr, flags);
 
 	if (!ec)
 		return ec;
