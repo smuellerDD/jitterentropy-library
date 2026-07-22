@@ -190,6 +190,12 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	if (bitcount(mask) == 0) {
+		fprintf(stderr,
+			"Mask selects no bits - the output would be all-zero. Check the mask value\n");
+		return 1;
+	}
+
 	f = fopen(argv[1], "r");
 	if (!f) {
 		fprintf(stderr, "File %s cannot be opened for read: %s\n",
@@ -226,7 +232,20 @@ int main(int argc, char *argv[])
 			goto err;
 		}
 
-		sample = strtoull(res, NULL, 10);
+		/*
+		 * Reject lines that are not a plain non-negative decimal
+		 * number (blank lines, headers, stray text, negative values):
+		 * they would silently parse as 0 (or wrap around) and inject a
+		 * bogus symbol into the SP800-90B input data.
+		 */
+		errno = 0;
+		endptr = NULL;
+		sample = strtoull(res, &endptr, 10);
+		if (errno || endptr == res || *res == '-' ||
+		    (*endptr != '\0' && *endptr != '\n' && *endptr != '\r')) {
+			fprintf(stderr, "Invalid sample line [%s]\n", res);
+			goto err;
+		}
 		unchanged0s |= sample;
 		unchanged1s &= sample;
 
