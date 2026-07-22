@@ -95,7 +95,7 @@
 #endif /* JENT_ARCH_MEM_LINUX_KERNEL */
 
 #define JENT_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
-#define JENT_IS_POWER_OF_2(n) (JENT_BUILD_BUG_ON((n & (n - 1)) != 0))
+#define JENT_IS_POWER_OF_2(n) (JENT_BUILD_BUG_ON(((n) & ((n) - 1)) != 0))
 
 /*
  * Whether the active backend provides secure (locked / wiped) memory. This
