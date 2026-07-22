@@ -102,7 +102,12 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 		exit(1);
 	}
 
-	if (timespec_get(&start, TIME_UTC) == 0) {
+	/*
+	 * Use a monotonic clock: the measured interval feeds the search
+	 * invariants, and a wall-clock step (NTP, DST, manual adjustment)
+	 * during a measurement would corrupt or even negate the runtime.
+	 */
+	if (clock_gettime(CLOCK_MONOTONIC, &start) != 0) {
 		fprintf(stderr, "Unable to get start time\n");
 		exit(1);
 	}
@@ -116,7 +121,7 @@ uint64_t jent_output_time(uint64_t rounds, unsigned int osr, unsigned int flags)
 		}
 	}
 
-	if (timespec_get(&finish, TIME_UTC) == 0) {
+	if (clock_gettime(CLOCK_MONOTONIC, &finish) != 0) {
 		fprintf(stderr, "Unable to get finish time\n");
 		exit(1);
 	}
@@ -408,7 +413,7 @@ int main(int argc, char * argv[])
 
 	/*
 	 * Now secondLinearGuess > firstLinearGuess and the times are usually
-	 * ordered the same way - but they are wall-clock measurements, so an
+	 * ordered the same way - but they are elapsed-time measurements, so an
 	 * inversion from timing noise is possible. Do not assert on measured
 	 * data: the bracketing logic below only compares the times against
 	 * timeBound and remains correct either way.
@@ -496,7 +501,7 @@ int main(int argc, char * argv[])
 
 		fprintf(stderr, "Trying osr=%u. ", curosr);
 		/*
-		 * curTime is a wall-clock measurement; timing noise can place it
+		 * curTime is an elapsed-time measurement; timing noise can place it
 		 * outside (minTime, maxTime), so it must not be asserted to lie
 		 * within. The bracket update below relies only on the comparison
 		 * with timeBound and keeps the search invariants intact.
