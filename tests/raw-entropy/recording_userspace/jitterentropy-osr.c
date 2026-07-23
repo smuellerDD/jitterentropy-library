@@ -328,16 +328,6 @@ int main(int argc, char * argv[])
 	 * the time cost per osr, and so this produces a likely underestimate.
 	 */
 	firstLinearGuess = (unsigned int)(timeBound / (1U + minTime / minBound));
-	/*
-	 * Keep the guess within the OSR range the library accepts: values beyond
-	 * JENT_MAX_OSR cannot be measured (initialization rejects them), and a
-	 * guess at or below minBound would degenerate the interpolation below
-	 * (identical x coordinates).
-	 */
-	if (firstLinearGuess <= minBound)
-		firstLinearGuess = minBound + 1;
-	if (firstLinearGuess > JENT_MAX_OSR)
-		firstLinearGuess = JENT_MAX_OSR;
 	fprintf(stderr, "The initial linear estimate is osr=%u\n", firstLinearGuess);
 	firstLinearTime = jent_output_time(rounds, firstLinearGuess, flags);
 
@@ -345,51 +335,13 @@ int main(int argc, char * argv[])
 	 * perform a full linear interpolation.
 	 * We are presently looking for an overestimate, so let's round up here.
 	 */
-	if (firstLinearTime == minTime) {
-		/*
-		 * Two identical timings carry no slope information (and would
-		 * trip the divide-by-zero guard in linearInverse()); fall back
-		 * to the neighboring value.
-		 */
-		secondLinearGuess = firstLinearGuess + 1;
-	} else {
-		double secondGuessD = ceil(linearInverse((double)timeBound,
-					   (double)minBound, (double)minTime,
-					   (double)firstLinearGuess,
-					   (double)firstLinearTime));
-
-		/*
-		 * Clamp into the valid OSR range before converting: with noisy
-		 * timings the interpolation can produce a negative value, and
-		 * casting a negative double to unsigned int is undefined
-		 * behavior. The comparison is written so a NaN also falls into
-		 * the clamp.
-		 *
-		 * The lower clamp is minBound + 1, not JENT_MIN_OSR: a guess
-		 * equal to minBound would - after the exchange below - allow
-		 * the bracket to collapse to maxBound == minBound when the
-		 * re-measurement of that osr lands above timeBound due to
-		 * timing noise, tripping the assert(maxBound > minBound).
-		 */
-		if (!(secondGuessD >= (double)(minBound + 1)))
-			secondGuessD = (double)(minBound + 1);
-		if (secondGuessD > (double)JENT_MAX_OSR)
-			secondGuessD = (double)JENT_MAX_OSR;
-		secondLinearGuess = (unsigned int)secondGuessD;
-	}
+	secondLinearGuess = (unsigned int)ceil(linearInverse((double)timeBound, (double)minBound, (double)minTime, (double)firstLinearGuess, (double)firstLinearTime));
 	fprintf(stderr, "Linear interpolation suggests a cutoff of %u\n", secondLinearGuess);
 
-	if (secondLinearGuess > JENT_MAX_OSR)
-		secondLinearGuess = JENT_MAX_OSR;
-
 	/* These estimates were done in two related ways, but they could have produced the same value.
-	 * Looking at the timing of two identical guesses isn't helpful, so adjust the result in this case.
-	 * Stay within the measurable OSR range while keeping the two guesses distinct. */
+	 * Looking at the timing of two identical guesses isn't helpful, so adjust the result in this case.*/
 	if(secondLinearGuess == firstLinearGuess) {
-		if (secondLinearGuess < JENT_MAX_OSR)
-			secondLinearGuess++;
-		else
-			secondLinearGuess--;
+		secondLinearGuess++;
 	}
 	secondLinearTime = jent_output_time(rounds, secondLinearGuess, flags);
 
@@ -411,20 +363,8 @@ int main(int argc, char * argv[])
 		secondLinearTime = tmpTime;
 	}
 
-	/*
-	 * Now secondLinearGuess > firstLinearGuess and the times are usually
-	 * ordered the same way - but they are elapsed-time measurements, so an
-	 * inversion from timing noise is possible. Do not assert on measured
-	 * data: the bracketing logic below only compares the times against
-	 * timeBound and remains correct either way.
-	 */
-	if (secondLinearTime <= firstLinearTime)
-		fprintf(stderr,
-			"Warning: non-monotone timings measured (osr %u: %llu ns, osr %u: %llu ns)\n",
-			firstLinearGuess,
-			(unsigned long long)firstLinearTime,
-			secondLinearGuess,
-			(unsigned long long)secondLinearTime);
+	/* Now secondLinearGuess > firstLinearGuess, and the time values should have a similar relationship. */
+	assert(secondLinearTime > firstLinearTime);
 
 	/* Use the linear interpolation guesses as bounds where possible. */
 	if(firstLinearTime > timeBound) {
@@ -448,33 +388,17 @@ int main(int argc, char * argv[])
 		minTime = secondLinearTime;
 	}
 
-	/* If we don't yet have a maxBound, find one. This will also adjust minBound up as the search goes.
-	 * The search is capped at JENT_MAX_OSR: larger values cannot be measured
-	 * (the library rejects them), and without the cap the former doubling
-	 * loop could never terminate once the target time exceeded the cost of
-	 * every valid OSR. */
+	/* If we don't yet have a maxBound, find one. This will also adjust minBound up as the search goes.*/
 	if(maxBound == 0) {
-		fprintf(stderr, "Trying to find a maximum:");
-		for (;;) {
-			if (minBound >= JENT_MAX_OSR) {
-				/*
-				 * Even the largest valid OSR meets the time
-				 * bound - it is the answer.
-				 */
-				fprintf(stderr,
-					".\nAll valid OSR values meet the target time.\n");
-				printf("%u\n", JENT_MAX_OSR);
-				return 0;
-			}
-			maxBound = minBound * 2;
-			if (maxBound > JENT_MAX_OSR)
-				maxBound = JENT_MAX_OSR;
-			fprintf(stderr, " %u", maxBound);
-			maxTime = jent_output_time(rounds, maxBound, flags);
-			if (maxTime > timeBound)
-				break;
+		maxBound = minBound*2;
+		fprintf(stderr, "Trying to find a maximum: %u", maxBound);
+		/* Locate the maxBound */
+		while((maxTime = jent_output_time(rounds, maxBound, flags)) <= timeBound) {
 			minBound = maxBound;
 			minTime = maxTime;
+			maxBound = maxBound * 2;
+			fprintf(stderr, " %u", maxBound);
+			assert(maxBound > minBound);
 		}
 		fprintf(stderr, ".\nMaximum found: osr upper bound is < %u.\n", maxBound);
 	}
@@ -500,13 +424,9 @@ int main(int argc, char * argv[])
 		assert(curosr < maxBound);
 
 		fprintf(stderr, "Trying osr=%u. ", curosr);
-		/*
-		 * curTime is an elapsed-time measurement; timing noise can place it
-		 * outside (minTime, maxTime), so it must not be asserted to lie
-		 * within. The bracket update below relies only on the comparison
-		 * with timeBound and keeps the search invariants intact.
-		 */
 		curTime = jent_output_time(rounds, curosr, flags);
+		assert(curTime > minTime);
+		assert(curTime < maxTime);
 
 		if(curTime <= timeBound) {
 			fprintf(stderr, "Timing is less than or equal to the target time. ");
