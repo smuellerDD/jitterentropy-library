@@ -37,7 +37,7 @@ MASK_LIST="FF:8"
 #MASK_LIST="FF:4,8 7F8:4,8"
 
 # Maximum number of entries to be extracted from the original file
-MAX_EVENTS=1000000
+MAX_EVENTS=1000
 
 ############################################################
 # Code only after this line -- do not change               #
