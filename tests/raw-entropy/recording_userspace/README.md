@@ -58,6 +58,18 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
   permissions as it attempts to allocate up to 512MB of mlock'ed memory (which
   typically exceeds the ulimit for a normal user).
 
+The `JENT_NTG1` and `JENT_FORCE_FIPS` modes require the memory of the entropy
+collector to be locked into RAM, i.e. the allocation fails when the operating
+system refuses the lock. How much memory may be locked is not set by the library
+but bounded per process by the operating system: `RLIMIT_MEMLOCK` on POSIX
+systems and the process working set quota on Windows. For these two modes the
+recording tools raise that limit as far as the process is allowed to - see
+`jitterentropy-memlock.h`. Raising the `RLIMIT_MEMLOCK` *hard* limit requires
+privileges, so the large memory sizes (see the notes on root permissions above)
+still need the tool to be invoked as root, whereas the smaller ones now work as
+a normal user; where the limit is not sufficient, the tool reports that the
+Jitter RNG handle cannot be allocated.
+
 ## Recording of Raw Entropy Data
 
 If the `invoke_testing.sh` is not helpful for performing the test, the following
