@@ -39,7 +39,12 @@ vpath %.c $(JENT_DIR)/src $(JENT_DIR)/arch
 
 INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src
 LIBRARY_DIRS :=
+# macOS has no librt; the clock/timer functions live in libSystem.
+ifeq (Darwin,$(shell uname))
+LIBRARIES := pthread
+else
 LIBRARIES := rt pthread
+endif
 
 CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
