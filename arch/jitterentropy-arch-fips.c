@@ -69,12 +69,20 @@ int jent_fips_enabled(void)
 # include <openssl/evp.h>
 #endif
 
+/*
+ * The switch file below is a Linux interface. It used to be read on every
+ * platform that is neither Windows nor backed by a crypto library, which meant
+ * the BSDs, macOS, AIX and Solaris each performed an open() that could only
+ * ever fail. The answer was still correct - no file, not in FIPS mode - but the
+ * dispatch said nothing about which platforms actually have the concept.
+ */
 #if !defined(LIBGCRYPT) && !defined(AWSLC) && !defined(OPENSSL) && \
-    !defined(_MSC_VER) && !defined(__MINGW32__)
+    defined(__linux__)
 # include <errno.h>
 # include <fcntl.h>
 # include <sys/types.h>
 # include <unistd.h>
+# define JENT_ARCH_FIPS_PROC
 #endif
 
 int jent_fips_enabled(void)
@@ -85,9 +93,7 @@ int jent_fips_enabled(void)
 	return FIPS_mode();
 #elif defined(OPENSSL)
 	return EVP_default_properties_is_fips_enabled(NULL);
-#elif defined(_MSC_VER) || defined(__MINGW32__)
-	return 0;
-#else
+#elif defined(JENT_ARCH_FIPS_PROC)
 #define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
 	char buf[2] = "0";
 	int fd = 0;
@@ -106,6 +112,13 @@ int jent_fips_enabled(void)
 	else
 		return 0;
 #undef FIPS_MODE_SWITCH_FILE
+#else
+	/*
+	 * No system-wide FIPS indicator on this platform (Windows, the BSDs,
+	 * macOS, AIX, Solaris, ...). Callers that need FIPS behaviour there ask
+	 * for it explicitly with the JENT_FORCE_FIPS flag.
+	 */
+	return 0;
 #endif
 }
 

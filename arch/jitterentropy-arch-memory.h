@@ -89,9 +89,14 @@ void *jent_zalloc(size_t len);
 void jent_zfree(void *ptr, size_t len);
 
 /*
- * Return whether the active memory backend provides secure (locked / wiped)
- * memory. Also declared in the public jitterentropy.h.
+ * jent_secure_memory_supported() - which reports whether the active backend
+ * provides locked / wiped memory - is part of the public API and is declared
+ * once, in jitterentropy.h. It is deliberately not repeated here: that
+ * declaration carries JENT_PRIVATE_STATIC, and an undecorated copy in this
+ * header silently dropped the attribute again ("redeclared without dllimport
+ * attribute: previous dllimport ignored" on a Windows shared build). Like the
+ * size_t above, it reaches every user of this header through jitterentropy.h,
+ * which src/jitterentropy-internal.h includes first.
  */
-int jent_secure_memory_supported(void);
 
 #endif /* _JITTERENTROPY_ARCH_MEMORY_H */

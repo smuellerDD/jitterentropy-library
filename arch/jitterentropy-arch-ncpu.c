@@ -43,6 +43,29 @@
  * DAMAGE.
  */
 
+/*
+ * _GNU_SOURCE exposes the Linux CPU-affinity interfaces used below on glibc
+ * (sched_getaffinity(), the CPU_* set macros). It is defined here, in the
+ * translation unit that needs it, rather than in the public jitterentropy.h so
+ * the installed header does not impose a feature-test macro on consumers; it
+ * must precede every system header.
+ */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+# define _GNU_SOURCE
+#endif
+
+/*
+ * GetActiveProcessorCount() and ALL_PROCESSOR_GROUPS are declared by the
+ * Windows SDK only when the translation unit asks for Windows 7 or newer.
+ * mingw-w64 has defaulted to older values across its releases, so the minimum
+ * is stated here rather than left to the toolchain; like _GNU_SOURCE above it
+ * must precede every system header, including the <windows.h> included below.
+ * An externally supplied, higher value is left alone.
+ */
+#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
+# define _WIN32_WINNT 0x0601
+#endif
+
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 

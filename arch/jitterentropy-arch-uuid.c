@@ -44,6 +44,17 @@
  * DAMAGE.
  */
 
+/*
+ * <bcrypt.h> and BCryptGenRandom() are declared by the Windows SDK only from
+ * Windows Vista onwards. mingw-w64 has defaulted to older values across its
+ * releases, so the minimum is stated here rather than left to the toolchain; it
+ * must precede every system header, including the <windows.h> included below.
+ * An externally supplied, higher value is left alone.
+ */
+#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
+# define _WIN32_WINNT 0x0601
+#endif
+
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 
@@ -73,11 +84,39 @@
 # include <stdlib.h>
 # define JENT_UUID_ARC4RANDOM
 #elif defined(__linux__)
-# include <sys/random.h>
 # include <errno.h>
 # include <fcntl.h>
 # include <unistd.h>
-# define JENT_UUID_GETRANDOM
+/*
+ * <sys/random.h> and the getrandom() wrapper are glibc 2.25 and newer; RHEL 7
+ * ships 2.17 and has neither, which is a missing-header build failure rather
+ * than a link error. Its kernel would not answer the syscall either - that is
+ * Linux 3.17 - so nothing is lost by taking the /dev/urandom path there, which
+ * is where the getrandom() branch below falls back to anyway.
+ *
+ * Bionic is checked the same way and for the same reason, only against an API
+ * level rather than a libc version. Its <sys/random.h> is always present - the
+ * NDK ships one set of headers for every level - but the declaration inside it
+ * carries __INTRODUCED_IN(28), so below that the header is a no-op and the call
+ * is an implicit declaration, which current NDK clang rejects outright. The
+ * bound is the wrapper's alone and not the kernel's - API 21 is already Linux
+ * 3.4 and up, where the syscall may or may not be there - which is exactly the
+ * case the runtime fallback below covers. This is what lets the NDK build
+ * target the whole range its toolchain supports (API 21 and up, see flake.nix)
+ * rather than only the levels that happen to declare getrandom().
+ *
+ * musl (>= 1.1.20) publishes the header with no version macro to test and is
+ * current enough to have it wherever this library is built.
+ */
+# if defined(__ANDROID__) && __ANDROID_API__ < 28
+#  define JENT_UUID_DEVURANDOM
+# elif defined(__GLIBC__) && \
+       (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 25))
+#  define JENT_UUID_DEVURANDOM
+# else
+#  include <sys/random.h>
+#  define JENT_UUID_GETRANDOM
+# endif
 #elif defined(__unix__) || defined(__sun) || defined(_AIX) || \
       defined(__HAIKU__) || defined(__CYGWIN__)
 # include <errno.h>
