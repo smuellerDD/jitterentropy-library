@@ -19,6 +19,11 @@
 
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
+/*
+ * Before the <windows.h> below: the header selects the API level it needs,
+ * which has to precede the first inclusion of the Windows headers.
+ */
+#include "jitterentropy-memlock.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -350,6 +355,24 @@ int main(int argc, char * argv[])
 		argc--;
 		argv++;
 	}
+
+	/*
+	 * The compliance modes require the collector memory to be locked into
+	 * RAM, which the operating system permits only within a per-process
+	 * limit. See jitterentropy-memlock.h.
+	 */
+	if (jent_raise_memlock_limit(flags))
+		fprintf(stderr,
+			"Cannot raise the memory lock limit, allocating the entropy collector may fail\n");
+
+	/*
+	 * Likewise the secure memory arena of the external crypto backends,
+	 * which is created once for the process and is what the library
+	 * allocates the collector from. See jitterentropy-memlock.h.
+	 */
+	if (jent_init_secure_memory(flags))
+		fprintf(stderr,
+			"Cannot create the secure memory arena, allocating the entropy collector will fail\n");
 
 	/* We don't start with a maxBound. */
 	maxBound = 0;
