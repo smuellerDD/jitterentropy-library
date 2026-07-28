@@ -43,6 +43,18 @@
  * DAMAGE.
  */
 
+/*
+ * GetLogicalProcessorInformationEx() and RelationCache are declared by the
+ * Windows SDK only when the translation unit asks for Windows 7 or newer.
+ * mingw-w64 in particular has defaulted to older values across its releases,
+ * so the minimum is stated here rather than left to the toolchain; it has to
+ * precede every system header, including the <windows.h> included below. An
+ * externally supplied, higher value is left alone.
+ */
+#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
+# define _WIN32_WINNT 0x0601
+#endif
+
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 
@@ -54,11 +66,33 @@
  * cache ID registers (arm64, readable at EL1). These headers must not reach the
  * -O0 core, which is why this discovery is out of line here.
  */
+#include <linux/cpu.h>		/* cpus_read_lock()/unlock() */
+#include <linux/cpumask.h>	/* for_each_online_cpu() */
+#include <linux/smp.h>		/* smp_call_function_single() */
 #ifdef CONFIG_X86
-#include <asm/processor.h>	/* cpuid_count(), boot_cpu_data */
+/*
+ * cpuid_count() has moved twice. It used to live in <asm/processor.h>; the x86
+ * CPUID centralisation split it out into <asm/cpuid.h>, and that header then
+ * became the directory <asm/cpuid/api.h>. <asm/processor.h> carried the API
+ * along for a while, but once the circular dependency between the two was
+ * resolved it was reduced to including <asm/cpuid/types.h> - types only, no
+ * cpuid_count() - which is what broke this file on 7.2-rc.
+ *
+ * boot_cpu_data still comes from <asm/processor.h> in every one of those
+ * arrangements, so that include stays unconditional and only the CPUID API is
+ * probed for. Kernels predating the split resolve cpuid_count() from it as
+ * before, which is why no version test is needed here.
+ */
+#if defined(__has_include)
+# if __has_include(<asm/cpuid/api.h>)
+#  include <asm/cpuid/api.h>	/* cpuid_count() */
+# elif __has_include(<asm/cpuid.h>)
+#  include <asm/cpuid.h>	/* cpuid_count() */
+# endif
+#endif
+#include <asm/processor.h>	/* boot_cpu_data */
 #endif
 #ifdef CONFIG_ARM64
-#include <linux/preempt.h>	/* preempt_disable()/enable() */
 #include <asm/barrier.h>	/* isb() */
 #include <asm/sysreg.h>		/* read_sysreg(), write_sysreg() */
 #endif
@@ -71,7 +105,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__CYGWIN__)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 # include <windows.h>
 # define JENT_ARCH_CACHE_WINDOWS
 #elif defined(__linux__)
@@ -84,23 +118,37 @@
 #elif defined(__APPLE__)
 # include <sys/sysctl.h>
 # define JENT_ARCH_CACHE_APPLE
-#elif (defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__)) && \
-      (defined(__x86_64__) || defined(__i386__) ||                            \
-       defined(__aarch64__) || defined(__riscv))
-# define JENT_ARCH_CACHE_BSD
-# if defined(__x86_64__) || defined(__i386__)
-#  include <cpuid.h>
-#  define JENT_ARCH_CACHE_BSD_CPUID
-# endif
 #elif defined(_AIX)
 # include <sys/systemcfg.h>
 # define JENT_ARCH_CACHE_AIX
+#elif (defined(__x86_64__) || defined(__i386__)) && \
+      (defined(__GNUC__) || defined(__clang__))
+/*
+ * Generic x86 fallback: read the geometry straight out of CPUID. This is the
+ * backend for every x86 platform that has no OS interface of its own here -
+ * the BSDs (which do not export data-cache sizes through sysctl in any uniform
+ * way), DragonFly, Solaris/illumos, Haiku and Cygwin. It deliberately sits
+ * after the OS-specific branches so that a platform which does have a better
+ * interface keeps using it.
+ *
+ * Cygwin is handled here rather than by the Windows branch above. It is a
+ * POSIX environment throughout the rest of this library, and mixing the Win32
+ * cache query into it was the one place that pulled <windows.h> into an
+ * otherwise POSIX translation unit.
+ */
+# include <cpuid.h>
+# define JENT_ARCH_CACHE_CPUID
 #endif
 
 #endif /* LINUX_KERNEL */
 
-static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
-						 int all_caches)
+/*
+ * Combine the discovered L1/L2/L3 data-cache sizes into the memory working-set
+ * size: the smallest power of two strictly greater than the summed cache size,
+ * or 0 when nothing was discovered.
+ */
+static uint32_t jent_cache_roundup_from_sizes(long l1, long l2, long l3,
+					      int all_caches)
 {
 	uint32_t cache_size = 0;
 
@@ -114,6 +162,9 @@ static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
 			cache_size += (uint32_t)l3;
 	}
 
+	if (cache_size == 0)
+		return 0;
+
 	/* Force the output_size to be of the form (bounding_power_of_2 - 1). */
 	cache_size |= (cache_size >> 1);
 	cache_size |= (cache_size >> 2);
@@ -121,19 +172,66 @@ static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
 	cache_size |= (cache_size >> 8);
 	cache_size |= (cache_size >> 16);
 
-	return cache_size;
+	/* smallest power of 2 strictly greater than the summed cache size */
+	return cache_size + 1;
+}
+
+/*
+ * Per-backend data-cache size discovery, defined exactly once below for the
+ * active platform. Every backend reports the same three values - the L1 data,
+ * L2 and L3 cache size in bytes, each 0 when that level is not discoverable -
+ * and leaves both the all_caches selection and the round-up to the common code
+ * above. Backends that enumerate several CPUs report the largest cache seen at
+ * each level.
+ *
+ * This is the uncached discovery: it is called once, from the memoising entry
+ * point below, and must not be called directly.
+ */
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3);
+
+/*
+ * Enumerating every CPU's data-cache geometry - the sysfs walk in userspace, a
+ * cross-CPU call per online CPU in the kernel - is comparatively expensive, and
+ * the answer is fixed for the life of the process / module. Run the discovery
+ * once, on the first call, derive both the L1-only (all_caches == 0) and the
+ * all-levels (all_caches == 1) working-set size from that single result, and
+ * return the cached answers afterwards so that repeated
+ * jent_entropy_collector_alloc() calls do not each trigger a full CPU walk and
+ * the latency spike it brings.
+ *
+ * The two results are deterministic, so the library's usual "initialise once
+ * before concurrent use" contract (see jent_entropy_init()) makes this safe. A
+ * thread still racing the very first call at worst recomputes the same values;
+ * a 32-bit slot is read/written atomically, so a racing reader observes either
+ * the old zero (harmless - the caller then falls back to its default size) or
+ * the final value, never a torn one.
+ */
+uint32_t jent_cache_size_roundup(int all_caches)
+{
+	static uint32_t cached[2];
+	static int cached_valid;
+
+	if (!cached_valid) {
+		long l1 = 0, l2 = 0, l3 = 0;
+
+		jent_get_cachesize_uncached(&l1, &l2, &l3);
+		cached[0] = jent_cache_roundup_from_sizes(l1, l2, l3, 0);
+		cached[1] = jent_cache_roundup_from_sizes(l1, l2, l3, 1);
+		cached_valid = 1;
+	}
+
+	return cached[!!all_caches];
 }
 
 /*
  * Compiled only for the backends that use it, so the other platforms do not
  * carry dead code (and clang's -Wunused-function noise) around.
  *
- * x86 data-cache discovery via CPUID leaf 4 (deterministic cache parameters,
- * Intel SDM Vol. 2A; also supported by modern AMD CPUs), shared by every x86
- * backend that can issue CPUID. The instruction is issued through the supplied
- * callback so each environment can plug in its own primitive (the userspace
- * __get_cpuid_count() from <cpuid.h>, the kernel's cpuid_count(), ...). The
- * callback returns non-zero on success and must fail when the leaf is
+ * x86 data-cache discovery via the deterministic cache parameters leaf, shared
+ * by every x86 backend that can issue CPUID. The instruction is issued through
+ * the supplied callback so each environment can plug in its own primitive (the
+ * userspace __get_cpuid_count() from <cpuid.h>, the kernel's cpuid_count(),
+ * ...). The callback returns non-zero on success and must fail when the leaf is
  * unsupported, matching __get_cpuid_count().
  *
  *   EAX[ 4: 0]  cache type (1 = data, 2 = instruction, 3 = unified)
@@ -144,19 +242,28 @@ static inline uint32_t jent_cache_size_to_memory(long l1, long l2, long l3,
  *   ECX         S = number of sets - 1
  * Total size = (W + 1) * (P + 1) * (L + 1) * (S + 1).
  */
-#if defined(JENT_ARCH_CACHE_BSD_CPUID) || \
+#if defined(JENT_ARCH_CACHE_CPUID) || \
     (defined(JENT_ARCH_CACHE_LINUX_KERNEL) && defined(CONFIG_X86))
+
+/* Intel SDM Vol. 2A, CPUID leaf 4: deterministic cache parameters. */
+#define JENT_CPUID_LEAF_CACHE		0x00000004U
+/* AMD APM Vol. 3, CPUID Fn8000_001D: the same layout, on AMD and Hygon. */
+#define JENT_CPUID_LEAF_CACHE_EXT	0x8000001DU
 
 typedef int (*jent_cpuid_count_t)(unsigned int leaf, unsigned int subleaf,
 				  unsigned int *eax, unsigned int *ebx,
 				  unsigned int *ecx, unsigned int *edx);
 
-static inline uint32_t jent_cache_size_roundup_cpuid(jent_cpuid_count_t cpuid,
-						     int all_caches)
+/* Walk the subleaves of @leaf; returns non-zero if any cache was found. */
+static inline int jent_cache_sizes_cpuid_leaf(jent_cpuid_count_t cpuid,
+					      unsigned int leaf,
+					      long *l1, long *l2, long *l3)
 {
-	long l1 = 0, l2 = 0, l3 = 0;
-	uint32_t cache_size;
 	unsigned int sub;
+
+	*l1 = 0;
+	*l2 = 0;
+	*l3 = 0;
 
 	for (sub = 0; sub < 16; sub++) {
 		unsigned int eax, ebx, ecx, edx;
@@ -164,7 +271,7 @@ static inline uint32_t jent_cache_size_roundup_cpuid(jent_cpuid_count_t cpuid,
 		unsigned int ways, partitions, line_size, sets;
 		long size;
 
-		if (!cpuid(4, sub, &eax, &ebx, &ecx, &edx))
+		if (!cpuid(leaf, sub, &eax, &ebx, &ecx, &edx))
 			break;
 
 		cache_type = eax & 0x1F;
@@ -188,23 +295,38 @@ static inline uint32_t jent_cache_size_roundup_cpuid(jent_cpuid_count_t cpuid,
 		 * caches; only the data cache (type 1) is relevant here. L2/L3
 		 * are usually unified, so accept data or unified.
 		 */
-		if (cache_level == 1 && cache_type == 1 && l1 == 0)
-			l1 = size;
-		else if (cache_level == 2 && l2 == 0)
-			l2 = size;
-		else if (cache_level == 3 && l3 == 0)
-			l3 = size;
+		if (cache_level == 1 && cache_type == 1 && *l1 == 0)
+			*l1 = size;
+		else if (cache_level == 2 && *l2 == 0)
+			*l2 = size;
+		else if (cache_level == 3 && *l3 == 0)
+			*l3 = size;
 	}
 
-	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
-	if (cache_size == 0)
-		return 0;
-
-	/* smallest power of 2 strictly greater than the summed cache size */
-	return cache_size + 1;
+	return (*l1 != 0 || *l2 != 0 || *l3 != 0);
 }
 
-#endif /* JENT_ARCH_CACHE_BSD_CPUID || (LINUX_KERNEL && CONFIG_X86) */
+static inline void jent_cache_sizes_cpuid(jent_cpuid_count_t cpuid,
+					  long *l1, long *l2, long *l3)
+{
+	/*
+	 * Leaf 4 is Intel's. AMD and Hygon parts leave it empty - it reports
+	 * cache type 0 in the first subleaf - and expose the identical structure
+	 * through extended leaf 0x8000001D instead (gated by the
+	 * TopologyExtensions feature; parts without it, and hypervisors hiding
+	 * it, again report cache type 0 and leave the sizes at zero). A guest
+	 * sees whichever leaf its host CPU implements, so probe both rather than
+	 * dispatching on the vendor ID.
+	 */
+	if (jent_cache_sizes_cpuid_leaf(cpuid, JENT_CPUID_LEAF_CACHE,
+					l1, l2, l3))
+		return;
+
+	jent_cache_sizes_cpuid_leaf(cpuid, JENT_CPUID_LEAF_CACHE_EXT,
+				    l1, l2, l3);
+}
+
+#endif /* JENT_ARCH_CACHE_CPUID || (LINUX_KERNEL && CONFIG_X86) */
 
 #if defined(JENT_ARCH_CACHE_LINUX_KERNEL) && defined(CONFIG_ARM64)
 
@@ -220,13 +342,15 @@ static inline uint32_t jent_cache_size_roundup_cpuid(jent_cpuid_count_t cpuid,
  */
 typedef uint64_t (*jent_read_ccsidr_t)(unsigned int level);
 
-static inline uint32_t jent_cache_size_roundup_arm64(uint64_t clidr, int ccidx,
-						     jent_read_ccsidr_t ccsidr_fn,
-						     int all_caches)
+static inline void jent_cache_sizes_arm64(uint64_t clidr, int ccidx,
+					  jent_read_ccsidr_t ccsidr_fn,
+					  long *l1, long *l2, long *l3)
 {
-	long l1 = 0, l2 = 0, l3 = 0;
-	uint32_t cache_size;
 	unsigned int level;
+
+	*l1 = 0;
+	*l2 = 0;
+	*l3 = 0;
 
 	for (level = 1; level <= 7; level++) {
 		/* CLIDR_EL1 holds a 3-bit cache type per level. */
@@ -257,27 +381,18 @@ static inline uint32_t jent_cache_size_roundup_arm64(uint64_t clidr, int ccidx,
 		}
 		size = (long)(((unsigned long)1 << (line + 4)) * assoc * sets);
 
-		if (level == 1 && l1 == 0)
-			l1 = size;
-		else if (level == 2 && l2 == 0)
-			l2 = size;
-		else if (level == 3 && l3 == 0)
-			l3 = size;
+		if (level == 1 && *l1 == 0)
+			*l1 = size;
+		else if (level == 2 && *l2 == 0)
+			*l2 = size;
+		else if (level == 3 && *l3 == 0)
+			*l3 = size;
 	}
-
-	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
-	if (cache_size == 0)
-		return 0;
-
-	/* smallest power of 2 strictly greater than the summed cache size */
-	return cache_size + 1;
 }
 
 #endif /* JENT_ARCH_CACHE_LINUX_KERNEL && CONFIG_ARM64 */
 
-#if defined(JENT_ARCH_CACHE_LINUX) || defined(JENT_ARCH_CACHE_APPLE)
-
-#ifdef JENT_ARCH_CACHE_LINUX
+#if defined(JENT_ARCH_CACHE_LINUX)
 
 /*
  * The _SC_LEVEL*_*CACHE_SIZE selectors are a glibc extension. musl, uClibc
@@ -318,229 +433,382 @@ static void jent_get_cachesize_sysconf(long *l1, long *l2, long *l3)
 # endif
 }
 
-static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
+/*
+ * Read a whole sysfs attribute file into @buf (always NUL-terminated on
+ * success). Returns the byte count read (> 0) or -1 on any failure. A read
+ * that fills the entire buffer is reported as such (rlen == buflen) so callers
+ * that care about truncation - the size attribute carries a K/M suffix - can
+ * reject it.
+ */
+static ssize_t jent_read_sysfs_attr(const char *file, char *buf, size_t buflen)
 {
-#define JENT_SYSFS_CACHE_DIR "/sys/devices/system/cpu/cpu0/cache"
-	long val;
-	unsigned int i;
-	char buf[32], file[50];
-	int fd = 0;
+	int fd;
 	ssize_t rlen;
 
-	/* Iterate over all caches */
-	for (i = 0; i < 4; i++) {
-		unsigned int shift = 0;
-		char *ext, *endptr;
-
-		/*
-		 * Check the cache type - we are only interested in Unified
-		 * and Data caches.
-		 */
-		memset(buf, 0, sizeof(buf));
-		snprintf(file, sizeof(file), "%s/index%u/type",
-			 JENT_SYSFS_CACHE_DIR, i);
-		fd = open(file, O_RDONLY);
-		if (fd < 0)
-			continue;
-		do {
-			rlen = read(fd, buf, sizeof(buf));
-		} while (rlen < 0 && errno == EINTR);
-		close(fd);
-		if (rlen <= 0)
-			continue;
-		buf[sizeof(buf) - 1] = '\0';
-
-		if (strncmp(buf, "Data", 4) && strncmp(buf, "Unified", 7))
-			continue;
-
-		/* Get size of cache */
-		memset(buf, 0, sizeof(buf));
-		snprintf(file, sizeof(file), "%s/index%u/size",
-			 JENT_SYSFS_CACHE_DIR, i);
-
-		fd = open(file, O_RDONLY);
-		if (fd < 0)
-			continue;
-		do {
-			rlen = read(fd, buf, sizeof(buf));
-		} while (rlen < 0 && errno == EINTR);
-		close(fd);
-		if (rlen <= 0)
-			continue;
-		/*
-		 * A read filling the entire buffer may have truncated the
-		 * K/M suffix; parsing the bare number would undercount the
-		 * cache size 1024-fold. Skip this cache instead.
-		 */
-		if ((size_t)rlen == sizeof(buf))
-			continue;
-		buf[sizeof(buf) - 1] = '\0';
-
-		ext = strstr(buf, "K");
-		if (ext) {
-			shift = 10;
-			*ext = '\0';
-		} else {
-			ext = strstr(buf, "M");
-			if (ext) {
-				shift = 20;
-				*ext = '\0';
-			}
-		}
-
-		errno = 0;
-		val = strtol(buf, &endptr, 10);
-		if (errno != 0 || endptr == buf || val <= 0 || val == LONG_MAX)
-			continue;
-		val <<= shift;
-
-		if (!*l1)
-			*l1 = val;
-		else if (!*l2)
-			*l2 = val;
-		else {
-			*l3 = val;
-			break;
-		}
-	}
-#undef JENT_SYSFS_CACHE_DIR
+	memset(buf, 0, buflen);
+	fd = open(file, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	do {
+		rlen = read(fd, buf, buflen);
+	} while (rlen < 0 && errno == EINTR);
+	close(fd);
+	if (rlen <= 0)
+		return -1;
+	buf[buflen - 1] = '\0';
+	return rlen;
 }
 
-#endif /* JENT_ARCH_CACHE_LINUX */
-
-#ifdef JENT_ARCH_CACHE_APPLE
-
-static void jent_get_cachesize_sysconf(long *l1, long *l2, long *l3)
+static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 {
-	size_t size;
+#define JENT_SYSFS_CPU_DIR "/sys/devices/system/cpu"
+	long conf, cpu;
 
-	size = sizeof(*l1);
-	if (sysctlbyname("hw.l1dcachesize", l1, &size, NULL, 0) != 0)
-		*l1 = 0;
-
-	size = sizeof(*l2);
-	if (sysctlbyname("hw.l2cachesize", l2, &size, NULL, 0) != 0)
-		*l2 = 0;
-
-	size = sizeof(*l3);
-	if (sysctlbyname("hw.l3cachesize", l3, &size, NULL, 0) != 0)
-		*l3 = 0;
-}
-
-#endif /* JENT_ARCH_CACHE_APPLE */
-
-uint32_t jent_cache_size_roundup(int all_caches)
-{
-	uint32_t cache_size = 0;
-	long l1 = 0, l2 = 0, l3 = 0;
-
-	jent_get_cachesize_sysconf(&l1, &l2, &l3);
-
-	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
-#ifdef JENT_ARCH_CACHE_LINUX
-	if (cache_size == 0) {
-		jent_get_cachesize_sysfs(&l1, &l2, &l3);
-		cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
-
-		if (cache_size == 0)
-			return 0;
-	}
-#endif
-
-	if (cache_size == 0)
-		return 0;
+	*l1 = 0;
+	*l2 = 0;
+	*l3 = 0;
 
 	/*
-	 * Make the output_size the smallest power of 2 strictly greater
-	 * than cache_size.
+	 * Enumerate every configured CPU, not just cpu0: on a hybrid CPU
+	 * (Intel P-cores + E-cores, Arm big.LITTLE) the per-core data-cache
+	 * sizes differ, and the collector normally runs on the more capable
+	 * core, so keep the largest cache seen at each level rather than
+	 * trusting whatever cpu0 happens to report.
+	 *
+	 * _SC_NPROCESSORS_CONF counts configured (not merely online) CPUs,
+	 * whose sysfs indices lie in [0, conf); offline CPUs have no cache
+	 * directory and are simply skipped. Fall back to cpu0 only when the
+	 * count is unavailable, and cap the scan so an implausible topology
+	 * cannot spin unbounded.
 	 */
-	cache_size++;
+#ifdef _SC_NPROCESSORS_CONF
+	conf = sysconf(_SC_NPROCESSORS_CONF);
+#else
+	conf = -1;
+#endif
+	if (conf <= 0)
+		conf = 1;
+	if (conf > 65536)
+		conf = 65536;
 
-	return cache_size;
+	for (cpu = 0; cpu < conf; cpu++) {
+		unsigned int idx;
+
+		for (idx = 0; idx < 16; idx++) {
+			char buf[32];
+			/* the filename buffer is larger than necessary for testing
+			 * with artifical sysfs e.g. under /tmp */
+			char file[128];
+			long *slot, val, level;
+			ssize_t rlen;
+			char *ext, *endptr;
+			unsigned int shift = 0;
+
+			/*
+			 * Cache type - only Data and Unified are relevant. The
+			 * kernel numbers cache indices contiguously from 0, so
+			 * a missing index means this CPU has no further caches
+			 * (or is offline and exposes no cache directory).
+			 */
+			snprintf(file, sizeof(file),
+				 "%s/cpu%ld/cache/index%u/type",
+				 JENT_SYSFS_CPU_DIR, cpu, idx);
+			if (jent_read_sysfs_attr(file, buf, sizeof(buf)) <= 0)
+				break;
+			if (strncmp(buf, "Data", 4) &&
+			    strncmp(buf, "Unified", 7))
+				continue;
+
+			/* Cache level selects the L1/L2/L3 bucket. */
+			snprintf(file, sizeof(file),
+				 "%s/cpu%ld/cache/index%u/level",
+				 JENT_SYSFS_CPU_DIR, cpu, idx);
+			if (jent_read_sysfs_attr(file, buf, sizeof(buf)) <= 0)
+				continue;
+			errno = 0;
+			level = strtol(buf, &endptr, 10);
+			if (errno != 0 || endptr == buf || level < 1)
+				continue;
+			if (level == 1)
+				slot = l1;
+			else if (level == 2)
+				slot = l2;
+			else
+				slot = l3;
+
+			/* Size of the cache, carrying a K or M suffix. */
+			snprintf(file, sizeof(file),
+				 "%s/cpu%ld/cache/index%u/size",
+				 JENT_SYSFS_CPU_DIR, cpu, idx);
+			rlen = jent_read_sysfs_attr(file, buf, sizeof(buf));
+			if (rlen <= 0)
+				continue;
+			/*
+			 * A read filling the entire buffer may have truncated
+			 * the K/M suffix; parsing the bare number would
+			 * undercount the cache size 1024-fold. Skip it instead.
+			 */
+			if ((size_t)rlen == sizeof(buf))
+				continue;
+
+			ext = strstr(buf, "K");
+			if (ext) {
+				shift = 10;
+				*ext = '\0';
+			} else {
+				ext = strstr(buf, "M");
+				if (ext) {
+					shift = 20;
+					*ext = '\0';
+				}
+			}
+
+			errno = 0;
+			val = strtol(buf, &endptr, 10);
+			if (errno != 0 || endptr == buf || val <= 0 ||
+			    val == LONG_MAX)
+				continue;
+			val <<= shift;
+
+			/* Keep the largest cache seen at this level. */
+			if (val > *slot)
+				*slot = val;
+		}
+	}
+#undef JENT_SYSFS_CPU_DIR
 }
+
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
+{
+	long s1 = 0, s2 = 0, s3 = 0;
+
+	/*
+	 * Prefer the sysfs scan: it enumerates every CPU and therefore captures
+	 * the largest (performance-core) data cache on a hybrid part, whereas
+	 * glibc's sysconf reflects only the single core its one-shot CPUID probe
+	 * happened to run on.
+	 */
+	jent_get_cachesize_sysfs(l1, l2, l3);
+	if (*l1 > 0)
+		return;
+
+	/*
+	 * No L1 data cache found - sysfs is unavailable (not mounted, a
+	 * restricted container, ...) or does not describe the caches. Fall back
+	 * to sysconf, keeping the larger value per level so a partial sysfs
+	 * result is never made worse.
+	 */
+	jent_get_cachesize_sysconf(&s1, &s2, &s3);
+	if (s1 > *l1)
+		*l1 = s1;
+	if (s2 > *l2)
+		*l2 = s2;
+	if (s3 > *l3)
+		*l3 = s3;
+}
+
+#elif defined(JENT_ARCH_CACHE_APPLE)
+
+#define JENT_ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+/*
+ * Return the first of @names that resolves, or 0 when none does.
+ *
+ * The value is read into a uint64_t rather than straight into the caller's
+ * long: the hw.* cache sysctls are 64 bit, so a 32-bit build passing
+ * sizeof(long) == 4 would be rejected with ENOMEM and lose the size entirely.
+ * A kernel answering with a narrower type is still handled - the destination
+ * is zeroed first and every Apple target is little-endian, so a short write
+ * lands in the low bytes.
+ */
+static long jent_sysctl_cachesize(const char *const *names, size_t nnames)
+{
+	size_t i;
+
+	for (i = 0; i < nnames; i++) {
+		uint64_t val = 0;
+		size_t len = sizeof(val);
+
+		if (sysctlbyname(names[i], &val, &len, NULL, 0) != 0)
+			continue;
+		if (len != sizeof(val) && len != sizeof(uint32_t))
+			continue;
+		if (val == 0 || val > (uint64_t)LONG_MAX)
+			continue;
+
+		return (long)val;
+	}
+
+	return 0;
+}
+
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
+{
+	/*
+	 * Apple Silicon is heterogeneous, and the flat hw.l1dcachesize /
+	 * hw.l2cachesize report the *least* capable cluster - the efficiency
+	 * cores. On an M-series part that is 64 kB / 4 MB where the
+	 * performance cores have 128 kB / 12 MB. Sizing the memory access
+	 * working set from the efficiency core understates it for the
+	 * performance cores the collector normally runs on, so ask for the
+	 * perflevel0 (most performant) cluster first.
+	 *
+	 * The perflevel* names only exist on Apple Silicon; on Intel Macs and
+	 * on homogeneous parts the lookup falls through to the flat names.
+	 */
+	static const char *const l1_names[] = {
+		"hw.perflevel0.l1dcachesize",
+		"hw.l1dcachesize"
+	};
+	static const char *const l2_names[] = {
+		"hw.perflevel0.l2cachesize",
+		"hw.l2cachesize"
+	};
+	/*
+	 * Apple Silicon exposes no L3 size through sysctl at all (the SLC is
+	 * not reported); these names only resolve on older Intel Macs. A
+	 * missing L3 simply leaves the value at zero.
+	 */
+	static const char *const l3_names[] = {
+		"hw.perflevel0.l3cachesize",
+		"hw.l3cachesize"
+	};
+
+	*l1 = jent_sysctl_cachesize(l1_names, JENT_ARRAY_SIZE(l1_names));
+	*l2 = jent_sysctl_cachesize(l2_names, JENT_ARRAY_SIZE(l2_names));
+	*l3 = jent_sysctl_cachesize(l3_names, JENT_ARRAY_SIZE(l3_names));
+}
+
+#undef JENT_ARRAY_SIZE
 
 #elif defined(JENT_ARCH_CACHE_WINDOWS)
 
-uint32_t jent_cache_size_roundup(int all_caches)
+/*
+ * GetLogicalProcessorInformationEx() rather than the older
+ * GetLogicalProcessorInformation(): the latter only ever describes processor
+ * group 0, so on a machine with more than 64 logical CPUs - and on the
+ * heterogeneous parts where the per-level scan below actually matters - every
+ * cache outside that first group was invisible.
+ *
+ * The Ex variant returns a packed sequence of variable-length records, so it
+ * has to be walked by each record's own Size field instead of being indexed
+ * like an array.
+ */
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
 {
-	long l1 = 0, l2 = 0, l3 = 0;
 	DWORD len = 0;
-	PSYSTEM_LOGICAL_PROCESSOR_INFORMATION buffer = NULL;
-	DWORD count;
-	DWORD i;
-	uint32_t cache_size;
+	BYTE *buffer, *pos, *end;
+	/* Bytes that must be readable before Relationship and Size are touched. */
+	const size_t hdr = offsetof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+				    Cache);
+	/* ... and before the Cache member itself is read. */
+	const size_t cache_rec = hdr + sizeof(CACHE_RELATIONSHIP);
+
+	*l1 = 0;
+	*l2 = 0;
+	*l3 = 0;
 
 	/* First call to get buffer size */
-	if (!GetLogicalProcessorInformation(NULL, &len) &&
+	if (!GetLogicalProcessorInformationEx(RelationCache, NULL, &len) &&
 	    GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-		return 0;
+		return;
 
-	buffer = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION)malloc(len);
+	buffer = (BYTE *)malloc(len);
 	if (!buffer)
-		return 0;
+		return;
 
 	/* Second call to retrieve data */
-	if (!GetLogicalProcessorInformation(buffer, &len)) {
+	if (!GetLogicalProcessorInformationEx(
+			RelationCache,
+			(PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer,
+			&len)) {
 		free(buffer);
-		return 0;
+		return;
 	}
 
-	count = len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION);
+	/*
+	 * One record is reported per cache, so every level shows up as many
+	 * times as the machine has such caches. Keep the largest of each level
+	 * rather than whatever happens to be enumerated last: on a
+	 * heterogeneous CPU (Intel P-cores and E-cores report different L2
+	 * sizes) the picked value would otherwise depend on enumeration order,
+	 * and a memory region sized after the smaller cache would still fit
+	 * into the larger one. On a homogeneous machine all entries of a level
+	 * are equal and the result is unchanged.
+	 */
+	pos = buffer;
+	end = buffer + len;
+	while ((size_t)(end - pos) >= hdr) {
+		PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX rec =
+			(PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)pos;
+		CACHE_RELATIONSHIP *cache;
+		long size;
 
-	for (i = 0; i < count; i++) {
-		if (buffer[i].Relationship == RelationCache) {
-			CACHE_DESCRIPTOR *cache = &buffer[i].Cache;
+		/*
+		 * A zero or oversized Size would make the walk spin or read
+		 * past the buffer; treat either as the end of the data.
+		 */
+		if (rec->Size < hdr || (size_t)(end - pos) < rec->Size)
+			break;
 
-			if (cache->Level == 1 && cache->Type == CacheData) {
-				l1 = (long)cache->Size;
-			} else if (cache->Level == 2 &&
-				   (cache->Type == CacheUnified ||
-				    cache->Type == CacheData)) {
-				l2 = (long)cache->Size;
-			} else if (cache->Level == 3 &&
-				   (cache->Type == CacheUnified ||
-				    cache->Type == CacheData)) {
-				l3 = (long)cache->Size;
-			}
+		if (rec->Relationship != RelationCache) {
+			pos += rec->Size;
+			continue;
 		}
+
+		/*
+		 * The bound checked above covers Relationship and Size only,
+		 * while the Cache member reaches past hdr. A record claiming
+		 * to describe a cache in less space than a CACHE_RELATIONSHIP
+		 * occupies is malformed, and reading it would run off the end
+		 * of the buffer when it is the last record; stop rather than
+		 * trust the remainder of the walk. The pointer is formed only
+		 * after this check, so it never even points past the
+		 * allocation.
+		 */
+		if (rec->Size < cache_rec)
+			break;
+
+		cache = &rec->Cache;
+		size = (long)cache->CacheSize;
+
+		if (cache->Level == 1 && cache->Type == CacheData) {
+			if (size > *l1)
+				*l1 = size;
+		} else if (cache->Level == 2 &&
+			   (cache->Type == CacheUnified ||
+			    cache->Type == CacheData)) {
+			if (size > *l2)
+				*l2 = size;
+		} else if (cache->Level == 3 &&
+			   (cache->Type == CacheUnified ||
+			    cache->Type == CacheData)) {
+			if (size > *l3)
+				*l3 = size;
+		}
+
+		pos += rec->Size;
 	}
 
 	free(buffer);
-
-	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
-	if (cache_size == 0)
-		return 0;
-
-	/*
-	 * Make the output_size the smallest power of 2 strictly greater
-	 * than cache_size.
-	 */
-	cache_size++;
-
-	return cache_size;
 }
 
-#elif defined(JENT_ARCH_CACHE_BSD)
+#elif defined(JENT_ARCH_CACHE_CPUID)
 
-uint32_t jent_cache_size_roundup(int all_caches)
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
 {
-#ifdef JENT_ARCH_CACHE_BSD_CPUID
 	/*
-	 * The BSDs do not export data-cache sizes through sysctl in a uniform
-	 * way; on x86 read them directly via CPUID leaf 4. __get_cpuid_count()
-	 * (from <cpuid.h>) already fails when the leaf is unsupported.
+	 * __get_cpuid_count() (from <cpuid.h>) already fails when the leaf is
+	 * unsupported, which is what jent_cache_sizes_cpuid() relies on to
+	 * probe the Intel and the AMD/Hygon leaf in turn.
+	 *
+	 * Unlike the sysfs and kernel backends this reads only the CPU the
+	 * caller happens to be running on, so on a hybrid part it reports that
+	 * core's geometry rather than the largest in the system. Every platform
+	 * routed here lacks a portable way to enumerate the others; the result
+	 * is a working-set size that is correct for some core rather than none.
 	 */
-	return jent_cache_size_roundup_cpuid(__get_cpuid_count, all_caches);
-#else
-	/*
-	 * AArch64 carries the data cache sizes in CCSIDR_EL1, an EL1 register
-	 * that the BSD arm64 kernels do not currently emulate for EL0. RISC-V
-	 * has no standardised user-mode cache-discovery instruction at all. In
-	 * both cases return zero so the caller falls back to its default.
-	 */
-	(void)all_caches;
-	return 0;
-#endif /* JENT_ARCH_CACHE_BSD_CPUID */
+	jent_cache_sizes_cpuid(__get_cpuid_count, l1, l2, l3);
 }
 
 #elif defined(JENT_ARCH_CACHE_AIX)
@@ -551,45 +819,58 @@ uint32_t jent_cache_size_roundup(int all_caches)
  * L2_cache_size for L2. AIX does not provide an L3 size in this struct, so
  * leave it at zero.
  */
-uint32_t jent_cache_size_roundup(int all_caches)
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
 {
-	long l1 = (long)_system_configuration.dcache_size;
-	long l2 = (long)_system_configuration.L2_cache_size;
-	long l3 = 0;
-	uint32_t cache_size;
-
-	cache_size = jent_cache_size_to_memory(l1, l2, l3, all_caches);
-	if (cache_size == 0)
-		return 0;
-
-	/*
-	 * Make the output_size the smallest power of 2 strictly greater
-	 * than cache_size.
-	 */
-	cache_size++;
-
-	return cache_size;
+	*l1 = (long)_system_configuration.dcache_size;
+	*l2 = (long)_system_configuration.L2_cache_size;
+	*l3 = 0;
 }
 
-#elif defined(JENT_ARCH_CACHE_LINUX_KERNEL) && defined(CONFIG_X86)
+#elif defined(JENT_ARCH_CACHE_LINUX_KERNEL) && \
+      (defined(CONFIG_X86) || defined(CONFIG_ARM64))
+
+struct jent_cpu_cache_sizes {
+	long l1, l2, l3;
+};
+
+#ifdef CONFIG_X86
 
 static int jent_cpuid_count(unsigned int leaf, unsigned int subleaf,
 			    unsigned int *eax, unsigned int *ebx,
 			    unsigned int *ecx, unsigned int *edx)
 {
-	if (boot_cpu_data.cpuid_level < (int)leaf)
+	/*
+	 * The basic (0x00000000-) and extended (0x80000000-) leaf ranges are
+	 * capped separately - by CPUID.0:EAX and CPUID.0x80000000:EAX - which
+	 * the kernel keeps in cpuid_level and extended_cpuid_level. Querying
+	 * past either cap does not fault but returns another leaf's contents,
+	 * so check the one belonging to the requested range.
+	 */
+	if (leaf & 0x80000000U) {
+		if (boot_cpu_data.extended_cpuid_level < leaf)
+			return 0;
+	} else if (boot_cpu_data.cpuid_level < (int)leaf) {
 		return 0;
+	}
 
 	cpuid_count(leaf, subleaf, eax, ebx, ecx, edx);
 	return 1;
 }
 
-uint32_t jent_cache_size_roundup(int all_caches)
+/*
+ * Runs on the target CPU via smp_call_function_single(), so the whole leaf-4
+ * walk stays pinned to that core - the per-level sizes cannot be torn across a
+ * migration between a P-core and an E-core.
+ */
+static void jent_cache_sizes_worker(void *info)
 {
-	return jent_cache_size_roundup_cpuid(jent_cpuid_count, all_caches);
+	struct jent_cpu_cache_sizes *sizes = info;
+
+	jent_cache_sizes_cpuid(jent_cpuid_count,
+			       &sizes->l1, &sizes->l2, &sizes->l3);
 }
 
-#elif defined(JENT_ARCH_CACHE_LINUX_KERNEL) && defined(CONFIG_ARM64)
+#else /* CONFIG_ARM64 */
 
 /* Read CCSIDR_EL1 for the data/unified cache at @level (1-based). */
 static uint64_t jent_read_ccsidr(unsigned int level)
@@ -600,30 +881,77 @@ static uint64_t jent_read_ccsidr(unsigned int level)
 	return read_sysreg(ccsidr_el1);
 }
 
-uint32_t jent_cache_size_roundup(int all_caches)
+/*
+ * Runs on the target PE via smp_call_function_single(). CSSELR_EL1/CCSIDR_EL1
+ * form a per-PE selector, so executing the whole sequence on one CPU is what
+ * keeps it consistent - and, unlike the former manual preempt_disable(), it
+ * also reads each cluster's own geometry on big.LITTLE / DynamIQ parts.
+ */
+static void jent_cache_sizes_worker(void *info)
 {
-	uint64_t clidr;
-	int ccidx;
-	uint32_t ret;
-
-	/* CSSELR_EL1/CCSIDR_EL1 form a per-PE selector; stay on one CPU. */
-	preempt_disable();
-	clidr = read_sysreg(clidr_el1);
+	struct jent_cpu_cache_sizes *sizes = info;
+	uint64_t clidr = read_sysreg(clidr_el1);
 	/* ID_AA64MMFR2_EL1.CCIDX is bits[23:20]; non-zero => wide CCSIDR format. */
-	ccidx = (int)((read_sysreg(id_aa64mmfr2_el1) >> 20) & 0xf);
-	ret = jent_cache_size_roundup_arm64(clidr, ccidx, jent_read_ccsidr,
-					    all_caches);
-	preempt_enable();
+	int ccidx = (int)((read_sysreg(id_aa64mmfr2_el1) >> 20) & 0xf);
 
-	return ret;
+	jent_cache_sizes_arm64(clidr, ccidx, jent_read_ccsidr,
+			       &sizes->l1, &sizes->l2, &sizes->l3);
+}
+
+#endif /* CONFIG_X86 */
+
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
+{
+	int cpu;
+
+	*l1 = 0;
+	*l2 = 0;
+	*l3 = 0;
+
+	/*
+	 * Read the cache geometry on every online CPU and keep the largest at
+	 * each level. Heterogeneous CPUs - Intel P-cores + E-cores with
+	 * differing L2, big.LITTLE / DynamIQ clusters with differing geometry
+	 * altogether - would otherwise be sized after the smaller cache, while
+	 * the collector normally runs on the more capable core.
+	 */
+	cpus_read_lock();
+	for_each_online_cpu(cpu) {
+		struct jent_cpu_cache_sizes sizes = { 0, 0, 0 };
+
+		if (smp_call_function_single(cpu, jent_cache_sizes_worker,
+					     &sizes, 1))
+			continue;
+
+		if (sizes.l1 > *l1)
+			*l1 = sizes.l1;
+		if (sizes.l2 > *l2)
+			*l2 = sizes.l2;
+		if (sizes.l3 > *l3)
+			*l3 = sizes.l3;
+	}
+	cpus_read_unlock();
 }
 
 #else /* no cache discovery available */
 
-uint32_t jent_cache_size_roundup(int all_caches)
+/*
+ * Reached by every remaining combination, most notably the non-Linux, non-Apple
+ * platforms on a non-x86 CPU: the BSDs on aarch64, powerpc or riscv, and any
+ * target whose compiler provides no <cpuid.h>.
+ *
+ * AArch64 carries the data cache sizes in CCSIDR_EL1, an EL1 register that the
+ * BSD arm64 kernels do not currently emulate for EL0 (the Linux kernel backend
+ * above can read it because it runs at EL1). RISC-V has no standardised
+ * user-mode cache-discovery instruction at all. Reporting nothing makes
+ * jent_update_memsize() fall back to JENT_DEFAULT_MEMORY_BITS, which is a
+ * conservative working-set size rather than a failure.
+ */
+static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
 {
-	(void)all_caches;
-	return 0;
+	*l1 = 0;
+	*l2 = 0;
+	*l3 = 0;
 }
 
 #endif
