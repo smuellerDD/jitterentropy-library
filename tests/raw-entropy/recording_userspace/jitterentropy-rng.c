@@ -25,6 +25,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(_MSC_VER) || defined(__MINGW32__)
+# include <fcntl.h>
+# include <io.h>
+#endif
+
 /*
  * Parse a complete numeric option value. A plain strtoul(str, NULL, 10) turns
  * a typo (or a follow-up option consumed as value) into 0 and the tool would
@@ -248,6 +253,21 @@ int main(int argc, char * argv[])
 	}
 
 	fprintf(stderr, "%s", status);
+
+	/*
+	 * Windows opens stdout in text mode: every 0x0A byte of the random
+	 * stream would be written out as 0x0D 0x0A, corrupting and inflating
+	 * the data as soon as it is redirected into a file or a pipe - which
+	 * is the only way this tool is used. The hex encoding below emits no
+	 * 0x0A at all and is therefore left alone.
+	 */
+#if defined(_MSC_VER) || defined(__MINGW32__)
+	if (!hex && _setmode(_fileno(stdout), _O_BINARY) == -1) {
+		fprintf(stderr, "Cannot switch stdout to binary mode\n");
+		ret = 1;
+		goto out;
+	}
+#endif
 
 	for (size = 0; size < rounds; size++) {
 		uint8_t tmp[32];

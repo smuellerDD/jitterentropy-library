@@ -43,6 +43,19 @@
 #include <unistd.h>
 #endif
 
+/*
+ * Windows opens file descriptors in text mode unless O_BINARY is requested:
+ * every 0x0A byte of the extracted sample stream would be written out as
+ * 0x0D 0x0A, silently corrupting (and inflating) the SP800-90B input data.
+ * POSIX makes no such distinction and has no O_BINARY.
+ */
+#if !defined(O_BINARY) && defined(_O_BINARY)
+# define O_BINARY _O_BINARY
+#endif
+#ifndef O_BINARY
+# define O_BINARY 0
+#endif
+
 #define BITS_PER_SAMPLE 64
 
 /*
@@ -203,7 +216,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	fd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL, 0777);
+	fd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL|O_BINARY, 0777);
 	if (fd < 0) {
 		fprintf(stderr, "File %s cannot be opened for write: %s\n",
 			argv[2], strerror(errno));
