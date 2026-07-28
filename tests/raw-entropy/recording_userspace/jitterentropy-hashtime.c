@@ -51,6 +51,7 @@
 #include "jitterentropy-arch-ncpu.c"
 #include "jitterentropy-arch-sched.c"
 #include "jitterentropy-arch-thread.c"
+#include "jitterentropy-arch-timer.c"
 #include "jitterentropy-arch-uuid.c"
 
 #ifndef REPORT_COUNTER_TICKS
@@ -168,7 +169,16 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 
 	printf("Processing %s\n", pathname);
 
+	/*
+	 * "wb" for the binary variant: Windows opens streams in text mode
+	 * otherwise and would expand every 0x0A byte of the recorded
+	 * timestamps to 0x0D 0x0A, corrupting the sample file.
+	 */
+#ifdef JENT_TEST_BINARY_OUTPUT
+	out = fopen(pathname, "wb");
+#else
 	out = fopen(pathname, "w");
+#endif
 	if (!out) {
 		ret = 1;
 		goto out;
