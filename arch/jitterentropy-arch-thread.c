@@ -45,6 +45,30 @@
  * DAMAGE.
  */
 
+/*
+ * _GNU_SOURCE exposes the Linux CPU-affinity interfaces used below on glibc
+ * (the CPU_* set macros, sched_setaffinity(), pthread_setaffinity_np()). It is
+ * defined here, in the translation unit that needs it, rather than in the
+ * public jitterentropy.h so the installed header does not impose a feature-test
+ * macro on consumers; it must precede every system header.
+ */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+# define _GNU_SOURCE
+#endif
+
+/*
+ * GetLogicalProcessorInformationEx(), RelationGroup, SetThreadGroupAffinity()
+ * and the GROUP_AFFINITY / GROUP_RELATIONSHIP structs are declared by the
+ * Windows SDK only when the translation unit asks for Windows 7 or newer.
+ * mingw-w64 has defaulted to older values across its releases, so the minimum
+ * is stated here rather than left to the toolchain; like _GNU_SOURCE above it
+ * must precede every system header, including the <windows.h> included below.
+ * An externally supplied, higher value is left alone.
+ */
+#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
+# define _WIN32_WINNT 0x0601
+#endif
+
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 #include "jitterentropy-arch-thread.h"	/* not pulled in by internal.h */
@@ -58,6 +82,8 @@
 /* CPU pinning back-end selection */
 #if defined(_MSC_VER) || defined(__MINGW32__)
 # include <windows.h>
+# include <stddef.h>	/* offsetof() */
+# include <stdlib.h>	/* malloc(), free() */
 # define JENT_ARCH_THREAD_PIN_WINDOWS
 #elif defined(__linux__)
 # include <sched.h>
@@ -80,6 +106,17 @@
 # define JENT_ARCH_THREAD_PIN_OPENBSD
 #endif
 
+#ifdef JENT_WIN_THREADS
+/*
+ * <windows.h> already came in with the pinning back-end above - the Win32
+ * thread back-end is only ever selected on the same platforms - but it is
+ * named again so this block does not silently depend on that.
+ */
+# include <windows.h>
+# include <process.h>	/* _beginthreadex() */
+# include <stdint.h>	/* uintptr_t */
+#endif
+
 /*
  * Pin the calling thread to a single logical CPU.
  *
@@ -94,29 +131,101 @@ int jent_thread_pin_to_cpu(unsigned long cpu)
 	 * A processor group holds at most 64 logical CPUs, so the flat CPU
 	 * index is resolved to a (group, in-group bit) pair by walking the
 	 * groups. This lets us pin to CPUs beyond 64 on systems that span
-	 * multiple processor groups.
+	 * multiple processor groups. The flat index space is the one
+	 * jent_ncpu() reports, i.e. the active processors of all groups
+	 * concatenated in group order.
+	 *
+	 * The groups are enumerated with GetLogicalProcessorInformationEx()
+	 * rather than counted with GetActiveProcessorGroupCount() /
+	 * GetActiveProcessorCount(): the index selects the n-th *active*
+	 * processor, and only ActiveProcessorMask says which bit positions
+	 * those actually are. Deriving the bit from the count alone assumes
+	 * the active processors occupy the lowest bits of the group without a
+	 * gap, which stops holding as soon as one is parked or disabled - the
+	 * thread would then be pinned to a different CPU than the caller asked
+	 * for, or to an inactive one.
 	 */
-	WORD group_count = GetActiveProcessorGroupCount();
-	WORD group;
+	DWORD len = 0;
+	BYTE *buffer;
+	PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX rec;
+	GROUP_RELATIONSHIP *groups;
+	/* Bytes that must be readable before Relationship and Size are read. */
+	const size_t hdr = offsetof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+				    Group);
+	size_t need;
 	unsigned long idx = cpu;
+	WORD group;
+	int ret = -EINVAL;
 
-	for (group = 0; group < group_count; group++) {
-		DWORD in_group = GetActiveProcessorCount(group);
-		GROUP_AFFINITY ga;
+	if (!GetLogicalProcessorInformationEx(RelationGroup, NULL, &len) &&
+	    GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+		return -EFAULT;
 
-		if (idx >= (unsigned long)in_group) {
-			idx -= in_group;
+	buffer = (BYTE *)malloc(len);
+	if (!buffer)
+		return -ENOMEM;
+
+	if (!GetLogicalProcessorInformationEx(
+			RelationGroup,
+			(PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer,
+			&len)) {
+		free(buffer);
+		return -EFAULT;
+	}
+
+	/*
+	 * RelationGroup is reported as a single record covering every group,
+	 * with the per-group entries as a trailing array. Validate the header,
+	 * then the array the announced ActiveGroupCount implies, before either
+	 * is dereferenced.
+	 */
+	rec = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer;
+	need = hdr + offsetof(GROUP_RELATIONSHIP, GroupInfo);
+	if ((size_t)len < hdr || (size_t)len < rec->Size ||
+	    rec->Relationship != RelationGroup || rec->Size < need) {
+		free(buffer);
+		return -EFAULT;
+	}
+
+	groups = &rec->Group;
+	need += (size_t)groups->ActiveGroupCount * sizeof(PROCESSOR_GROUP_INFO);
+	if (rec->Size < need) {
+		free(buffer);
+		return -EFAULT;
+	}
+
+	for (group = 0; group < groups->ActiveGroupCount; group++) {
+		const PROCESSOR_GROUP_INFO *gi = &groups->GroupInfo[group];
+		unsigned long seen = 0;
+		unsigned int bit;
+
+		if (idx >= (unsigned long)gi->ActiveProcessorCount) {
+			idx -= gi->ActiveProcessorCount;
 			continue;
 		}
 
-		ZeroMemory(&ga, sizeof(ga));
-		ga.Group = group;
-		ga.Mask = (KAFFINITY)1 << idx;
-		if (!SetThreadGroupAffinity(GetCurrentThread(), &ga, NULL))
-			return -EFAULT;
-		return 0;
+		/* The idx-th set bit of this group's active mask. */
+		for (bit = 0; bit < (unsigned int)(sizeof(KAFFINITY) * 8);
+		     bit++) {
+			GROUP_AFFINITY ga;
+
+			if (!((gi->ActiveProcessorMask >> bit) & (KAFFINITY)1))
+				continue;
+			if (seen++ != idx)
+				continue;
+
+			ZeroMemory(&ga, sizeof(ga));
+			ga.Group = group;
+			ga.Mask = (KAFFINITY)1 << bit;
+			ret = SetThreadGroupAffinity(GetCurrentThread(), &ga,
+						     NULL) ? 0 : -EFAULT;
+			break;
+		}
+		break;
 	}
-	return -EINVAL;
+
+	free(buffer);
+	return ret;
 #elif defined(JENT_ARCH_THREAD_PIN_LINUX)
 	cpu_set_t set;
 
@@ -128,14 +237,40 @@ int jent_thread_pin_to_cpu(unsigned long cpu)
 		return -errno;
 	return 0;
 #elif defined(JENT_ARCH_THREAD_PIN_MACOS)
+	/*
+	 * macOS exposes no CPU pinning API at all. THREAD_AFFINITY_POLICY is
+	 * the closest thing, but an affinity tag is only a hint that threads
+	 * sharing a tag should share an L2 cache - it does not name a CPU and
+	 * does not bind the thread to one. It is used here purely to push the
+	 * counting thread into an affinity set of its own (tag 0 means "no
+	 * affinity", hence the +1), which is the most the OS allows.
+	 *
+	 * On Apple Silicon even that is gone: thread_policy_set() returns
+	 * KERN_NOT_SUPPORTED for THREAD_AFFINITY_POLICY, so this always fails.
+	 * That is reported as -ENOTSUP rather than an error, matching OpenBSD
+	 * below. Pinning is advisory, so the internal timer keeps working; the
+	 * counting thread simply runs wherever the scheduler puts it.
+	 */
 	thread_affinity_policy_data_t policy;
+	kern_return_t kr;
 
-	/* Affinity tag 0 means "no affinity", so offset the CPU index. */
+	/*
+	 * affinity_tag is a 32-bit signed integer and tag 0 means "no
+	 * affinity": reject CPU indices whose +1 does not fit, instead of
+	 * letting the truncated conversion silently request tag 0 (un-pin)
+	 * or a negative tag.
+	 */
+	if (cpu >= INT32_MAX)
+		return -EINVAL;
+
 	policy.affinity_tag = (integer_t)(cpu + 1);
-	if (thread_policy_set(pthread_mach_thread_np(pthread_self()),
-			      THREAD_AFFINITY_POLICY,
-			      (thread_policy_t)&policy,
-			      THREAD_AFFINITY_POLICY_COUNT) != KERN_SUCCESS)
+	kr = thread_policy_set(pthread_mach_thread_np(pthread_self()),
+			       THREAD_AFFINITY_POLICY,
+			       (thread_policy_t)&policy,
+			       THREAD_AFFINITY_POLICY_COUNT);
+	if (kr == KERN_NOT_SUPPORTED)
+		return -ENOTSUP;
+	if (kr != KERN_SUCCESS)
 		return -EFAULT;
 	return 0;
 #elif defined(JENT_ARCH_THREAD_PIN_FREEBSD)
@@ -173,6 +308,24 @@ int jent_thread_pin_to_cpu(unsigned long cpu)
 #endif
 }
 
+#ifdef JENT_WIN_THREADS
+/*
+ * Win32 thread entry point.
+ *
+ * _beginthreadex() wants unsigned __stdcall (*)(void *), which is neither of
+ * the signatures the public thread-handler interface offers (struct
+ * jent_notime_thread in jitterentropy.h). Rather than adding a third,
+ * Windows-only one to that public struct, the routine and its argument travel
+ * in the context and this trampoline unpacks them.
+ */
+static unsigned __stdcall jent_notime_thread_win32(void *arg)
+{
+	struct jent_notime_ctx *ctx = (struct jent_notime_ctx *)arg;
+
+	return (unsigned)ctx->notime_routine(ctx->notime_arg);
+}
+#endif
+
 /*
  * Spawn the counting thread running start_routine(arg).
  *
@@ -182,7 +335,7 @@ int jent_notime_thread_create(struct jent_notime_ctx *ctx,
 			      jent_notime_start_routine routine,
 			      void *arg)
 {
-#ifdef JENT_PTHREAD
+#if defined(JENT_PTHREAD)
 	int ret = -pthread_attr_init(&ctx->notime_pthread_attr);
 
 	if (ret)
@@ -200,21 +353,40 @@ int jent_notime_thread_create(struct jent_notime_ctx *ctx,
 	}
 	ctx->notime_thread_started = 1;
 	return 0;
-#else
-	switch (thrd_create(&ctx->notime_thread_id, routine, arg)) {
-	case thrd_success:
-		ctx->notime_thread_started = 1;
-		return 0;
-	case thrd_nomem:
-		return -ENOMEM;
-	case thrd_timedout:
-		return -ETIMEDOUT;
-	case thrd_busy:
-		return -EBUSY;
-	case thrd_error:
-	default:
-		return -EINVAL;
+#else /* JENT_WIN_THREADS; the header rejects anything else */
+	/*
+	 * _beginthreadex() rather than CreateThread(): the counting thread runs
+	 * CRT code - jent_thread_pin_to_cpu() above allocates - and a thread
+	 * that reaches the CRT without having been started through it leaks the
+	 * per-thread state the CRT then initializes lazily. Since the internal
+	 * timer starts and stops the thread on every entropy request, that leak
+	 * would accumulate for the life of the process. The handle it returns is
+	 * a real Win32 HANDLE and is closed by the join below.
+	 *
+	 * The default stack size (0, i.e. the value in the image header) and no
+	 * creation flags are deliberate: the thread only increments a counter,
+	 * and it must run immediately rather than be created suspended.
+	 */
+	uintptr_t handle;
+
+	ctx->notime_routine = routine;
+	ctx->notime_arg = arg;
+
+	handle = _beginthreadex(NULL, 0, jent_notime_thread_win32, ctx, 0, NULL);
+	if (!handle) {
+		/*
+		 * _beginthreadex() reports the reason in errno (EAGAIN,
+		 * EINVAL, EACCES). It is only meaningful when it was actually
+		 * set, hence the fallback.
+		 */
+		int ret = errno;
+
+		return ret ? -ret : -EAGAIN;
 	}
+
+	ctx->notime_thread_id = (void *)handle;
+	ctx->notime_thread_started = 1;
+	return 0;
 #endif
 }
 
@@ -229,11 +401,19 @@ void jent_notime_thread_join(struct jent_notime_ctx *ctx)
 	if (!ctx->notime_thread_started)
 		return;
 
-#ifdef JENT_PTHREAD
+#if defined(JENT_PTHREAD)
 	pthread_join(ctx->notime_thread_id, NULL);
 	pthread_attr_destroy(&ctx->notime_pthread_attr);
-#else
-	thrd_join(ctx->notime_thread_id, NULL);
+#else /* JENT_WIN_THREADS */
+	/*
+	 * The wait is the join; the handle then has to be closed explicitly, as
+	 * a Win32 thread handle keeps the (already terminated) thread object
+	 * alive until its last reference goes away. Clearing it afterwards keeps
+	 * a second join from operating on a closed handle.
+	 */
+	WaitForSingleObject((HANDLE)ctx->notime_thread_id, INFINITE);
+	CloseHandle((HANDLE)ctx->notime_thread_id);
+	ctx->notime_thread_id = NULL;
 #endif
 	ctx->notime_thread_started = 0;
 }

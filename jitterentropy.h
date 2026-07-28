@@ -67,11 +67,6 @@
  * Compilation for OpenSSL    #define OPENSSL
  */
 
-/* used for sched_getaffinity and CPU_* macros */
-#ifdef __linux__
-	#define _GNU_SOURCE
-#endif
-
 #include <limits.h>
 #include <time.h>
 #include <stdint.h>
@@ -81,8 +76,31 @@
 #include <errno.h>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
-# include <windows.h>
-typedef int64_t ssize_t;
+/*
+ * Note there is deliberately no <windows.h> here, for the same reason as the
+ * Mach/Apple note below: this is the installed public header, so everything it
+ * includes becomes part of every consumer's translation unit - and <windows.h>
+ * brings in the whole Win32 API along with its min()/max() macros, which
+ * collide with ordinary C++ and C identifiers unless the consumer thinks to
+ * define NOMINMAX first. Nothing in the API declared below needs it. The
+ * places that do call Win32 (the sources under arch/) include it themselves,
+ * each after selecting the API level it requires.
+ *
+ * ssize_t is the signed counterpart of size_t and has to match its width:
+ * intptr_t is that type on Windows (the same choice the SDK makes for its own
+ * SSIZE_T alias of LONG_PTR). A hard-coded int64_t was 64 bits wide even in
+ * 32-bit builds, where it made jent_read_entropy() derive its clamp by
+ * shifting a 32-bit size_t by 63 - undefined behavior, diagnosed by MSVC as
+ * C4293 and silently reduced to a shift by 31.
+ *
+ * The guard leaves an existing definition alone: MinGW's <sys/types.h>
+ * provides ssize_t as long / long long, which is a different type to the
+ * compiler even where it is the same width, so redefining it is an error.
+ */
+# ifndef _SSIZE_T_DEFINED
+#  define _SSIZE_T_DEFINED
+typedef intptr_t ssize_t;
+# endif
 #else
 # include <sys/types.h>
 # include <sys/stat.h>
@@ -90,13 +108,17 @@ typedef int64_t ssize_t;
 # include <unistd.h>
 #endif
 
-#ifdef __MACH__
-# include <assert.h>
-# include <CoreServices/CoreServices.h>
-# include <mach/mach.h>
-# include <mach/mach_time.h>
-# include <unistd.h>
-#endif
+/*
+ * Note there is deliberately no Mach/Apple block here. This is the installed
+ * public header, so anything pulled in becomes part of every consumer's
+ * translation unit. The Mach headers this used to include are not needed by
+ * the API declared below, <unistd.h> is already covered above, and
+ * <CoreServices/CoreServices.h> in particular is a large umbrella framework
+ * that no part of the library references - and one that does not exist in the
+ * iOS/tvOS/watchOS SDKs, all of which define __MACH__. The few places that do
+ * need Mach interfaces (arch/jitterentropy-arch-thread.c,
+ * arch/jitterentropy-arch-timer.c) include exactly what they use themselves.
+ */
 
 #endif /* LINUX_KERNEL */
 
@@ -206,15 +228,94 @@ extern "C" {
 # define JENT_PRIVATE_STATIC
 #else /* JENT_PRIVATE_COMPILE */
 #if defined(_WIN32)
-#define JENT_PRIVATE_STATIC __declspec(dllexport)
+/*
+ * Windows has no visibility attribute; the linkage is chosen per translation
+ * unit instead. This header is installed and therefore also read by consumers,
+ * so it must not unconditionally say "dllexport": that is only correct while
+ * the DLL itself is being compiled. A consumer that saw dllexport declared the
+ * imported functions as if it were defining them, which makes MSVC fall back to
+ * a thunked auto-import and makes MinGW warn outright.
+ *
+ * The build system defines JENT_BUILDING_DLL for the library's own translation
+ * units (see CMakeLists.txt); consumers of a shared build get dllimport, and
+ * consumers of a static build define JENT_STATIC_LIB to get neither.
+ */
+# if defined(JENT_STATIC_LIB)
+#  define JENT_PRIVATE_STATIC
+# elif defined(JENT_BUILDING_DLL)
+#  define JENT_PRIVATE_STATIC __declspec(dllexport)
+# else
+#  define JENT_PRIVATE_STATIC __declspec(dllimport)
+# endif
 #else
 #define JENT_PRIVATE_STATIC __attribute__((visibility("default")))
 #endif
 #endif
 
-#if defined(__MINGW32__) || defined(__APPLE__) || defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__NetBSD__)
-#define JENT_PTHREAD
+/*
+ * Threading back-end for the internal timer.
+ */
+#if !defined(JENT_PTHREAD) && !defined(JENT_WIN_THREADS) && \
+    !defined(LINUX_KERNEL)
+# if defined(_MSC_VER) || defined(__MINGW32__)
+#  define JENT_WIN_THREADS
+# else
+#  define JENT_PTHREAD
+# endif
 #endif
+
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+#if defined(__KERNEL__) || defined(LINUX_KERNEL)
+	/*
+	 * Match both the kernel's own __KERNEL__ and the build-system macro
+	 * LINUX_KERNEL used by every other arch file, so a TU compiled with
+	 * only one of them cannot pair the kernel memory backend with the
+	 * hosted thread backend.
+	 */
+# define JENT_ARCH_THREAD_LINUX_KERNEL
+#elif defined(_KERNEL) && defined(__FreeBSD__)
+# define JENT_ARCH_THREAD_FREEBSD_KERNEL
+#elif defined(JENT_BAREMETAL) || \
+      (defined(__STDC_HOSTED__) && (__STDC_HOSTED__ == 0))
+# define JENT_ARCH_THREAD_BAREMETAL
+#else
+# define JENT_ARCH_THREAD_HOSTED
+#endif
+
+#if defined(JENT_ARCH_THREAD_HOSTED)
+
+#if defined(JENT_PTHREAD)
+# include <pthread.h>
+typedef void *(*jent_notime_start_routine)(void *);
+#elif defined(JENT_WIN_THREADS)
+typedef int (*jent_notime_start_routine)(void *);
+#else
+# error "no threading back-end selected: build with -DJENT_PTHREAD or -DJENT_WIN_THREADS"
+#endif
+
+struct jent_notime_ctx {
+#if defined(JENT_PTHREAD)
+	pthread_attr_t notime_pthread_attr;	/* pthreads library */
+	pthread_t notime_thread_id;		/* pthreads thread ID */
+#else /* JENT_WIN_THREADS */
+	void *notime_thread_id;			/* Win32 thread HANDLE */
+	jent_notime_start_routine notime_routine; /* what the thread runs */
+	void *notime_arg;			/* its argument */
+#endif
+	unsigned long notime_cpu;		/* CPU the thread pins to */
+	int notime_thread_started;		/* thread successfully created? */
+};
+
+#else /* freestanding: LINUX_KERNEL / FREEBSD_KERNEL / BAREMETAL */
+
+struct jent_notime_ctx {
+	unsigned long notime_cpu;		/* CPU the thread pins to */
+};
+
+typedef int (*jent_notime_start_routine)(void *);
+
+#endif /* JENT_ARCH_THREAD_HOSTED */
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 /* Forward declaration of opaque value */
 struct rand_data;
@@ -335,6 +436,12 @@ int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread);
  * When unset, the counting thread defaults to the highest-numbered online
  * CPU. Pinning itself is best-effort: an out-of-range index or a platform
  * without affinity support does not stop the internal timer from working.
+ *
+ * Not every platform can honour the CPU index. OpenBSD exposes no
+ * thread-to-CPU affinity API, and macOS only has affinity *tags*, which hint
+ * that threads should share an L2 cache rather than naming a CPU - on Apple
+ * Silicon even those are rejected by the kernel. On such systems the index is
+ * accepted and recorded but has no effect on placement.
  *
  * Returns 0 on success or a negative errno on failure.
  */

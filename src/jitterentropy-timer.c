@@ -60,6 +60,11 @@ int jent_notime_init(void **ctx)
 	 * thread is left unpinned, so on the >= 2 CPUs guaranteed above the
 	 * scheduler keeps the two on separate cores and the counter keeps
 	 * ticking while the consumer busy-waits.
+	 *
+	 * Pinning is advisory: jent_thread_pin_to_cpu() reports -ENOTSUP on
+	 * platforms without an affinity API (OpenBSD, and macOS on Apple
+	 * Silicon). There the two threads are merely left to the scheduler,
+	 * which the >= 2 CPU requirement above still makes workable.
 	 */
 	if (jent_notime_cpu_configured)
 		thread_ctx->notime_cpu = jent_notime_cpu;
