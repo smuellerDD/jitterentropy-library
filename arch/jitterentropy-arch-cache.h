@@ -47,14 +47,19 @@
  * or 0 when the platform offers no way to discover it. Defined in
  * arch/jitterentropy-arch-cache.c.
  *
+ * Every backend there implements the same hook - report the L1 data, L2 and L3
+ * cache size, 0 for a level it cannot discover - and the common code does the
+ * discovery once and answers from a cache afterwards.
+ *
  * Dispatch:
- *   - Linux            -> sysconf(_SC_LEVEL{1,2,3}_*) with /sys/devices fallback
+ *   - Linux            -> /sys/devices/system/cpu walk with sysconf(_SC_LEVEL{1,2,3}_*) fallback
  *   - macOS            -> sysctlbyname("hw.l{1d,2,3}cachesize")
  *   - Windows / Cygwin -> GetLogicalProcessorInformation
- *   - {Open,Free,Net}BSD x86 -> CPUID leaf 4 (deterministic cache parameters)
+ *   - {Open,Free,Net}BSD x86 -> CPUID deterministic cache parameters
+ *                               (leaf 4, or 0x8000001D on AMD / Hygon)
  *   - {Open,Free,Net}BSD aarch64 / riscv -> zero stub (no EL0-readable source)
  *   - AIX              -> _system_configuration (dcache_size / L2_cache_size)
- *   - Linux Kernel x86 -> CPUID leaf 4
+ *   - Linux Kernel x86 -> CPUID leaf 4 / 0x8000001D, on every online CPU
  *   - Linux Kernel arm64 -> CLIDR_EL1 / CCSIDR_EL1 cache ID registers
  *   - other            -> return 0
  */
