@@ -1,0 +1,1536 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Every job scripts in bash, including the Windows ones, so that the build and
+# run steps stay identical across the matrix rather than being rewritten in
+# PowerShell. Git for Windows provides bash on the Windows runners.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ubuntu-24.04-arm rather than a hypothetical "ubuntu-latest-arm": GitHub
+  # publishes no -arm alias for ubuntu-latest, only version-pinned arm labels.
+  #
+  # The arm64 entry is not a duplicate of the x86 one. It is the only job that
+  # compiles the aarch64 cntvct_el0 timer read against Linux, and the only
+  # aarch64 target anywhere in this workflow that pairs it with glibc and with
+  # the sysfs cache-size discovery in arch/jitterentropy-arch-cache.c. macOS on
+  # Apple Silicon reaches the same timer instruction but through an entirely
+  # different libc and a sysctl cache backend, so neither stands in for the
+  # other.
+  linux:
+    name: Linux / ${{ matrix.os }} / ${{ matrix.cc }} / shared=${{ matrix.shared }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        cc: [ gcc, clang ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      # The memory lock limits are printed before the runs below: the raise the
+      # recording tools do can only take the soft limit up to the hard one, so
+      # on a runner whose hard RLIMIT_MEMLOCK is smaller than the collector
+      # needs this line is what says why the compliance modes could not lock
+      # their memory.
+      - name: Run tests
+        run: |
+          echo "RLIMIT_MEMLOCK soft=$(ulimit -Sl) hard=$(ulimit -Hl)"
+          ./build/tests/gcd/gcd
+          export LD_LIBRARY_PATH="$PWD/build:$LD_LIBRARY_PATH"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  # 32-bit exercises code paths no other job reaches: the JENT_MAX_AUTO_MEMSIZE
+  # cap on the cache-derived working set, and the narrower size_t/long the cache
+  # and memory backends compute with.
+  linux-32bit:
+    name: Linux / gcc -m32
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 32-bit toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_FLAGS=-m32 \
+            -DCMAKE_EXE_LINKER_FLAGS=-m32 \
+            -DCMAKE_SHARED_LINKER_FLAGS=-m32
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run tests
+        run: |
+          file build/tests/gcd/gcd | grep -q '32-bit' || { echo "not a 32-bit build"; exit 1; }
+          ./build/tests/gcd/gcd
+          for opt in "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  # Every other Linux job here links against glibc, but the library leans on a
+  # good deal of what the two libcs disagree about: the
+  # pthread_setaffinity_np()/CPU_SET pinning in arch/jitterentropy-arch-sched.c,
+  # the mlock/getrlimit handling in arch/jitterentropy-arch-memory.c, and
+  # clock_gettime(), which musl keeps in libc where glibc split it into librt.
+  # musl is also stricter about which header declares what, so an include glibc
+  # happens to supply transitively breaks here first.
+  #
+  # Distro musl and Nix musl are not the same test. This job is Debian's
+  # musl-gcc wrapper over the stock gcc against musl 1.2.x headers, which is how
+  # Alpine and the container world build the library; the nix-musl job below is
+  # a different musl, a different gcc and a full pkgsMusl dependency tree. The
+  # cheap one runs here, on a plain runner, where the failure is easy to read.
+  #
+  # Both linkages are built. Static is not a variation for its own sake: it is
+  # the configuration musl is usually chosen for, and it is where the library's
+  # use of pthreads and clock_gettime() has to hold up with no dynamic loader
+  # underneath - the case glibc warns about for NSS and that nothing else here
+  # covers.
+  linux-musl:
+    name: Linux / musl-gcc / ${{ matrix.link }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        link: [ dynamic, static ]
+        include:
+          - link: dynamic
+            flags: ''
+            # What `file` must report for this linkage, checked below.
+            expect: ld-musl
+          - link: static
+            flags: '-static'
+            expect: statically linked
+    steps:
+      - uses: actions/checkout@v4
+
+      # binutils for `strings`, which the libc check below reads the binary
+      # with.
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools binutils
+
+      # musl-gcc is a wrapper script, not a compiler binary, so the compiler ABI
+      # check CMake runs at configure time is what proves it is usable at all.
+      #
+      # The -idirafter pair is what makes the whole tree build rather than just
+      # the library. musl-gcc's specs replace the system include path with
+      # musl's own, which carries no Linux UAPI headers, so the two tools that
+      # speak to the kernel module - jitterentropy-chardev-status and
+      # getrawentropy, both reaching <linux/ioctl.h> through
+      # linux_kernel/jitterentropy_uapi.h - fail to compile. CMakeLists.txt
+      # gates those two on Linux with no way to opt out, which musl on Linux
+      # still is. Searched *after* musl's own directories, so musl keeps
+      # precedence for everything it defines and only linux/* and asm/*, which
+      # it does not ship, resolve out of Debian's linux-libc-dev.
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=musl-gcc \
+            -DCMAKE_C_FLAGS="${{ matrix.flags }} -idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}"
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run tests
+        run: |
+          bin=build/tests/gcd/gcd
+          file "$bin"
+
+          # Confirm this really is musl before trusting anything the tests say:
+          # a wrapper that silently fell back to the host compiler would produce
+          # a glibc binary and the job would pass as a duplicate of the plain
+          # Linux one. glibc stamps GLIBC_* symbol versions into everything it
+          # links, static builds included, and musl stamps nothing - so the
+          # absence of them is the one check that holds for both linkages. A
+          # static musl binary carries no positive marker to test instead; it is
+          # an ordinary SysV ELF with no libc name anywhere in it.
+          if strings "$bin" | grep -q GLIBC; then
+            echo "::error::GLIBC symbol versions present, this is not musl"
+            exit 1
+          fi
+
+          # And that the linkage is the one this matrix entry asked for; -static
+          # silently ignored would otherwise duplicate the dynamic entry. For
+          # the dynamic entry this doubles as the positive musl test, the
+          # interpreter being ld-musl rather than ld-linux.
+          file "$bin" | grep -q "${{ matrix.expect }}" || {
+            echo "::error::expected a ${{ matrix.link }} binary (${{ matrix.expect }})"
+            exit 1
+          }
+
+          ./build/tests/gcd/gcd
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  # The distributions the hosted runners are not: every enterprise Linux
+  # generation still under support - RHEL 7 through 10, SLES 15 SP7 and 16.1 -
+  # and, at the other end, Arch. Between them they span eighteen years of
+  # toolchain, gcc 4.8.5 / glibc 2.17 through gcc 16 / glibc 2.44, and they are
+  # here to hold *both* bounds. The Ubuntu jobs above sit in the middle and say
+  # only that the library builds against something current; the long-lived
+  # appliance and HSM firmware it tends to end up inside is built against
+  # something considerably older, and the compiler that will reject it next is
+  # newer.
+  #
+  # The entries are not interchangeable, and the interesting one is RHEL 7. It is
+  # the only environment anywhere in this workflow where glibc's own version
+  # floors are visible at all - every other Linux job runs a glibc new enough
+  # that the following two are invisible, and each was a hard compile failure
+  # until this job existed:
+  #
+  #   - <sys/random.h> and the getrandom() wrapper are glibc 2.25, and the UUID
+  #     backend included the header unconditionally on Linux
+  #     (arch/jitterentropy-arch-uuid.c). Below that it takes the /dev/urandom
+  #     path it already falls back to at runtime - which is the right answer here
+  #     anyway, the getrandom() syscall being Linux 3.17 and RHEL 7's kernel
+  #     3.10.
+  #   - MAP_ANONYMOUS is __USE_MISC-guarded, so the Makefile's strict -std=c11
+  #     hides it. Current glibc defines it unconditionally regardless, which is
+  #     why arch/jitterentropy-arch-memory.c got away with setting no
+  #     feature-test macro; on 2.17 neither spelling exists.
+  #
+  # Arch is the mirror image of RHEL 7 and the reason this job is not only about
+  # old toolchains. It is a rolling release carrying gcc and glibc within days of
+  # upstream, which makes it the earliest warning available that a new compiler
+  # has started rejecting something: today it builds this library with gcc 16 and
+  # glibc 2.44, a full compiler generation ahead of the newest enterprise entry
+  # and two ahead of the Ubuntu runners. It is also the only job whose CMake is
+  # 4.x, which is what keeps CMakeLists.txt's 3.20 floor honest - CMake 4 dropped
+  # compatibility with anything below 3.5 and will keep raising that.
+  #
+  # The rest are compiler coverage. Between them the entries compile the library
+  # with gcc 4.8.5, 7.5, 8.5, 11.5, 14, 15 and 16 - seven diagnostic generations,
+  # where the two Ubuntu jobs supply one. gcc 14 is the first to reject implicit
+  # declarations outright rather than warn, and SLES 15 is the only thing here on
+  # gcc 7: an enterprise distribution can hold a compiler generation for a
+  # decade, and the gap between RHEL 7's 4.8 and RHEL 8's 8.5 is otherwise not
+  # covered by anything.
+  #
+  # None of these has a hosted runner, and unlike the BSDs none needs a VM - a
+  # container is the same libc and the same compiler. It is started with docker
+  # run from the job rather than through the workflow's "container:" key because
+  # actions/checkout is a Node 20 action and Node 20 requires glibc 2.28: it
+  # cannot execute inside the RHEL 7 image at all. So the checkout happens on the
+  # runner and the tree is mounted in, uniformly for every entry rather than only
+  # where it is forced.
+  #
+  # Each distribution's own image is used rather than a rebuild: Red Hat's UBI,
+  # SUSE's BCI and Arch's own are all published by the project itself, and the
+  # first two carry a repository subset that serves the handful of packages
+  # installed here without a subscription. centos:7 would instead need every
+  # build to first rewrite its yum configuration to point at vault.centos.org,
+  # the mirrors having been retired.
+  linux-distro:
+    name: ${{ matrix.name }} / cmake + make
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # RHEL 7.9 is pinned because it is the last RHEL 7 minor release: a
+          # fixed target rather than a moving "latest". The other UBI entries
+          # are still receiving minor releases and deliberately track them - a
+          # new compiler landing in RHEL 9 is a thing this job should notice,
+          # not something to pin away.
+          - name: RHEL 7
+            image: registry.access.redhat.com/ubi7/ubi:7.9
+            # RHEL 7 has no CMake meeting the project's floor: its own is
+            # 2.8.12 and is not even in the UBI repository subset, and EPEL 7's
+            # cmake3 stopped at 3.17.5, below the 3.20 CMakeLists.txt requires.
+            # Kitware's Linux x86_64 binaries are still built against glibc
+            # 2.17, and installing one is what a RHEL 7 user building a current
+            # CMake project actually does. Every other entry ships one that is
+            # new enough (3.26 to 3.31) and uses it.
+            cmake: kitware
+          - name: RHEL 8
+            image: registry.access.redhat.com/ubi8/ubi:latest
+            cmake: distro
+          - name: RHEL 9
+            image: registry.access.redhat.com/ubi9/ubi:latest
+            cmake: distro
+          - name: RHEL 10
+            image: registry.access.redhat.com/ubi10/ubi:latest
+            cmake: distro
+          # BCI publishes no floating major tag - there is no bci-base:15 or
+          # :16, only <major>.<minor> and a "latest" that currently means the
+          # newest SLE 15 service pack - so unlike UBI these have to be named
+          # exactly and bumped by hand when a service pack lands. One per
+          # generation is enough: 15 SP6 and SP7 carry an identical toolchain,
+          # as do 16.0 and 16.1.
+          - name: SLES 15 SP7
+            image: registry.suse.com/bci/bci-base:15.7
+            cmake: distro
+          - name: SLES 16.1
+            image: registry.suse.com/bci/bci-base:16.1
+            cmake: distro
+          # Arch publishes the same image to Docker Hub and to quay.io. The
+          # latter is used because Docker Hub rate-limits anonymous pulls per
+          # source IP, and a GitHub runner shares its IP with every other job on
+          # the same host - a limit this workflow has no way to raise and would
+          # hit at random.
+          - name: Arch Linux
+            image: quay.io/archlinux/archlinux:latest
+            cmake: distro
+    env:
+      # Only used by the kitware entry. Any version whose Linux x86_64 binary
+      # still runs on glibc 2.17 - Kitware has kept that baseline, and the day it
+      # moves, the RHEL 7 leg is where it shows.
+      CMAKE_VERSION: 3.31.9
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a ${{ matrix.name }} container
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e CMAKE_SOURCE="${{ matrix.cmake }}" \
+            -e CMAKE_VERSION="$CMAKE_VERSION" \
+            "${{ matrix.image }}" \
+            bash -euxo pipefail -c '
+              # RHEL 7 predates dnf and has only yum; RHEL 8 and later keep yum
+              # as a symlink onto dnf; SLES uses zypper and Arch pacman. Probing
+              # in this order picks each distribution native tool rather than a
+              # compatibility shim.
+              #
+              # pacman needs -Sy to fetch the package databases first: the image
+              # ships with none, and the Arch mirrors carry only the current
+              # version of each package, so a database older than the image is
+              # already stale. --needed skips anything the image happens to
+              # carry rather than reinstalling it.
+              if command -v dnf > /dev/null; then
+                install="dnf -y install"
+              elif command -v zypper > /dev/null; then
+                install="zypper --non-interactive install"
+              elif command -v pacman > /dev/null; then
+                install="pacman -Sy --noconfirm --needed"
+              else
+                install="yum -y install"
+              fi
+              $install gcc make
+
+              if [ "$CMAKE_SOURCE" = distro ]; then
+                $install cmake
+              else
+                # tar is not in the RHEL 7 base image and the tarball needs it.
+                $install tar
+                url=https://github.com/Kitware/CMake/releases/download
+                curl -fsSL \
+                  "$url/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-linux-x86_64.tar.gz" \
+                  -o /tmp/cmake.tar.gz
+                mkdir -p /opt/cmake
+                tar -xzf /tmp/cmake.tar.gz -C /opt/cmake --strip-components=1
+                export PATH=/opt/cmake/bin:$PATH
+              fi
+
+              # GNU make is plain make here, not gmake as on the BSD guests the
+              # script is otherwise driven from.
+              MAKE=make sh .github/scripts/vm-build-and-test.sh
+            '
+
+  # The out-of-tree kernel module is a third build system (Kbuild) compiling the
+  # same core against a completely different environment: no libc, LINUX_KERNEL
+  # defined, and its own backends for memory, cache discovery and the timer.
+  # Nothing else in this workflow compiles that configuration.
+  #
+  # The module is only built, never loaded - the runner kernel is not the one
+  # the headers describe, and loading is not what tends to break. The interface
+  # options are each exercised because they are what the #ifdefs key on.
+  # Built on both architectures. The arm64 half is the only place anything
+  # compiles the CONFIG_ARM64 branch of arch/jitterentropy-arch-cache.c - the
+  # CLIDR/CCSIDR cache-ID register reads behind read_sysreg(), and the isb()
+  # from <asm/barrier.h>. The nix kernel matrix is x86_64 throughout and the
+  # userspace arm64 job takes the sysfs backend instead, so without this that
+  # code is compiled by nothing in the project.
+  linux-kmod:
+    name: Linux / kernel module / ${{ matrix.os }} / ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        # A real dimension so that it multiplies with os; the include entries
+        # below match on it to attach each config's flags to both
+        # architectures, rather than adding standalone combinations.
+        config: [ default, test-interface, minimal ]
+        include:
+          # Kbuild.config as shipped: crypto API, chardev and hwrng on.
+          - config: default
+            flags: ''
+          # Adds the raw-entropy test interface, which pulls in
+          # jitterentropy_testing.c.
+          - config: test-interface
+            flags: CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y
+          # Every optional interface off, so the module core has to stand alone.
+          - config: minimal
+            flags: >-
+              CONFIG_EXTERNAL_JITTERENTROPY_KCAPI=n
+              CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV=n
+              CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=n
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kernel headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-headers-generic
+
+      - name: Build
+        run: |
+          # The prepared headers tree is used directly rather than
+          # /lib/modules/$(uname -r)/build: the runner's kernel is an Azure
+          # build whose headers package is not installable, and an out-of-tree
+          # module only needs a configured tree to compile against.
+          KDIR=$(ls -d /usr/src/linux-headers-*-generic | sort -V | tail -n 1)
+          echo "Building against $KDIR"
+          make -C "$KDIR" M="$PWD/linux_kernel" ${{ matrix.flags }} \
+            modules -j "$(nproc)"
+
+      - name: Show the result
+        run: |
+          ls -l linux_kernel/jitter_rng.ko
+          modinfo linux_kernel/jitter_rng.ko
+
+  # The linux-kmod job above varies the interface options but builds against a
+  # single kernel - whichever linux-headers-generic Ubuntu currently ships. The
+  # module's other axis of breakage is the kernel API itself, which moves under
+  # it continuously: an exported symbol that changes signature, a header that
+  # splits, a helper that becomes a macro.
+  #
+  # flake.nix already describes that axis. kernelSetsFor enumerates every
+  # numbered kernel package set nixpkgs exposes plus linux_testing, and
+  # modulesFor builds jitter_rng.ko against each, so the set tracks nixpkgs
+  # rather than a list here that would silently go stale. The attribute names
+  # are read back out of the flake and turned into one job per kernel: they
+  # build independently, a kernel that fails names itself, and no single job
+  # has to sit through every kernel in sequence.
+  #
+  # vmTestsFor derives a NixOS VM test from the same kernelSetsFor list, so
+  # every module attribute has a check attribute next to it - vm-linux_6_6
+  # beside jitterentropy-module-linux_6_6, vm beside jitterentropy-module. The
+  # two names are paired here so that the build job can boot the VM for the
+  # kernel it has just built for, which is what turns "the module compiles"
+  # into "the module loads, registers its interfaces and produces entropy".
+  #
+  # The same evaluation also yields the cross-compilation smoke builds, so the
+  # matrix for those is read out of the flake here rather than restated in this
+  # file. crossTargets is a hand-written list - unlike the kernel sets it does
+  # not track nixpkgs - but deriving the matrix from it still keeps a target
+  # added to the flake from being silently left unbuilt by CI.
+  nix-list:
+    name: Nix / enumerate outputs
+    runs-on: ubuntu-latest
+    outputs:
+      pairs: ${{ steps.list.outputs.pairs }}
+      cross: ${{ steps.cross.outputs.attrs }}
+      consumers: ${{ steps.consumers.outputs.attrs }}
+      crypto: ${{ steps.crypto.outputs.attrs }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # attrNames forces only the attribute set's spine, not the derivations
+      # behind it, so this stays an evaluation rather than an instantiation of
+      # every ISO and cross target that packages.x86_64-linux also carries.
+      #
+      # jitterentropy-module-i686 is excluded by name: it builds against
+      # pkgsi686Linux.linuxPackages_latest.kernel, and nixpkgs publishes no
+      # binary cache for a 32-bit x86 kernel, so the job would compile a whole
+      # kernel from source before it got to the module. The 32-bit code paths
+      # it covers are reached more cheaply elsewhere in this workflow - the
+      # linux-32bit job for userspace, and the cross-i686 entry of the nix-cross
+      # matrix - and it stays available for anyone building the flake locally.
+      - name: List the kernel module outputs and their VM tests
+        id: list
+        run: |
+          modules=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "jitterentropy-module.*" n != null
+                       && n != "jitterentropy-module-i686")
+                   (builtins.attrNames ps)')
+          vms=$(nix eval --json .#checks.x86_64-linux --apply \
+            'cs: builtins.attrNames cs')
+
+          # jitterentropy-module -> vm, jitterentropy-module-<k> -> vm-<k>,
+          # keeping only the pairs the flake actually exposes as a check.
+          pairs=$(jq -cn --argjson modules "$modules" --argjson vms "$vms" '
+            $modules
+            | map({ attr: ., vm: sub("^jitterentropy-module"; "vm") })
+            | map(select([.vm] | inside($vms)))')
+
+          # Both sets come out of kernelSetsFor, so a module without a check
+          # means the two have been allowed to drift apart in flake.nix. Say
+          # which one rather than quietly building it without booting it.
+          missing=$(jq -rn --argjson modules "$modules" --argjson pairs "$pairs" \
+            '($modules - ($pairs | map(.attr))) | join(" ")')
+          if [ -n "$missing" ]; then
+            echo "::error::no VM test in .#checks.x86_64-linux for: $missing"
+            exit 1
+          fi
+
+          jq -r '.[] | "\(.attr) -> \(.vm)"' <<<"$pairs"
+          echo "pairs=$pairs" >> "$GITHUB_OUTPUT"
+
+      - name: List the cross-compilation outputs
+        id: cross
+        run: |
+          cross=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "cross-.*" n != null)
+                   (builtins.attrNames ps)')
+
+          # An empty matrix is not an error to GitHub - it skips the job - so
+          # the case where the filter stops matching would otherwise look like
+          # a green run with no cross builds in it.
+          if [ "$(jq 'length' <<<"$cross")" -eq 0 ]; then
+            echo "::error::no cross-* outputs in .#packages.x86_64-linux"
+            exit 1
+          fi
+
+          jq -r '.[]' <<<"$cross"
+          echo "attrs=$cross" >> "$GITHUB_OUTPUT"
+
+      # Same treatment for the downstream consumer builds, and for the same
+      # reason: consumersFor is hand-written, so reading the matrix out of the
+      # flake keeps a consumer added there from going unbuilt here.
+      - name: List the downstream consumer outputs
+        id: consumers
+        run: |
+          consumers=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "consumer-.*" n != null)
+                   (builtins.attrNames ps)')
+
+          if [ "$(jq 'length' <<<"$consumers")" -eq 0 ]; then
+            echo "::error::no consumer-* outputs in .#packages.x86_64-linux"
+            exit 1
+          fi
+
+          jq -r '.[]' <<<"$consumers"
+          echo "attrs=$consumers" >> "$GITHUB_OUTPUT"
+
+      # And for the external crypto backends, so that a backend added to
+      # cryptoFor is built here without the workflow having to be edited too.
+      - name: List the external crypto backend outputs
+        id: crypto
+        run: |
+          crypto=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "crypto-.*" n != null)
+                   (builtins.attrNames ps)')
+
+          if [ "$(jq 'length' <<<"$crypto")" -eq 0 ]; then
+            echo "::error::no crypto-* outputs in .#packages.x86_64-linux"
+            exit 1
+          fi
+
+          jq -r '.[]' <<<"$crypto"
+          echo "attrs=$crypto" >> "$GITHUB_OUTPUT"
+
+  nix-kmod:
+    name: Nix / ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    # A kernel whose dev output is not in the binary cache has to be built from
+    # source, which is far longer than this job is worth; bound it rather than
+    # letting it run to the six-hour default. The VM test that follows the
+    # build reuses that same kernel, so it does not widen the worst case by
+    # anything like a second kernel build.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      # One entry per {attr, vm} pair from the enumerate job: the module
+      # attribute to build and the NixOS VM test to boot for that same kernel.
+      matrix:
+        include: ${{ fromJSON(needs.nix-list.outputs.pairs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            # runNixOSTest marks its derivation as needing the kvm and
+            # nixos-test system features. Nix only advertises kvm when
+            # /dev/kvm was present as the daemon started, so state both
+            # explicitly rather than depending on the runner image.
+            system-features = nixos-test benchmark big-parallel kvm
+
+      - name: Build
+        run: nix build --no-link --print-build-logs ".#${{ matrix.attr }}"
+
+      - name: Show the result
+        run: |
+          ko=$(find "$(nix path-info ".#${{ matrix.attr }}")" -name '*.ko')
+          ls -l "$ko"
+          nix shell nixpkgs#kmod -c modinfo "$ko"
+
+      # GitHub's Ubuntu runners carry /dev/kvm but leave it accessible only to
+      # root, and the build runs as an unprivileged nix daemon user. QEMU would
+      # fall back to TCG emulation (accel=kvm:tcg), which boots the guest but
+      # takes many times longer - long enough to matter across this matrix.
+      - name: Enable KVM for the unprivileged builder
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Boots a NixOS guest on this kernel with jitter_rng loaded and runs the
+      # assertions in flake.nix: the character device, the kernel crypto API
+      # instance, the hwrng registration, the debugfs raw entropy interface,
+      # the JENT_IOC* ioctls and the O_NONBLOCK behaviour. The guest module is
+      # the same source built with withTestInterface = true, so this recompiles
+      # jitter_rng.ko but not the kernel the build step already fetched.
+      - name: Boot the VM integration test
+        run: |
+          nix build --no-link --print-build-logs \
+            ".#checks.x86_64-linux.${{ matrix.vm }}"
+
+  # Every job above runs on an architecture GitHub hosts a runner for: x86-64
+  # and aarch64, Linux, macOS and Windows. Everything else the library claims to
+  # support - s390x, POWER, RISC-V, LoongArch, 32-bit ARM, 32-bit Windows - is
+  # reached by nothing, and those are exactly the targets whose jent_get_nstime()
+  # and cache backends are selected by preprocessor conditions, so a break there
+  # is invisible until someone builds for the platform.
+  #
+  # crossTargets in flake.nix compiles and links the library and its tools for
+  # each of them; this builds every one, one job per target so that a target
+  # that fails names itself. They are not run - the point is the compile and the
+  # link, which is where this class of breakage shows up (a missing declaration,
+  # an unavailable header, an unlinked import library, inline asm that does not
+  # assemble).
+  nix-cross:
+    name: Nix / ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    # The toolchains come out of the binary cache; a target whose cache entry
+    # has gone would build a cross GCC from source instead, which is far longer
+    # than a smoke build is worth.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        attr: ${{ fromJSON(needs.nix-list.outputs.cross) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # --print-out-paths so the step below inspects what this build produced
+      # rather than re-evaluating the flake to ask where it would have gone.
+      # --print-build-logs writes to stderr, leaving the path alone on stdout.
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#${{ matrix.attr }}")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      # A cross build that quietly produced host binaries would still succeed,
+      # so name the machine of everything it installed rather than trusting the
+      # exit status. The tools land in bin/ and the library in lib/, whatever
+      # the target's extensions are.
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          find "$OUT" -type f \( -path '*/bin/*' -o -name '*.a' -o -name '*.so*' \
+            -o -name '*.dll' \) -print0 |
+            xargs -0 --no-run-if-empty nix shell nixpkgs#file -c file
+
+  # Every other job here builds this repository and runs this repository's own
+  # tools, which cannot see the ways an installed library breaks the programs
+  # that link it: a declaration dropped from the installed header, a symbol that
+  # stops being exported, a link dependency that never reaches the .pc file.
+  # Those show up in the consumer's build, not in ours.
+  #
+  # consumersFor in flake.nix builds the two consumers that matter - rng-tools,
+  # whose rngd feeds the kernel from a jitter entropy source, and ESDM, whose
+  # es_jent entropy source is this library - as nixpkgs packages them, with only
+  # their jitterentropy input swapped for this working tree. Each is built
+  # twice, with the internal timer on and off, because that option changes which
+  # symbols the library exports and rng-tools configures against the ones it
+  # finds (see the comment on consumersFor).
+  #
+  # This is a compile-and-link check: the flake turns both consumers' check
+  # phases off, and nothing built here is executed. Whether the library produces
+  # entropy is what the tool runs and the VM tests in the other jobs answer.
+  nix-consumers:
+    name: Nix / ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    # Both consumers pull a sizeable dependency tree (openssl, opensc and
+    # rtl-sdr for rng-tools, botan and protobuf-c for ESDM); bound the job in
+    # case one of them misses the binary cache rather than letting it run to the
+    # six-hour default.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        attr: ${{ fromJSON(needs.nix-list.outputs.consumers) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#${{ matrix.attr }}")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      # The library is built as a static archive, so a consumer that links it
+      # keeps no store reference to it and a successful build on its own does
+      # not say the swap took effect - a consumer configured without jitter
+      # entropy support would link just as cleanly. The symbol table of what it
+      # installed is what shows the archive was linked in, and reading it runs
+      # nothing.
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          # Dispatched on the attribute rather than on which files exist, so
+          # that a consumer added to the flake arrives here as an error instead
+          # of quietly taking another consumer's check and failing on a missing
+          # file.
+          case "${{ matrix.attr }}" in
+          consumer-rng-tools*) file=bin/rngd; nmflags="" ;;
+          consumer-esdm*) file=lib/libesdm.so; nmflags="-D" ;;
+          *)
+            echo "::error::no result check defined for ${{ matrix.attr }}"
+            exit 1
+            ;;
+          esac
+
+          # rngd links the archive into the executable, ESDM into libesdm.so;
+          # the shared library exports only its dynamic symbols, hence -D there.
+          syms=$(nix shell nixpkgs#binutils -c \
+            nm $nmflags --defined-only "$OUT/$file")
+          grep -E ' [TtWw] jent_' <<<"$syms" | head -20
+          grep -qE ' [TtWw] jent_entropy_init$' <<<"$syms" || {
+            echo "::error::no jitterentropy symbols in $file"
+            exit 1
+          }
+
+  # The external crypto backends: EXTERNAL_CRYPTO=OPENSSL, AWSLC and LIBGCRYPT.
+  # Every other job in this workflow builds the library with its own secure
+  # memory allocator and its own FIPS-mode query, so the branches these select -
+  # the libgcrypt secmem pool, OpenSSL's secure heap and AWS-LC's
+  # wiped-but-unlocked OPENSSL_malloc() in arch/jitterentropy-arch-memory.c, and
+  # each library's own FIPS-mode query in arch/jitterentropy-arch-fips.c - are
+  # compiled by nothing at all otherwise. They are also what the AMALGAMATED
+  # test program in tests/raw-entropy/recording_userspace/CMakeLists.txt had to
+  # be taught about: it absorbs those sources and links neither the library nor
+  # its dependencies.
+  #
+  # Nix rather than apt: AWS-LC is not packaged by Ubuntu, and pinning all three
+  # through the flake keeps the versions the same from run to run.
+  #
+  # The two pool-based backends allocate the collector out of an arena that is
+  # created once per process and can then not be resized. The library does not
+  # size it - the recording tools do, from the memory size the collector is
+  # asked for, in
+  # tests/raw-entropy/recording_userspace/jitterentropy-memlock.h - which is
+  # what lets a run here ask for a block larger than the 2 MiB the library used
+  # to reserve for itself, as --all-caches and the NTG.1 startup growth do.
+  nix-crypto:
+    name: Nix / ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    # openssl, aws-lc and libgcrypt all come out of the binary cache; bound the
+    # job in case one of them misses it rather than letting it run to the
+    # six-hour default.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        attr: ${{ fromJSON(needs.nix-list.outputs.crypto) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#${{ matrix.attr }}")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      # A build in which EXTERNAL_CRYPTO quietly did not take effect would look
+      # exactly like a successful one - the library falls back to its own
+      # implementations for everything - so the linkage is what says the backend
+      # is actually in use.
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          case "${{ matrix.attr }}" in
+          crypto-openssl|crypto-awslc) needed=libcrypto ;;
+          crypto-libgcrypt)            needed=libgcrypt ;;
+          *)
+            echo "::error::no result check defined for ${{ matrix.attr }}"
+            exit 1
+            ;;
+          esac
+
+          # The amalgamated tool is the one that carries the dependency
+          # directly; the others reach it through libjitterentropy.so.
+          for bin in bin/jitterentropy-hashtime lib/libjitterentropy.so; do
+            echo "==> $bin"
+            nix shell nixpkgs#binutils -c readelf -d "$OUT/$bin" |
+              grep NEEDED
+          done
+
+          nix shell nixpkgs#binutils -c readelf -d \
+            "$OUT/bin/jitterentropy-hashtime" |
+            grep -q "NEEDED.*$needed" || {
+              echo "::error::$needed is not linked into jitterentropy-hashtime"
+              exit 1
+            }
+
+      - name: Run tests
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          "$OUT/bin/gcd"
+          for opt in "" "--force-internal-timer" "--all-caches"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null
+          done
+
+          # The compliance modes are run but not gated on, as everywhere else:
+          # they are the modes whose startup health tests may not converge on a
+          # given machine. Both demand secure memory, which on these backends
+          # means the collector has to come out of the arena the tool created -
+          # so a run that does converge also says the arena was sized for it.
+          for opt in "--force-fips" "--ntg1"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed"
+          done
+
+  # Address and undefined behaviour sanitizers (the ENABLE_SANITIZERS option of
+  # CMakeLists.txt). The library is compiled at -O0 and does its own memory
+  # management - mmap with PROT_NONE guard pages around the collector state,
+  # pointer arithmetic back to the mapping base on free, a memory access loop
+  # walking a masked offset into that region - which is exactly the class of
+  # code where an off-by-one is silently harmless in an ordinary build and
+  # caught here.
+  #
+  # Both compilers: their sanitizer runtimes do not diagnose the same set, and
+  # UBSan in particular differs between the two on what it instruments by
+  # default.
+  #
+  # halt_on_error makes UBSan fail the job rather than print a report and carry
+  # on with exit code 0 - without it a diagnosed error is only visible to
+  # someone reading the log of a green run.
+  sanitizers:
+    name: Linux / ${{ matrix.cc }} / sanitizers
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          bin=./build/tests/raw-entropy/recording_userspace
+
+          # The compliance modes are not gated on here either (see the Linux
+          # job), but a tolerated exit status must not swallow a sanitizer
+          # finding - which is the whole point of this job and would otherwise
+          # be indistinguishable from a health test that did not converge. The
+          # two are told apart by what the runtime writes to stderr; everything
+          # else the tools print there (the status JSON, the health test
+          # message) is kept in the log either way.
+          run_tolerated() {
+            log="$RUNNER_TEMP/sanitizer-run.log"
+
+            if "$@" > /dev/null 2> "$log"; then
+              return 0
+            fi
+
+            cat "$log"
+            if grep -qE 'Sanitizer|runtime error:' "$log"; then
+              echo "::error::sanitizer report from: $*"
+              exit 1
+            fi
+            echo "::warning::failed without a sanitizer finding: $*"
+          }
+
+          ./build/tests/gcd/gcd
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            "$bin/jitterentropy-rng" 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            run_tolerated "$bin/jitterentropy-rng" 256 $opt
+          done
+
+          # The recording tool as well, and not as a duplicate of the above: it
+          # is the AMALGAMATED build, which compiles the library sources into
+          # the program itself, and it is the only thing here that drives the
+          # raw noise collection (jent_measure_jitter and the memory access
+          # loop) directly rather than through jent_read_entropy().
+          run_tolerated "$bin/jitterentropy-hashtime" \
+            1000 2 "$RUNNER_TEMP/hashtime" --force-fips
+
+  # The Nix half of the musl coverage, and static only: .#musl-static is built
+  # through pkgsStatic, so it is not just the library that is musl-linked and
+  # statically linked but every dependency under it, against a musl and a gcc
+  # pinned by the flake rather than whatever Ubuntu ships this month. A
+  # regression that needs a newer or older musl than Debian's shows up here and
+  # not in linux-musl.
+  #
+  # Dynamic musl is deliberately not built here. linux-musl already covers it,
+  # and repeating it through pkgsMusl would exercise the same code paths a
+  # second time; the fully static tree is the configuration that has no
+  # counterpart elsewhere in this workflow.
+  #
+  # pkgsStatic is a native package set, so unlike the cross targets these
+  # binaries run on the runner and the job executes them instead of only
+  # linking them.
+  nix-musl:
+    name: Nix / musl-static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            .#musl-static)
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          # file and strings come from the flake's nixpkgs rather than the
+          # runner image, so this reads the same either way.
+          nix shell nixpkgs#file nixpkgs#binutils -c sh -c '
+            set -e
+            file "$1"
+
+            # Same reasoning as linux-musl: glibc stamps GLIBC_* symbol
+            # versions into everything it links, static builds included, and
+            # musl stamps nothing, so their absence is what separates the two.
+            # A static musl binary carries no positive marker to test instead -
+            # it is an ordinary SysV ELF with no libc name anywhere in it.
+            if strings "$1" | grep -q GLIBC; then
+              echo "::error::GLIBC symbol versions present, this is not musl"
+              exit 1
+            fi
+
+            file "$1" | grep -q "statically linked" || {
+              echo "::error::expected a statically linked binary"; exit 1
+            }
+          ' sh "$OUT/bin/gcd"
+
+          "$OUT/bin/gcd"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  # Android is a fourth build system: ndk-build reading arch/android/Android.mk,
+  # against bionic rather than glibc, with the NDK's own clang. Nothing else
+  # here compiles that file, so a variable renamed in it or a source directory
+  # that stops being picked up by its wildcard would go unnoticed.
+  #
+  # Two ABIs are built (see androidFor in flake.nix): arm64-v8a for the
+  # cntvct_el0 timer read as bionic reaches it, and x86_64 for the emulator
+  # configuration. The NDK is unfree, which the flake accepts for this output
+  # alone - no runner-side nixpkgs config is needed.
+  nix-android:
+    name: Nix / android
+    runs-on: ubuntu-latest
+    # Dominated by the ~1 GiB NDK download, which is a fixed-output derivation
+    # fetched from Google rather than substituted from the binary cache.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths .#android)
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      # ndk-build treats an ABI it has nothing to do for as success rather than
+      # as an error, so both are named explicitly here: dropping one out of
+      # APP_ABI would otherwise leave a green job that built half of what it
+      # says it does.
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          find "$OUT/lib" -name '*.so' -print0 |
+            xargs -0 --no-run-if-empty nix shell nixpkgs#file -c file
+          for abi in arm64-v8a x86_64; do
+            test -f "$OUT/lib/$abi/libjitterentropy.so" || {
+              echo "::error::no libjitterentropy.so for ABI $abi"
+              exit 1
+            }
+          done
+
+  # The Makefile is a second, independent build system with its own flag and
+  # link-library selection (see its UNAME_S branches), so it needs its own
+  # coverage rather than being assumed equivalent to CMakeLists.txt.
+  makefile:
+    name: Makefile / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make -j 4
+
+      - name: Link and run against the built library
+        run: |
+          cat > smoke.c <<'EOF'
+          #include <stdio.h>
+          #include "jitterentropy.h"
+
+          static int collect(unsigned int flags, const char *what)
+          {
+                  char buf[64];
+                  struct rand_data *ec = jent_entropy_collector_alloc(0, flags);
+
+                  if (!ec) { printf("alloc failed (%s)\n", what); return 1; }
+                  if (jent_read_entropy(ec, buf, sizeof(buf)) != (ssize_t)sizeof(buf)) {
+                          printf("short read (%s)\n", what);
+                          jent_entropy_collector_free(ec);
+                          return 1;
+                  }
+                  jent_entropy_collector_free(ec);
+                  printf("ok (%s)\n", what);
+                  return 0;
+          }
+
+          int main(void) {
+                  int rc = jent_entropy_init();
+                  if (rc) { printf("jent_entropy_init: %d\n", rc); return 1; }
+                  if (collect(0, "default")) return 1;
+                  /*
+                   * Forced: where the counter read works, which is everywhere
+                   * this runs, the automatic selection never falls back to the
+                   * internal timer, so the thread back-end the Makefile links
+                   * -pthread for would never be started. This is the only thing
+                   * the Makefile build runs.
+                   */
+                  if (collect(JENT_FORCE_INTERNAL_TIMER, "internal timer")) return 1;
+                  return 0;
+          }
+          EOF
+          # librt only exists on Linux; macOS carries the POSIX clocks in libSystem.
+          case "${{ runner.os }}" in
+            Linux) LIBS="-pthread -lrt" ;;
+            *)     LIBS="-pthread" ;;
+          esac
+          cc -std=c11 -I. smoke.c libjitterentropy.a $LIBS -o smoke
+          ./smoke
+
+  # Both macOS architectures: they select different jent_get_nstime() back-ends
+  # (cntvct_el0 on Apple Silicon, rdtsc on Intel) and different cache sysctls
+  # (the hw.perflevel0.* names exist only on Apple Silicon).
+  macos:
+    name: macOS / ${{ matrix.os }} / shared=${{ matrix.shared }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, macos-15-intel ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      - name: Run tests
+        run: |
+          ./build/tests/gcd/gcd
+          export DYLD_LIBRARY_PATH="$PWD/build:$DYLD_LIBRARY_PATH"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  # These systems have no hosted GitHub runner, so they are exercised in a QEMU
+  # guest started by the vmactions actions on an Ubuntu runner. They are worth
+  # the boot cost because each one reaches code no other job compiles:
+  #
+  #   - FreeBSD: the cpuset_setaffinity() CPU pinning back-end, and the CMake
+  #     branch that deliberately does not link pthread (libthr comes in through
+  #     -pthread instead).
+  #   - NetBSD: the pthread_setaffinity_np()/cpuset_create() pinning back-end,
+  #     and the only non-Linux, non-Windows job here whose cc is GCC.
+  #   - OpenBSD: the no-affinity-API path, which has to report -ENOTSUP rather
+  #     than fail, plus a libc with no librt at all - the case the Makefile's
+  #     LIBRARIES branch and the jent_get_nstime() clock selection exist for.
+  #   - DragonFly: named in the Makefile's -z relro branch and in the arc4random
+  #     UUID backend, but reached by neither until now.
+  #   - Solaris: the only SunOS target, and the only one that is neither Linux,
+  #     Windows, Apple nor BSD. It is the sole job reaching the SunOS arm of the
+  #     Makefile - the one that still needs -lrt and must not be given -z relro
+  #     - and the only one compiling the CMAKE_SYSTEM_NAME STREQUAL "SunOS"
+  #     branch of CMakeLists.txt. Per the comment in
+  #     arch/jitterentropy-arch-memory.c it is also one of the platforms the
+  #     POSIX mlock backend was widened to cover on the strength of the option
+  #     macros alone, with nothing ever compiling it.
+  #
+  # The guests are shared between the CMake and Makefile builds by
+  # .github/scripts/vm-build-and-test.sh: one boot dominates the job, so both
+  # build systems and both link configurations run inside it rather than being
+  # spread over a matrix as they are on Linux and macOS.
+  #
+  # The release is left unpinned so the action's default (its most recently
+  # tested image) is used; pinning here only guarantees the job breaks once that
+  # image is retired. Solaris is the exception and says why at the job.
+  freebsd:
+    name: FreeBSD / cmake + make
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg install -y cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
+
+  openbsd:
+    name: OpenBSD / cmake + make
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in an OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg_add -I cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
+
+  netbsd:
+    name: NetBSD / cmake + make
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            /usr/sbin/pkg_add cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
+
+  dragonflybsd:
+    name: DragonFly BSD / cmake + make
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a DragonFly BSD VM
+        uses: vmactions/dragonflybsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg install -y cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
+
+  # Solaris is the SunOS half of the list above. Two things differ from the BSD
+  # jobs and both are deliberate.
+  #
+  # The release is pinned, against the rule stated above, because the stock
+  # 11.4 image carries no C compiler and the action publishes ready-made
+  # variants rather than leaving one to be installed: 11.4-gcc is 11.4 with the
+  # default gcc/g++ already in it. Installing a compiler through pkg(1) instead
+  # would cost a large download on every run to arrive at the same place.
+  #
+  # Packages come from Oracle's IPS repository rather than the OpenCSW pkgutil
+  # the action's own example uses. CMakeLists.txt asks for CMake 3.20 and the
+  # 11.4 IPS repository carries 3.2x, whereas OpenCSW targets Solaris 10 and
+  # makes no such promise. developer/build/gnu-make is what puts gmake on PATH,
+  # which the shared script needs because the Makefile is GNU make syntax and
+  # /usr/bin/make here is the SunOS one.
+  #
+  # CC is set rather than left to the script's cc/gcc/clang search: on Solaris
+  # /usr/bin/cc can be the Oracle Studio compiler, and while CMakeLists.txt has
+  # a SUNPRO branch, the Makefile is GCC-specific - it parses `cc -dumpversion`
+  # and passes GCC warning flags - so the Makefile half of the script would fail
+  # on a guest where cc resolved to Studio.
+  solaris:
+    name: Solaris / cmake + make
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a Solaris VM
+        uses: vmactions/solaris-vm@v1
+        with:
+          release: "11.4-gcc"
+          usesh: true
+          copyback: false
+          prepare: |
+            # pkg(1) exits 4 for "nothing to do", which is what an image that
+            # already carries one of these reports; only a real failure should
+            # stop the job, so 4 is accepted and everything else is not.
+            pkg install developer/build/cmake developer/build/gnu-make || [ $? -eq 4 ]
+          run: |
+            CC=gcc sh .github/scripts/vm-build-and-test.sh
+
+  # Haiku and Cygwin are the last two platforms arch/ names but nothing here
+  # compiles. Both appear by name in the same preprocessor conditions -
+  # jitterentropy-arch-sched.c, -ncpu.c and -uuid.c all test
+  # defined(__HAIKU__) || defined(__CYGWIN__) - so both were added to those
+  # branches on the strength of the documentation alone, exactly the situation
+  # the Solaris job was added for and immediately found a real break in.
+  #
+  # Each also builds the internal timer against a pthreads implementation of its
+  # own - Haiku's in libroot, Cygwin's in the Cygwin DLL - which is the only
+  # coverage the thread back-end gets outside glibc, musl, the BSDs and Apple.
+  #
+  # MAKE=make on both: the shared script defaults to gmake for the BSDs and
+  # Solaris, but Haiku and Cygwin ship GNU make under its plain name and have
+  # no gmake at all.
+  haiku:
+    name: Haiku / cmake + make
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a Haiku VM
+        uses: vmactions/haiku-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkgman install -y cmake make
+          run: |
+            MAKE=make sh .github/scripts/vm-build-and-test.sh
+
+  # Cygwin is the one entry here that is not a VM: it runs on the hosted Windows
+  # runner, so it needs no guest, but it is not a variation of the MSVC or MinGW
+  # jobs either. Those two are Windows targets; Cygwin is a POSIX target that
+  # happens to sit on Windows. CMake does not set WIN32 for it, so the whole
+  # ELF-ish branch of CMakeLists.txt applies - the -z now,-z relro hardening,
+  # -fPIC, the pthread selection - and arch/jitterentropy-arch-cache.c says in
+  # so many words that Cygwin is handled outside its Windows branch.
+  cygwin:
+    name: Cygwin / cmake + make
+    runs-on: windows-latest
+    steps:
+      # Before the checkout, so the shell scripts arrive with LF endings.
+      # Cygwin's sh reads a CRLF script as having a stray \r on every line and
+      # fails on the first one.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v4
+
+      - uses: cygwin/cygwin-install-action@v6
+        with:
+          # gcc-core rather than gcc: the C compiler alone, no C++ or the rest
+          # of the collection this build never invokes.
+          packages: |
+            cmake
+            gcc-core
+            make
+            binutils
+
+      # The workflow-level "shell: bash" default resolves to Cygwin's bash here
+      # rather than the runner's Git bash: the action prepends Cygwin's bin to
+      # PATH, and GitHub looks the interpreter up there. That is what makes the
+      # POSIX script below run against the Cygwin toolchain at all.
+      - name: Build and test
+        run: MAKE=make sh .github/scripts/vm-build-and-test.sh
+
+  # MSVC is the reference Windows toolchain. The shared configuration is built
+  # as well because it is the only one that exercises the dllexport/dllimport
+  # split in jitterentropy.h.
+  #
+  # windows-11-arm is not a duplicate of the x64 entry: it is the only target in
+  # this workflow that reaches the QueryPerformanceCounter timer back-end and
+  # the __yield() pause intrinsic, both of which exist solely for Windows on ARM.
+  #
+  # --force-internal-timer is what actually starts the Win32 thread back-end in
+  # arch/jitterentropy-arch-thread.c: the __stdcall trampoline,
+  # _beginthreadex() and the WaitForSingleObject()/CloseHandle() join, none of
+  # which any other job here runs. Forced rather than left to the automatic
+  # selection, which on a machine with a working counter never reaches it:
+  # jent_entropy_init() only falls back to the internal timer when the plain
+  # path fails, so without the flag these jobs would compile that back-end and
+  # never run it.
+  windows-msvc:
+    name: Windows / MSVC / ${{ matrix.os }} / shared=${{ matrix.shared }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, windows-11-arm ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+
+      # The Visual Studio generator is multi-config, so the configuration is
+      # named at build time and the binaries land in a per-config subdirectory.
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Run tests
+        run: |
+          # A shared build leaves the import library beside the executables but
+          # the DLL in the top-level config directory; Windows resolves it from
+          # PATH.
+          export PATH="$PWD/build/Release:$PATH"
+          ./build/tests/gcd/Release/gcd.exe
+          rng=./build/tests/raw-entropy/recording_userspace/Release/jitterentropy-rng.exe
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            "$rng" 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            "$rng" 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  # MinGW is a distinct Windows target rather than a variation of MSVC: it is
+  # the GCC side of the Win32 thread back-end (__stdcall on a GCC front end,
+  # _beginthreadex() out of the mingw-w64 CRT rather than the UCRT), and it has
+  # to be told to link bcrypt explicitly because the #pragma comment(lib, ...)
+  # in arch/jitterentropy-arch-uuid.c is MSVC-only.
+  #
+  # Only 64-bit environments are built. MSYS2 retired MINGW32: package builds
+  # were dropped progressively from 2023 and the community 32-bit repository
+  # stopped being updated in November 2025, so a mingw-w64-i686-* install no
+  # longer resolves. 32-bit Windows is compiled instead by the cross-mingw32
+  # entry of the nix-cross matrix, which needs no MSYS2 repository at all.
+  windows-mingw:
+    name: Windows / MinGW-w64 / ${{ matrix.msystem }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - msystem: MINGW64
+            prefix: mingw-w64-x86_64
+          - msystem: UCRT64
+            prefix: mingw-w64-ucrt-x86_64
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.prefix }}-gcc
+            ${{ matrix.prefix }}-cmake
+            ${{ matrix.prefix }}-ninja
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run tests
+        run: |
+          ./build/tests/gcd/gcd.exe
+          rng=./build/tests/raw-entropy/recording_userspace/jitterentropy-rng.exe
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            "$rng" 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            "$rng" 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
