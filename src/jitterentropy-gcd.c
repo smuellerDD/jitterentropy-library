@@ -130,11 +130,11 @@ out:
 	return ret;
 }
 
-uint64_t *jent_gcd_init(size_t nelem)
+uint64_t *jent_gcd_init(size_t nelem, unsigned int flags)
 {
 	uint64_t *delta_history;
 
-	delta_history = jent_zalloc(nelem * sizeof(uint64_t));
+	delta_history = jent_zalloc(nelem * sizeof(uint64_t), flags);
 	if (!delta_history)
 		return NULL;
 
@@ -156,11 +156,11 @@ int jent_gcd_get(uint64_t *value)
 	return 0;
 }
 
-int jent_gcd_selftest(void)
+int jent_gcd_selftest(unsigned int flags)
 {
 #define JENT_GCD_SELFTEST_ELEM 10
 #define JENT_GCD_SELFTEST_EXP 3ULL
-	uint64_t *gcd = jent_gcd_init(JENT_GCD_SELFTEST_ELEM);
+	uint64_t *gcd = jent_gcd_init(JENT_GCD_SELFTEST_ELEM, flags);
 	uint64_t running_gcd, delta_sum;
 	unsigned int i;
 	int ret = EGCD;

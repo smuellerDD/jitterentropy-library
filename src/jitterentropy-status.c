@@ -160,7 +160,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t\t\t\"initialization\": %u\n", ec->memaccessloops * JENT_MEM_ACC_LOOP_INIT);
 	jent_add_to_status("\t\t},\n");
 
-	jent_add_to_status("\t\t\"secureMemory\": %s,\n", jent_secure_memory_supported() ? "true" : "false");
+	jent_add_to_status("\t\t\"secureMemory\": %s,\n", jent_memory_is_secure(ec->flags) ? "true" : "false");
 	jent_add_to_status("\t\t\"internalTimer\": %s,\n", ec->enable_notime ? "true" : "false");
 	jent_add_to_status("\t\t\"fipsMode\": %s,\n", ec->is_fips_enabled ? "true" : "false");
 	jent_add_to_status("\t\t\"ntg1Mode\": %s,\n", !!(ec->flags & JENT_NTG1) ? "true" : "false");
@@ -176,8 +176,10 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 		 !!(ec->flags & JENT_FORCE_FIPS) ? "true" : "false");
 	jent_add_to_status("\t\t\t\"JENT_NTG1\": %s,\n",
 		 !!(ec->flags & JENT_NTG1) ? "true" : "false");
-	jent_add_to_status("\t\t\t\"JENT_CACHE_ALL\": %s\n",
+	jent_add_to_status("\t\t\t\"JENT_CACHE_ALL\": %s,\n",
 		 !!(ec->flags & JENT_CACHE_ALL) ? "true" : "false");
+	jent_add_to_status("\t\t\t\"JENT_FORCE_SECURE_MEM\": %s\n",
+		 !!(ec->flags & JENT_FORCE_SECURE_MEM) ? "true" : "false");
 	jent_add_to_status("\t\t}\n");
 	jent_add_to_status("\t}\n");
 

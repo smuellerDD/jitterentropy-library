@@ -193,6 +193,38 @@ FIPS setting of the underlying operating system.
 .B JENT_NTG1
 Enable the BSI AIS 20/31 v3.0 NTG.1 compliant behavior.
 .TP
+.B JENT_FORCE_SECURE_MEM
+Require the memory of the entropy collector to be secure memory.
+The Jitter RNG always asks for it - a memory lock from the operating
+system, or an allocation from the secure memory arena of the crypto
+library it was built against; this flag decides what happens when that
+request cannot be granted. Without it - the default - the collector is
+created regardless, at the price of a state that may be written to the
+swap space. It is then treated as insecure memory: the
+.I secureMemory
+entry of
+.BR jent_status ()
+reports
+.IR false ,
+and the enhanced backtracking operation is kept. With the flag the
+allocation fails instead, which is what an environment not permitting
+locking - a CI system or a restricted container with a too small
+.IR RLIMIT_MEMLOCK ,
+say - will run into, as will an application that has not configured the
+secure memory arena of libgcrypt (GCRYCTL_INIT_SECMEM) or OpenSSL
+.RB ( CRYPTO_secure_malloc_init ()),
+each of which is process-wide state the library does not establish
+itself.
+.IP
+The flag is implied by
+.B JENT_NTG1
+and
+.BR JENT_FORCE_FIPS ,
+whose compliance claims cover the protection of the collector state.
+It has no effect in the Linux kernel, where the memory is secure by
+construction, nor with AWS-LC, which wipes its memory but does not lock
+it and therefore never claims to be secure.
+.TP
 .B JENT_MAX_MEMSIZE_*
 Define the maximum amount of memory that the Jitter RNG will use
 for its operation supporting the collection of raw noise. Without

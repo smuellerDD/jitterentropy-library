@@ -64,7 +64,7 @@ void jent_sha3_256_init(struct jent_sha_ctx *ctx);
 void jent_sha3_update(struct jent_sha_ctx *ctx, const uint8_t *in,
 		      size_t inlen);
 void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest);
-int jent_sha3_alloc(void **hash_state);
+int jent_sha3_alloc(void **hash_state, unsigned int flags);
 void jent_sha3_dealloc(void *hash_state);
 int jent_sha3_tester(void);
 

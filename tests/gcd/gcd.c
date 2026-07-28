@@ -46,7 +46,7 @@
 #define EXP_GCD 50ULL
 int main(int argc, char *argv[])
 {
-	uint64_t *gcd = jent_gcd_init(ELEM);
+	uint64_t *gcd = jent_gcd_init(ELEM, 0);
 	uint64_t val;
 	unsigned int i;
 

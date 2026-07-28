@@ -169,6 +169,17 @@ extern "C" {
 				 automatically determine the memory size for the
 				 memory access? By default it is only the L1
 				 cache size. */
+#define JENT_FORCE_SECURE_MEM (1<<8) /* Require the memory of the entropy
+				   collector to be secure memory: fail the
+				   allocation when the platform does not grant
+				   it - a memory lock the operating system
+				   refuses, or a secure memory arena that the
+				   application did not configure (libgcrypt,
+				   OpenSSL) - instead of continuing with memory
+				   that may be written to swap. Secure memory
+				   is always attempted; this flag only turns a
+				   refusal into an error. It is implied by
+				   JENT_NTG1 and JENT_FORCE_FIPS. */
 
 #if defined(LINUX_KERNEL) && !defined(UINT32_C)
 #define UINT32_C(c)	c ## U
