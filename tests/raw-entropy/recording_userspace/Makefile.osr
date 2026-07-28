@@ -4,7 +4,11 @@ CC ?= gcc
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
 #Hardening
 CFLAGS +=-fwrapv --param ssp-buffer-size=4
-LDFLAGS +=-Wl,-z,relro,-z,now -lm
+LDFLAGS +=-lm
+# ld64 supports neither -z relro nor -z now.
+ifneq (Darwin,$(shell uname))
+LDFLAGS +=-Wl,-z,relro,-z,now
+endif
 
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
 ifeq "$(GCCVERSIONFORMAT)" "3"
@@ -37,7 +41,12 @@ vpath %.c $(JENT_DIR)/src $(JENT_DIR)/arch
 
 INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src
 LIBRARY_DIRS :=
+# macOS has no librt; the clock/timer functions live in libSystem.
+ifeq (Darwin,$(shell uname))
+LIBRARIES := pthread
+else
 LIBRARIES := rt pthread
+endif
 
 CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))

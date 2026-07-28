@@ -51,6 +51,7 @@ jitter_rng-y += ../src/jitterentropy-base.o				       \
 		../src/jitterentropy-status.o				       \
 		../src/jitterentropy-timer.o				       \
 		../arch/jitterentropy-arch-memory.o			       \
+		../arch/jitterentropy-arch-timer.o			       \
 		../arch/jitterentropy-arch-sched.o			       \
 		../arch/jitterentropy-arch-cache.o			       \
 		../arch/jitterentropy-arch-fips.o			       \
@@ -69,6 +70,21 @@ CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_c_args)
 CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
 CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_c_args)
+# Deliberately not $(jitter_rng_c_args_zero), unlike the entropy core above.
+# This object is the one place <linux/timex.h> is included, and that header does
+# not compile at -O0 on current kernels: x86's random_get_entropy() reaches
+# _static_cpu_has(), whose asm goto needs a compile-time-constant feature
+# operand, and without optimization GCC cannot produce one ("impossible
+# constraint in 'asm'"). The -O0 requirement covers the measured loops in the
+# entropy core, not the counter read, so building just the timestamp accessor
+# with the kernel's normal flags costs a call per timestamp and nothing else.
+#
+# Only the architectures without a counter instruction of their own reach
+# <linux/timex.h> at all: x86, aarch64, s390x, powerpc, riscv, sparc64 and
+# loongarch64 read their counter with the instruction directly and would build
+# at -O0 as well. The flags are kept uniform for the object rather than made
+# conditional on the target architecture.
+CFLAGS_../arch/jitterentropy-arch-timer.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_c_args)

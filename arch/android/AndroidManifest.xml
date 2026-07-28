@@ -15,5 +15,10 @@
             </intent-filter>
         </activity>
     </application>
-    <uses-sdk android:minSdkVersion="9" />
+    <!--
+        Matches the APP_PLATFORM the library is built at: API 21 is the lowest
+        level the current NDK targets at all, so a lower value here would
+        advertise a range no toolchain can produce.
+    -->
+    <uses-sdk android:minSdkVersion="21" />
 </manifest> 
