@@ -200,6 +200,28 @@ static inline unsigned int jent_update_hashloop(unsigned int flags,
 	return flags;
 }
 
+/*
+ * The compliance modes claim a protected entropy collector state, so they turn
+ * secure memory from a best effort into a requirement: with them the
+ * allocation fails rather than leaving the state in memory that may be swapped
+ * out. Every other caller keeps the default, where memory the platform does
+ * not protect is tolerated.
+ *
+ * This normalization belongs to the caller-provided flags and therefore not
+ * into jent_entropy_collector_alloc_internal(): jent_time_entropy_init() ORs
+ * JENT_FORCE_FIPS into its test instance to get the health tests run, which is
+ * not a compliance statement, and deriving the requirement there would make
+ * every default allocation demand secure memory. Same reasoning as the
+ * JENT_DISABLE_MEMORY_ACCESS check in _jent_entropy_collector_alloc().
+ */
+static inline unsigned int jent_update_secure_mem(unsigned int flags)
+{
+	if (flags & (JENT_NTG1 | JENT_FORCE_FIPS))
+		flags |= JENT_FORCE_SECURE_MEM;
+
+	return flags;
+}
+
 /***************************************************************************
  * Random Number Generation
  ***************************************************************************/
@@ -333,7 +355,7 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	 * pros and cons considering that the SHA3 operation is not that
 	 * expensive.
 	 */
-	if (!jent_secure_memory_supported())
+	if (!jent_memory_is_secure(ec->flags))
 		jent_read_random_block(ec, NULL, 0);
 
 err:
@@ -628,7 +650,7 @@ static struct rand_data
 	if (jent_notime_forced() && (flags & JENT_DISABLE_INTERNAL_TIMER))
 		return NULL;
 
-	entropy_collector = jent_zalloc(sizeof(struct rand_data));
+	entropy_collector = jent_zalloc(sizeof(struct rand_data), flags);
 	if (NULL == entropy_collector)
 		return NULL;
 
@@ -646,7 +668,7 @@ static struct rand_data
 		flags = jent_update_memsize(flags, 0);
 		memsize = jent_memsize(flags);
 		entropy_collector->mem =
-			(unsigned char *)jent_zalloc(memsize);
+			(unsigned char *)jent_zalloc(memsize, flags);
 
 		if (entropy_collector->mem == NULL)
 			goto err;
@@ -663,7 +685,7 @@ static struct rand_data
 	flags = jent_update_hashloop(flags, 0);
 	entropy_collector->hashloopcnt = jent_hashloop_cnt(flags);
 
-	if (jent_sha3_alloc(&entropy_collector->hash_state))
+	if (jent_sha3_alloc(&entropy_collector->hash_state, flags))
 		goto err;
 
 	/*
@@ -754,6 +776,8 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 	if ((flags & JENT_DISABLE_MEMORY_ACCESS) &&
 	    ((flags & (JENT_NTG1 | JENT_FORCE_FIPS)) || jent_fips_enabled()))
 		return NULL;
+
+	flags = jent_update_secure_mem(flags);
 
 	ec = jent_entropy_collector_alloc_internal(osr, flags);
 
@@ -899,7 +923,7 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	int i, time_backwards = 0, count_stuck = 0, ret = 0;
 	unsigned int health_test_result;
 
-	delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT);
+	delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT, flags);
 	if (!delta_history)
 		return EMEM;
 
@@ -1033,7 +1057,12 @@ out:
 	return ret;
 }
 
-static inline int jent_entropy_init_common_pre(void)
+/*
+ * The flags are only needed for the memory the GCD self test allocates:
+ * JENT_FORCE_SECURE_MEM must reach it as well, or the initialization would
+ * report success on memory the collector allocation is then going to reject.
+ */
+static inline int jent_entropy_init_common_pre(unsigned int flags)
 {
 	int ret;
 
@@ -1043,7 +1072,7 @@ static inline int jent_entropy_init_common_pre(void)
 	if (jent_sha3_tester())
 		return EHASH;
 
-	ret = jent_gcd_selftest();
+	ret = jent_gcd_selftest(flags);
 
 	jent_selftest_run = 1;
 
@@ -1069,7 +1098,7 @@ static inline int jent_entropy_init_common_post(int ret)
 JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
 {
-	int ret = jent_entropy_init_common_pre();
+	int ret = jent_entropy_init_common_pre(0);
 
 	if (ret)
 		return ret;
@@ -1087,7 +1116,17 @@ int jent_entropy_init(void)
 JENT_PRIVATE_STATIC
 int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 {
-	int ret = jent_entropy_init_common_pre();
+	int ret;
+
+	/*
+	 * Apply the same requirement the collector allocation will apply, so
+	 * that a caller asking for a compliance mode is not told the
+	 * initialization succeeded on memory that the later allocation then
+	 * refuses to work with.
+	 */
+	flags = jent_update_secure_mem(flags);
+
+	ret = jent_entropy_init_common_pre(flags);
 
 	if (ret)
 		return ret;

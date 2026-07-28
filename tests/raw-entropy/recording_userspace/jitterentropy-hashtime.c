@@ -122,7 +122,7 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 		goto out;
 	}
 #else
-	jent_entropy_init_common_pre();
+	jent_entropy_init_common_pre(flags);
 #endif
 
 	/*

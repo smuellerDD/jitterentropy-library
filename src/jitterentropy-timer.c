@@ -37,8 +37,7 @@
 static int jent_notime_cpu_configured = 0;
 static unsigned long jent_notime_cpu = 0;
 
-JENT_PRIVATE_STATIC
-int jent_notime_init(void **ctx)
+static int jent_notime_init_flags(void **ctx, unsigned int flags)
 {
 	struct jent_notime_ctx *thread_ctx;
 	long ncpu = jent_ncpu();
@@ -50,7 +49,7 @@ int jent_notime_init(void **ctx)
 	if (ncpu < 2)
 		return -ENOENT;
 
-	thread_ctx = jent_zalloc(sizeof(struct jent_notime_ctx));
+	thread_ctx = jent_zalloc(sizeof(struct jent_notime_ctx), flags);
 	if (!thread_ctx)
 		return -ENOMEM;
 
@@ -74,6 +73,20 @@ int jent_notime_init(void **ctx)
 	*ctx = thread_ctx;
 
 	return 0;
+}
+
+/*
+ * The registered-handler interface (struct jent_notime_thread) passes nothing
+ * but the context pointer, so this entry point - the one an external handler
+ * replaces - cannot know the collector flags and allocates its context with
+ * the default ones. The builtin handler is not called through it but through
+ * jent_notime_init_flags() above, which does see them (see
+ * jent_notime_enable_thread()).
+ */
+JENT_PRIVATE_STATIC
+int jent_notime_init(void **ctx)
+{
+	return jent_notime_init_flags(ctx, 0);
 }
 
 JENT_PRIVATE_STATIC
@@ -245,11 +258,23 @@ void jent_get_nstime_internal(struct rand_data *ec, uint64_t *out)
 	}
 }
 
-static inline int jent_notime_enable_thread(struct rand_data *ec)
+static inline int jent_notime_enable_thread(struct rand_data *ec,
+					    unsigned int flags)
 {
-	if (notime_thread)
-		return notime_thread->jent_notime_init(&ec->notime_thread_ctx);
-	return 0;
+	if (!notime_thread)
+		return 0;
+
+	/*
+	 * Reach the builtin handler through the variant that takes the flags:
+	 * it allocates its context with jent_zalloc() and therefore has to
+	 * honor JENT_FORCE_SECURE_MEM like every other allocation of this
+	 * collector. An externally registered handler is reached through the
+	 * documented interface, which has no room for them.
+	 */
+	if (notime_thread == &jent_notime_thread_builtin)
+		return jent_notime_init_flags(&ec->notime_thread_ctx, flags);
+
+	return notime_thread->jent_notime_init(&ec->notime_thread_ctx);
 }
 
 void jent_notime_disable(struct rand_data *ec)
@@ -269,7 +294,7 @@ int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 			return EHEALTH;
 
 		ec->enable_notime = 1;
-		return jent_notime_enable_thread(ec);
+		return jent_notime_enable_thread(ec, flags);
 	}
 
 	return 0;

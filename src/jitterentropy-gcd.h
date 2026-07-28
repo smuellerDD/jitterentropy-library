@@ -30,13 +30,13 @@ extern "C"
 JENT_PRIVATE_STATIC
 int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr);
 JENT_PRIVATE_STATIC
-uint64_t *jent_gcd_init(size_t nelem);
+uint64_t *jent_gcd_init(size_t nelem, unsigned int flags);
 JENT_PRIVATE_STATIC
 void jent_gcd_fini(uint64_t *delta_history, size_t nelem);
 JENT_PRIVATE_STATIC
 int jent_gcd_get(uint64_t *value);
 JENT_PRIVATE_STATIC
-int jent_gcd_selftest(void);
+int jent_gcd_selftest(unsigned int flags);
 
 /* Watch for common adjacent GCD values */
 #define jent_gcd_add_value(delta_history, delta, idx)			\

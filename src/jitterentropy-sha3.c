@@ -382,11 +382,11 @@ void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest)
 	jent_sha3_init(ctx);
 }
 
-int jent_sha3_alloc(void **hash_state)
+int jent_sha3_alloc(void **hash_state, unsigned int flags)
 {
 	struct jent_sha_ctx *tmp;
 
-	tmp = jent_zalloc(JENT_SHA_MAX_CTX_SIZE);
+	tmp = jent_zalloc(JENT_SHA_MAX_CTX_SIZE, flags);
 	if (!tmp)
 		return 1;
 
