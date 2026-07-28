@@ -88,18 +88,18 @@ static void jent_lag_init(struct rand_data *ec, unsigned int osr)
 	 * entropy rate of 1/osr.
 	 */
 	/* TODO: add permanent health failure */
-	if (osr > ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
+	if (osr > JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
 		ec->lag_global_cutoff =
 			jent_lag_global_cutoff_lookup[
-				ARRAY_SIZE(jent_lag_global_cutoff_lookup) - 1];
+				JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup) - 1];
 	} else {
 		ec->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr - 1];
 	}
 
-	if (osr > ARRAY_SIZE(jent_lag_local_cutoff_lookup)) {
+	if (osr > JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup)) {
 		ec->lag_local_cutoff =
 			jent_lag_local_cutoff_lookup[
-				ARRAY_SIZE(jent_lag_local_cutoff_lookup) - 1];
+				JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup) - 1];
 	} else {
 		ec->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr - 1];
 	}
@@ -316,11 +316,11 @@ static void jent_apt_init(struct rand_data *ec)
 	 * Establish the apt_cutoff based on the presumed entropy rate of
 	 * 1/osr.
 	 */
-	if (ec->osr >= ARRAY_SIZE(jent_apt_cutoff_lookup)) {
+	if (ec->osr >= JENT_ARRAY_SIZE(jent_apt_cutoff_lookup)) {
 		ec->apt_cutoff = jent_apt_cutoff_lookup[
-			ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
+			JENT_ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
 		ec->apt_cutoff_permanent = jent_apt_cutoff_permanent_lookup[
-			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) - 1];
+			JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) - 1];
 	} else {
 		ec->apt_cutoff = jent_apt_cutoff_lookup[ec->osr - 1];
 		ec->apt_cutoff_permanent =
@@ -345,12 +345,12 @@ static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1[15]=
 
 static void jent_apt_init_ntg1(struct rand_data *ec)
 {
-	if (ec->osr >= ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1)) {
+	if (ec->osr >= JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1)) {
 		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[
-			ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) - 1];
+			JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) - 1];
 		ec->apt_cutoff_permanent =
 			jent_apt_cutoff_permanent_lookup_ntg1[
-			ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1) - 1];
+			JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1) - 1];
 	} else {
 		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[ec->osr - 1];
 		ec->apt_cutoff_permanent =
@@ -475,12 +475,12 @@ static const unsigned short jent_rct_mem_cutoff_permanent_lookup[] =
 
 static void jent_rct_mem_init(struct rand_data *ec)
 {
-	if (ec->osr >= ARRAY_SIZE(jent_rct_mem_cutoff_lookup)) {
+	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup)) {
 		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[
-			ARRAY_SIZE(jent_rct_mem_cutoff_lookup) - 1];
+			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup) - 1];
 		ec->rct_mem_cutoff_permanent =
 			jent_rct_mem_cutoff_permanent_lookup[
-			ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) - 1];
+			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) - 1];
 	} else {
 		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[ec->osr - 1];
 		ec->rct_mem_cutoff_permanent =
@@ -505,12 +505,12 @@ static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1[] =
 	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 static void jent_rct_mem_init_ntg1(struct rand_data *ec)
 {
-	if (ec->osr >= ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1)) {
+	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1)) {
 		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup_ntg1[
-			ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) - 1];
+			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) - 1];
 		ec->rct_mem_cutoff_permanent =
 			jent_rct_mem_cutoff_permanent_lookup_ntg1[
-			ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1) - 1];
+			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1) - 1];
 	} else {
 		ec->rct_mem_cutoff =
 			jent_rct_mem_cutoff_lookup_ntg1[ec->osr - 1];

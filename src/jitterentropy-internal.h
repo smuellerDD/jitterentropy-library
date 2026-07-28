@@ -66,6 +66,25 @@
  * this file.
  */
 #include <linux/math64.h>	/* div64_u64(), div64_u64_rem() */
+/*
+ * memcpy()/memset() are used by the core itself (jitterentropy-base.c,
+ * jitterentropy-noise.c, jitterentropy-sha3.c). They used to arrive here by
+ * accident, dragged in behind <linux/timex.h> via the arch timer header; that
+ * header now lives in arch/jitterentropy-arch-timer.c and the core no longer
+ * sees it, so the dependency is stated where it is actually used. <linux/
+ * string.h> is itself fine at -O0 - it was already being compiled that way
+ * through the transitive path this replaces.
+ */
+#include <linux/string.h>	/* memcpy(), memset() */
+/*
+ * Reached the core the same accidental way: -EAGAIN is returned by
+ * jitterentropy-gcd.c and jitterentropy-health.c, and the kernel's
+ * fallthrough attribute backs JENT_FALLTHROUGH below for kernel builds. Both
+ * used to arrive behind <linux/timex.h> -> <linux/kernel.h>. Neither header is
+ * heavier than the ones above and both are safe for the -O0 core.
+ */
+#include <linux/errno.h>	/* EAGAIN */
+#include <linux/compiler.h>	/* fallthrough */
 #endif
 
 #ifdef __cplusplus
@@ -87,20 +106,8 @@ extern "C" {
 # endif
 #endif
 
-/*
- * jitterentropy.h intentionally does not pull in <linux/module.h> (and thus not
- * <linux/kernel.h>) to keep the -O0 core free of headers that do not compile at
- * -O0 on modern kernels. Provide ARRAY_SIZE()/BUILD_BUG_ON() here for the core.
- * The guards matter on older kernels where the arch headers included above
- * still drag in <linux/kernel.h> transitively (e.g. via <linux/timex.h>), which
- * defines these macros; there the kernel's definitions are used unchanged.
- */
-#ifndef BUILD_BUG_ON
-# define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
-#endif
-#ifndef ARRAY_SIZE
-# define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
+/* The kernel supplies a fallthrough macro of its own. */
+#define JENT_FALLTHROUGH	fallthrough
 
 /*
  * Test interface support (see jitterentropy-base.c): allocate an entropy
@@ -135,15 +142,28 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 
 #else /* LINUX_KERNEL */
 
-#if __has_attribute(__fallthrough__)
-# define fallthrough	__attribute__((__fallthrough__))
-#else
-# define fallthrough	do {} while (0)
+/*
+ * Deliberately JENT_-prefixed rather than the bare lowercase "fallthrough".
+ * This header is included before the platform headers in several translation
+ * units, and a macro by that name silently rewrites any system header that
+ * probes for the attribute - Apple's <os/base.h>, reached through
+ * <mach/mach.h>, does exactly that with __has_attribute(fallthrough) and
+ * fails to compile once the bare macro is in scope.
+ *
+ * __has_attribute() itself must be probed with defined() first: compilers
+ * that do not provide it (MSVC) replace the unknown identifier with 0 and
+ * then choke on the leftover "(__fallthrough__)" argument list - a constraint
+ * violation, which MSVC reports as warning C4067 in every translation unit
+ * including this header.
+ */
+#if defined(__has_attribute)
+# if __has_attribute(__fallthrough__)
+#  define JENT_FALLTHROUGH	__attribute__((__fallthrough__))
+# endif
 #endif
-
-#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
-
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#ifndef JENT_FALLTHROUGH
+# define JENT_FALLTHROUGH	do {} while (0)
+#endif
 
 /*
  * 64-bit division / modulo with a 64-bit divisor; see the kernel branch
@@ -161,6 +181,34 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 }
 
 #endif /* LINUX_KERNEL */
+
+/*
+ * JENT_-prefixed, and defined outside the LINUX_KERNEL split above, for the
+ * same reason JENT_FALLTHROUGH is: the bare names belong to the environment,
+ * not to this library.
+ *
+ * jitterentropy.h deliberately does not pull in <linux/module.h> (and so not
+ * <linux/kernel.h>), which keeps the -O0 entropy core free of headers that do
+ * not compile without optimisation - but it also means the kernel's
+ * ARRAY_SIZE()/BUILD_BUG_ON() are not available to the core, so equivalents
+ * have to be defined here.
+ *
+ * Spelling them with the kernel's names and an #ifndef guard is what this did
+ * before, and it only worked by accident: some other header had to define them
+ * first for the guard to suppress ours. That held while <linux/timex.h> pulled
+ * <linux/kernel.h> into every translation unit; once the timer backend moved
+ * out (see arch/jitterentropy-arch-timer.c) our definitions landed first
+ * instead, and every file that later included a kernel header got a
+ * "'ARRAY_SIZE' redefined" warning. A distinct name cannot collide in either
+ * order, on any kernel, so no guard is needed.
+ *
+ * linux_kernel/ is deliberately not converted: that layer includes
+ * <linux/kernel.h> itself and uses the kernel's own macros, as kernel code
+ * should.
+ */
+#define JENT_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+
+#define JENT_ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 #ifndef JENT_STUCK_INIT_THRES
 /*
@@ -258,6 +306,31 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
  */
 #ifndef JENT_CACHE_SHIFT_BITS
 #define JENT_CACHE_SHIFT_BITS 0
+#endif
+
+/*
+ * Ceiling for the memory size that jent_update_memsize() derives on its own
+ * from the discovered cache geometry. It does not constrain a size the caller
+ * requested explicitly with a JENT_MAX_MEMSIZE_* flag - that is the caller's
+ * decision to make - only the automatic one.
+ *
+ * On a 64-bit target this is JENT_MAX_MEMSIZE_MAX, i.e. no additional limit.
+ * On a 32-bit target the address space is the binding constraint rather than
+ * the cache: a two-socket machine with a large L3 makes JENT_CACHE_ALL derive
+ * the full 512 MB, which the collector then both maps and mlock()s. That is a
+ * sixth of the usable address space of a 32-bit process and well beyond a
+ * typical RLIMIT_MEMLOCK, so jent_zalloc() fails and the whole collector
+ * allocation fails with it. Capping the derived value at 64 MB keeps the
+ * automatic path working on i686, armv7, RV32 and 31-bit s390.
+ *
+ * UINTPTR_MAX is the pointer-width test; where it is unavailable (the Linux
+ * kernel build does not define it) the 64-bit branch is taken, which leaves
+ * that configuration's behaviour unchanged.
+ */
+#if defined(UINTPTR_MAX) && (UINTPTR_MAX <= 0xffffffffUL)
+# define JENT_MAX_AUTO_MEMSIZE JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_64MB)
+#else
+# define JENT_MAX_AUTO_MEMSIZE JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX)
 #endif
 
 /*

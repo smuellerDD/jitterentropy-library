@@ -76,7 +76,7 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 	memcpy(intermediary + JENT_OFFSET_TIMEDELTA,
 	       (uint8_t *)&time_delta, sizeof(uint64_t));
 
-	BUILD_BUG_ON(JENT_SIZEOF_INTERMEDIARY < JENT_SIZEOF_INTERMEDIARY_DATA);
+	JENT_BUILD_BUG_ON(JENT_SIZEOF_INTERMEDIARY < JENT_SIZEOF_INTERMEDIARY_DATA);
 
 	/*
 	 * Inject the data from the intermediary buffer, including the hash we
@@ -122,8 +122,8 @@ static void jent_hash_loop(struct rand_data *ec,
 	 */
 	uint64_t hash_loop_cnt = loop_cnt ? loop_cnt : ec->hashloopcnt;
 
-	BUILD_BUG_ON(JENT_HASH_LOOP_DEFAULT < 1);
-	BUILD_BUG_ON(JENT_HASH_LOOP_INIT < 1);
+	JENT_BUILD_BUG_ON(JENT_HASH_LOOP_DEFAULT < 1);
+	JENT_BUILD_BUG_ON(JENT_HASH_LOOP_INIT < 1);
 
 	jent_sha3_256_init(&ctx);
 
@@ -626,7 +626,7 @@ void jent_random_data(struct rand_data *ec)
 				     jent_health_init_type_ntg1 :
 				     jent_health_init_type_common);
 
-		fallthrough;
+		JENT_FALLTHROUGH;
 	case jent_startup_sha3:
 		jent_random_data_one(ec, jent_measure_jitter_ntg1_sha3);
 		ec->startup_state = jent_startup_completed;

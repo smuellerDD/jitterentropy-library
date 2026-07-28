@@ -159,6 +159,15 @@ static inline unsigned int jent_update_memsize(unsigned int flags,
 		/* Adjust offset */
 		max = (max > JENT_MAX_MEMSIZE_OFFSET) ?
 			max - JENT_MAX_MEMSIZE_OFFSET : 0;
+
+		/*
+		 * Bound the automatically derived size. This is a no-op on
+		 * 64-bit targets; on 32-bit ones it keeps a large host cache
+		 * from deriving a working set that cannot be mapped and locked.
+		 * See JENT_MAX_AUTO_MEMSIZE.
+		 */
+		if (max > JENT_MAX_AUTO_MEMSIZE)
+			max = JENT_MAX_AUTO_MEMSIZE;
 	} else {
 		max += inc;
 	}
@@ -229,14 +238,21 @@ JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 {
 	/*
-	 * Maximum value representable by ssize_t. Use a portable
-	 * definition in case SSIZE_MAX is not available under strict
-	 * C standard modes. It is nevertheless available on POSIX systems.
+	 * Maximum value representable by ssize_t. Use a portable definition
+	 * in case SSIZE_MAX is not available under strict C standard modes.
+	 * It is nevertheless available on POSIX systems.
+	 *
+	 * Clearing the sign bit of SIZE_MAX relies on ssize_t being the
+	 * signed counterpart of size_t, which the build assertion below
+	 * enforces. Deriving the shift count from sizeof(ssize_t) instead
+	 * would be undefined behavior as soon as ssize_t is the wider type.
 	 */
-	static const size_t ssize_max = (size_t)(((size_t)1 << (sizeof(ssize_t) * 8 - 1)) - 1);
+	static const size_t ssize_max = (size_t)-1 >> 1;
 	char *p = data;
 	size_t orig_len;
 	int ret = 0;
+
+	JENT_BUILD_BUG_ON(sizeof(ssize_t) != sizeof(size_t));
 
 	/* check obvious misuse of API */
 	if (!ec || (data == NULL && len > 0))
@@ -435,14 +451,21 @@ JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 {
 	/*
-	 * Maximum value representable by ssize_t. Use a portable
-	 * definition in case SSIZE_MAX is not available under strict
-	 * C standard modes. It is nevertheless available on POSIX systems.
+	 * Maximum value representable by ssize_t. Use a portable definition
+	 * in case SSIZE_MAX is not available under strict C standard modes.
+	 * It is nevertheless available on POSIX systems.
+	 *
+	 * Clearing the sign bit of SIZE_MAX relies on ssize_t being the
+	 * signed counterpart of size_t, which the build assertion below
+	 * enforces. Deriving the shift count from sizeof(ssize_t) instead
+	 * would be undefined behavior as soon as ssize_t is the wider type.
 	 */
-	static const size_t ssize_max = (size_t)(((size_t)1 << (sizeof(ssize_t) * 8 - 1)) - 1);
+	static const size_t ssize_max = (size_t)-1 >> 1;
 	char *p = data;
 	size_t orig_len;
 	ssize_t ret = 0;
+
+	JENT_BUILD_BUG_ON(sizeof(ssize_t) != sizeof(size_t));
 
 	/* check obvious misuse of API */
 	if (!ec || (data == NULL && len > 0))
@@ -565,8 +588,8 @@ static struct rand_data
 	 * health-test lookup tables are indexed with osr - 1, and an empty
 	 * [JENT_MIN_OSR, JENT_MAX_OSR] range would make every allocation fail.
 	 */
-	BUILD_BUG_ON(JENT_MIN_OSR < 1);
-	BUILD_BUG_ON(JENT_MIN_OSR > JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_MIN_OSR < 1);
+	JENT_BUILD_BUG_ON(JENT_MIN_OSR > JENT_MAX_OSR);
 
 	/*
 	 * Requesting disabling and forcing of internal timer
@@ -624,6 +647,7 @@ static struct rand_data
 		memsize = jent_memsize(flags);
 		entropy_collector->mem =
 			(unsigned char *)jent_zalloc(memsize);
+
 		if (entropy_collector->mem == NULL)
 			goto err;
 
@@ -968,10 +992,11 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 
 	/*
 	 * we allow up to three times the time running backwards.
-	 * CLOCK_REALTIME is affected by adjtime and NTP operations. Thus,
-	 * if such an operation just happens to interfere with our test, it
-	 * should not fail. The value of 3 should cover the NTP case being
-	 * performed during our test run.
+	 * All timer backends are monotonic by construction, but a counter read
+	 * can still appear to go backwards once in a while, e.g. when the
+	 * thread migrates between CPUs whose counters are not perfectly in
+	 * sync. Such an event must not fail the test outright; the value of 3
+	 * covers the occasional occurrence during our test run.
 	 */
 	if (time_backwards > 3) {
 		ret = ENOMONOTONIC;
