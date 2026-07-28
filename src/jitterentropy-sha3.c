@@ -54,12 +54,10 @@ static inline void le64_to_ptr(uint8_t *p, const uint64_t value)
 	le32_to_ptr(p,     (uint32_t)(value));
 }
 
-#ifndef LINUX_KERNEL
 static inline uint64_t rol64(uint64_t x, unsigned int n)
 {
 	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
 }
-#endif
 
 /*********************************** Keccak ***********************************/
 /* state[x + y*5] */
@@ -372,8 +370,12 @@ void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest)
 	 *   have a loop around the jent_keccakp_1600 / copy out loop below
 	 *
 	 * * the requested digest size must be multiples of uint64_t
+	 *
+	 * digestsize is a uint8_t, whose integral promotion makes the division
+	 * below a signed int; the cast keeps both sides of the comparison
+	 * unsigned (MSVC /W4 warns C4018 about the mismatch otherwise).
 	 */
-	for (i = 0; i < ctx->digestsize / 8; i++, digest += 8)
+	for (i = 0; i < (unsigned int)ctx->digestsize / 8; i++, digest += 8)
 		le64_to_ptr(digest, ctx->state[i]);
 
 	memset(ctx->partial, 0, ctx->r);
@@ -424,19 +426,19 @@ static void jent_xdrbg256_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 	uint8_t encode;
 
 	/* Checking the output size */
-	BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != ((DATA_SIZE_BITS / 8)));
+	JENT_BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != ((DATA_SIZE_BITS / 8)));
 	/*
 	 * The XOF implementation only allows the generation of up to one
 	 * rate-size block. See the comments in the squeeze operation for
 	 * details
 	 */
-	BUILD_BUG_ON(JENT_SHA3_256_SIZE_BLOCK < sizeof(jent_block_next_state));
+	JENT_BUILD_BUG_ON(JENT_SHA3_256_SIZE_BLOCK < sizeof(jent_block_next_state));
 	/*
 	 * The squeeze operation is limited to return multiples of uint64_t -
 	 * verify all set_digestsize values.
 	 */
-	BUILD_BUG_ON(JENT_XDRBG_SIZE_STATE % sizeof(uint64_t));
-	BUILD_BUG_ON(sizeof(jent_block_next_state) % sizeof(uint64_t));
+	JENT_BUILD_BUG_ON(JENT_XDRBG_SIZE_STATE % sizeof(uint64_t));
+	JENT_BUILD_BUG_ON(sizeof(jent_block_next_state) % sizeof(uint64_t));
 
 	/* The final operation automatically re-initializes the ->hash_state */
 
@@ -561,7 +563,7 @@ static int jent_xdrbg256_tester(void)
 	uint8_t act[sizeof(exp)] = { 0 };
 	unsigned int i;
 
-	BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != sizeof(exp));
+	JENT_BUILD_BUG_ON(JENT_SHA3_256_SIZE_DIGEST != sizeof(exp));
 
 	jent_shake256_init(&ctx);
 	/* Initial seed */
