@@ -46,19 +46,66 @@
  * DAMAGE.
  */
 
+/*
+ * GetProcessWorkingSetSizeEx() and SetProcessWorkingSetSizeEx() are declared by
+ * the Windows SDK only from Windows Vista onwards. mingw-w64 has defaulted to
+ * older values across its releases, so the minimum is stated here rather than
+ * left to the toolchain; it has to precede every system header, including the
+ * <windows.h> included below. An externally supplied, higher value is left
+ * alone.
+ */
+#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
+# define _WIN32_WINNT 0x0601
+#endif
+
+/*
+ * MAP_ANONYMOUS, MAP_ANON and madvise()/MADV_DONTDUMP are all __USE_MISC on
+ * glibc, so a strict -std=c11 - which the Makefile uses - hides them. Current
+ * glibc happens to define MAP_ANONYMOUS unconditionally, which is why this was
+ * only noticed on glibc 2.17 (RHEL 7), where neither spelling exists and the
+ * MAP_ANON fallback below expands to an undeclared identifier.
+ *
+ * _DEFAULT_SOURCE is the modern spelling and _BSD_SOURCE the one glibc before
+ * 2.19 understands; both are defined because 2.17 ignores the former and
+ * everything from 2.20 on warns about the latter unless the former is present
+ * too. Defined here rather than in the public jitterentropy.h so the header
+ * imposes no feature-test macro on consumers; they must precede every system
+ * header. Same reasoning as arch/jitterentropy-arch-timer.c.
+ */
+#if defined(__linux__)
+# ifndef _DEFAULT_SOURCE
+#  define _DEFAULT_SOURCE
+# endif
+# ifndef _BSD_SOURCE
+#  define _BSD_SOURCE
+# endif
+#endif
+
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 
 /*
  * Platform detection.
+ *
+ * The POSIX backend is selected from the option macros the platform itself
+ * publishes in <unistd.h>, not from a list of operating systems.
+ *
+ * _POSIX_MEMLOCK_RANGE is required to be strictly positive rather than merely
+ * not -1: a value of 0 means "ask sysconf() at runtime", and since a failed
+ * mlock() makes jent_zalloc() fail the allocation outright, such a platform is
+ * better served by the malloc() path than by an allocator that might refuse
+ * every request.
  */
 #ifdef LINUX_KERNEL
 # define JENT_ARCH_MEM_LINUX_KERNEL
+#elif defined(_MSC_VER) || defined(__MINGW32__)
+# define JENT_ARCH_MEM_WINDOWS
 #else
-# if defined(_MSC_VER) || defined(__MINGW32__)
-#  define JENT_ARCH_MEM_WINDOWS
-# elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
-       defined(__NetBSD__) || defined(__APPLE__)
+# include <unistd.h>
+# if defined(_POSIX_MAPPED_FILES) && (_POSIX_MAPPED_FILES - 0) > 0 &&	      \
+     defined(_POSIX_MEMORY_PROTECTION) &&				      \
+     (_POSIX_MEMORY_PROTECTION - 0) > 0 &&				      \
+     defined(_POSIX_MEMLOCK_RANGE) && (_POSIX_MEMLOCK_RANGE - 0) > 0
 #  define JENT_ARCH_MEM_POSIX_MLOCK
 # endif
 #endif
@@ -96,6 +143,13 @@
 
 #define JENT_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 #define JENT_IS_POWER_OF_2(n) (JENT_BUILD_BUG_ON(((n) & ((n) - 1)) != 0))
+
+/*
+ * Slack kept between the process minimum and maximum working set when the
+ * Windows backend raises them (see jent_virtual_lock()). The maximum only has
+ * to exceed the minimum; the value merely avoids pinning the two together.
+ */
+#define JENT_WS_HEADROOM	65536
 
 /*
  * Whether the active backend provides secure (locked / wiped) memory. This
@@ -140,7 +194,7 @@ void jent_memset_secure(void *s, size_t n)
 #endif
 }
 
-#ifdef JENT_ARCH_MEM_WINDOWS
+#if defined(JENT_ARCH_MEM_WINDOWS) && !defined(JENT_CONF_RELAX_MLOCK)
 static size_t jent_pagesize(void)
 {
 	SYSTEM_INFO si;
@@ -148,7 +202,84 @@ static size_t jent_pagesize(void)
 	GetSystemInfo(&si);
 	return si.dwPageSize;
 }
-#endif /* JENT_ARCH_MEM_WINDOWS */
+
+/*
+ * Lock @len bytes at @addr into RAM. Returns 0 on success.
+ *
+ * VirtualLock() charges its pages against the process *minimum* working set -
+ * "the maximum number of pages a process can lock is equal to the number of
+ * pages in its minimum working set minus a small overhead" - and fails with
+ * ERROR_WORKING_SET_QUOTA once that budget is exhausted. Raising the minimum
+ * is therefore part of locking, not an independent knob: without it every
+ * request larger than the (small) default minimum working set failed and
+ * jent_entropy_collector_alloc() returned EMEM - which is what a JENT_CACHE_ALL
+ * collector, asking for the summed L1+L2+L3 size, ran into on every machine.
+ *
+ * The limits are read and extended rather than set to a fixed size: they are
+ * process-wide, so overwriting them would evict the working set the host
+ * application has reserved for itself. dwMaximumWorkingSetSize must stay
+ * strictly greater than dwMinimumWorkingSetSize, otherwise the call is
+ * rejected with ERROR_INVALID_PARAMETER.
+ *
+ * The same applies to the quota flags, which is why they are read back with
+ * GetProcessWorkingSetSizeEx() and handed to SetProcessWorkingSetSizeEx()
+ * unchanged. The non-Ex getter used here before cannot report them, so the
+ * flags argument was a fixed QUOTA_LIMITS_HARDWS_MIN_ENABLE: that silently
+ * replaced whatever quota policy the host application had established and left
+ * the process with a hard working-set floor - one this code never lowers again
+ * - as a side effect of allocating an entropy collector. Raising the minimum is
+ * what lifts the lock quota; making that minimum a hard limit is not required
+ * for it and is not a library's decision to make.
+ *
+ * The raise happens only after a lock has actually failed, and the quota is
+ * not lowered again on free (another thread may have locked memory against it
+ * in the meantime). Growing on demand is what keeps a repeated
+ * allocate/free cycle from ratcheting the process working set up without
+ * bound: once the quota covers the collector, every later lock succeeds on
+ * the first attempt.
+ */
+static int jent_virtual_lock(void *addr, size_t len)
+{
+	SIZE_T minWS = 0, maxWS = 0, want_min, want_max;
+	DWORD ws_flags = 0;
+
+	if (VirtualLock(addr, len))
+		return 0;
+	if (GetLastError() != ERROR_WORKING_SET_QUOTA)
+		return -1;
+
+	if (!GetProcessWorkingSetSizeEx(GetCurrentProcess(), &minWS, &maxWS,
+					&ws_flags))
+		return -1;
+
+	/*
+	 * A process that has never had its quota configured reports
+	 * QUOTA_LIMITS_HARDWS_MIN_DISABLE | QUOTA_LIMITS_HARDWS_MAX_DISABLE,
+	 * i.e. soft limits on both ends - which is all VirtualLock() needs.
+	 * Should an implementation ever answer with no flags at all, name the
+	 * documented default explicitly rather than forwarding a zero the
+	 * setter may reject with ERROR_INVALID_PARAMETER.
+	 */
+	if (!ws_flags)
+		ws_flags = QUOTA_LIMITS_HARDWS_MIN_DISABLE |
+			   QUOTA_LIMITS_HARDWS_MAX_DISABLE;
+
+	/* Headroom above the new minimum, and the guard against wrapping. */
+	if (len > (SIZE_T)-1 - minWS)
+		return -1;
+	want_min = minWS + len;
+	if (want_min > (SIZE_T)-1 - JENT_WS_HEADROOM)
+		return -1;
+	want_max = (maxWS > want_min + JENT_WS_HEADROOM) ?
+		   maxWS : want_min + JENT_WS_HEADROOM;
+
+	if (!SetProcessWorkingSetSizeEx(GetCurrentProcess(), want_min, want_max,
+					ws_flags))
+		return -1;
+
+	return VirtualLock(addr, len) ? 0 : -1;
+}
+#endif /* JENT_ARCH_MEM_WINDOWS && !JENT_CONF_RELAX_MLOCK */
 
 #ifdef JENT_ARCH_MEM_POSIX_MLOCK
 /* Some BSDs / macOS only provide the older MAP_ANON spelling. */
@@ -239,59 +370,37 @@ void *jent_zalloc(size_t len)
 
 # ifndef JENT_CONF_RELAX_MLOCK
 	{
-		size_t minWS, maxWS;
-
-		JENT_BUILD_BUG_ON(JENT_SECURE_MEMORY_SIZE_MAX / 2 == 0);
 		/*
-		 * On query failure assume a zero working set so the raise
-		 * below always runs; the outputs are uninitialized otherwise.
+		 * Guard-page layout as on the POSIX path: commit the whole
+		 * region inaccessible and enable only the payload, leaving a
+		 * PAGE_NOACCESS guard page on each side that faults on any
+		 * accidental access beyond the state.
 		 */
-		if (!GetProcessWorkingSetSize(GetCurrentProcess(), &minWS,
-					      &maxWS))
-			minWS = maxWS = 0;
-		if (maxWS < JENT_SECURE_MEMORY_SIZE_MAX &&
-		    !SetProcessWorkingSetSizeEx(
-			GetCurrentProcess(),
-			JENT_SECURE_MEMORY_SIZE_MAX / 2,
-			JENT_SECURE_MEMORY_SIZE_MAX,
-			QUOTA_LIMITS_HARDWS_MIN_ENABLE))
+		size_t page_size = jent_pagesize();
+		size_t payload, total;
+		uint8_t *base;
+		DWORD oldprot;
+
+		if (len > (size_t)-1 - 3 * page_size)
 			return NULL;
+		payload = (len + page_size - 1) & ~(page_size - 1);
+		total = payload + 2 * page_size;
 
-		{
-			/*
-			 * Guard-page layout as on the POSIX path: commit the
-			 * whole region inaccessible and enable only the
-			 * payload, leaving a PAGE_NOACCESS guard page on each
-			 * side that faults on any accidental access beyond
-			 * the state.
-			 */
-			size_t page_size = jent_pagesize();
-			size_t payload, total;
-			uint8_t *base;
-			DWORD oldprot;
+		base = VirtualAlloc(NULL, total, MEM_COMMIT | MEM_RESERVE,
+				    PAGE_NOACCESS);
+		if (!base)
+			return NULL;
+		if (!VirtualProtect(base + page_size, payload, PAGE_READWRITE,
+				    &oldprot)) {
+			VirtualFree(base, 0, MEM_RELEASE);
+			return NULL;
+		}
 
-			if (len > (size_t)-1 - 3 * page_size)
-				return NULL;
-			payload = (len + page_size - 1) & ~(page_size - 1);
-			total = payload + 2 * page_size;
+		tmp = base + page_size;
 
-			base = VirtualAlloc(NULL, total,
-					    MEM_COMMIT | MEM_RESERVE,
-					    PAGE_NOACCESS);
-			if (!base)
-				return NULL;
-			if (!VirtualProtect(base + page_size, payload,
-					    PAGE_READWRITE, &oldprot)) {
-				VirtualFree(base, 0, MEM_RELEASE);
-				return NULL;
-			}
-
-			tmp = base + page_size;
-
-			if (!VirtualLock(tmp, payload)) {
-				VirtualFree(base, 0, MEM_RELEASE);
-				return NULL;
-			}
+		if (jent_virtual_lock(tmp, payload)) {
+			VirtualFree(base, 0, MEM_RELEASE);
+			return NULL;
 		}
 	}
 # else
@@ -304,29 +413,59 @@ void *jent_zalloc(size_t len)
 		/*
 		 * Layout: [guard page | payload (page-rounded) | guard page]
 		 *
-		 * The whole region is mapped PROT_NONE first and only the
-		 * payload is made accessible, leaving one inaccessible guard
-		 * page on each side: any accidental access beyond the state
-		 * faults immediately instead of silently reading or
-		 * corrupting adjacent data. The page-aligned payload is also
-		 * what allows the madvise() dump exclusion below.
+		 * One inaccessible guard page on each side of the payload, so
+		 * that any accidental access beyond the state faults
+		 * immediately instead of silently reading or corrupting
+		 * adjacent data. The page-aligned payload is also what allows
+		 * the madvise() dump exclusion below.
+		 *
+		 * The region is mapped readable and writable and the two guard
+		 * pages are then protected *down* to PROT_NONE. The reverse -
+		 * map the whole region PROT_NONE and raise the payload to
+		 * PROT_READ|PROT_WRITE - is the more common spelling of this
+		 * idiom and is what this code did until NetBSD rejected it:
+		 * mprotect() there returns EACCES, "the requested protection
+		 * would exceed the maximum protection allowed on the region",
+		 * because NetBSD clamps a mapping's maximum protection to the
+		 * protection mmap() was called with. A region mapped PROT_NONE
+		 * can then never be made accessible again, so jent_zalloc()
+		 * failed every allocation on that platform and every caller
+		 * reported it as an out-of-memory condition.
+		 *
+		 * Lowering protection is permitted everywhere, so this order
+		 * needs no platform conditional and reaches the same final
+		 * layout. The guard pages are briefly writable, which is not
+		 * observable: the mapping is fresh and its address has not
+		 * been handed out yet.
 		 */
 		size_t page_size = jent_pagesize();
 		size_t payload, total;
 		uint8_t *base;
+		/*
+		 * OpenBSD excludes a mapping from core dumps at mmap() time
+		 * rather than through madvise(); it has no MADV_DONTDUMP or
+		 * MADV_NOCORE. The flag is the OpenBSD counterpart of the
+		 * madvise() call below.
+		 */
+		int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+
+# ifdef MAP_CONCEAL
+		mmap_flags |= MAP_CONCEAL;
+# endif
 
 		if (len > SIZE_MAX - 3 * page_size)
 			return NULL;
 		payload = (len + page_size - 1) & ~(page_size - 1);
 		total = payload + 2 * page_size;
 
-		base = mmap(NULL, total, PROT_NONE,
-			    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		base = mmap(NULL, total, PROT_READ | PROT_WRITE, mmap_flags,
+			    -1, 0);
 		if (base == MAP_FAILED)
 			return NULL;
 
-		if (mprotect(base + page_size, payload,
-			     PROT_READ | PROT_WRITE)) {
+		if (mprotect(base, page_size, PROT_NONE) ||
+		    mprotect(base + page_size + payload, page_size,
+			     PROT_NONE)) {
 			munmap(base, total);
 			return NULL;
 		}
@@ -339,6 +478,12 @@ void *jent_zalloc(size_t len)
 		 * (e.g. old kernels) does not fail the allocation. No revert
 		 * is needed on free: munmap() destroys the mapping including
 		 * its madvise state.
+		 *
+		 * macOS provides no equivalent - it has neither MADV_DONTDUMP
+		 * nor MADV_NOCORE nor MAP_CONCEAL - so on that platform the
+		 * state stays mlock()ed but is not excluded from a core dump.
+		 * The only lever there is process-wide (RLIMIT_CORE), which is
+		 * the application's decision to make, not a library's.
 		 */
 # if defined(MADV_DONTDUMP)
 		madvise(tmp, len, MADV_DONTDUMP);	/* Linux */
@@ -454,5 +599,6 @@ void jent_zfree(void *ptr, size_t len)
 
 #endif /* JENT_ARCH_MEM_LINUX_KERNEL */
 
+#undef JENT_WS_HEADROOM
 #undef JENT_IS_POWER_OF_2
 #undef JENT_BUILD_BUG_ON
