@@ -44,22 +44,23 @@
  *
  * The internal ("notime") timer spawns a helper thread that does nothing
  * but increment a counter. This header declares the two pieces of code
- * that differ between platforms and defines the context struct they use;
- * the definitions live in arch/jitterentropy-arch-thread.c.
+ * that differ between platforms; the definitions live in
+ * arch/jitterentropy-arch-thread.c.
  *
  *   1. Thread creation / joining. jent_notime_thread_create() /
  *      jent_notime_thread_join() hide the back-end behind a single
- *      signature and a single context struct (struct jent_notime_ctx).
+ *      signature and a single context struct (struct jent_notime_ctx,
+ *      defined in jitterentropy.h).
  *
  *   2. Pinning the calling thread to a single logical CPU via
  *      jent_thread_pin_to_cpu(). Keeping the counting thread on one CPU
  *      avoids inter-core migration of the running counter.
  *
- * Three execution environments are distinguished: hosted userspace
- * (JENT_ARCH_THREAD_HOSTED, POSIX or C11 threads plus the native affinity
- * API) and the freestanding Linux kernel / FreeBSD kernel / baremetal
- * targets (stub handler, pinning is a no-op). Pinning is best-effort:
- * callers treat a negative return as "not pinned" and continue.
+ * Both come in a hosted userspace flavour (JENT_ARCH_THREAD_HOSTED, POSIX or
+ * Win32 threads plus the native affinity API) and a freestanding one for the
+ * Linux kernel / FreeBSD kernel / baremetal targets (stub handler, pinning is
+ * a no-op). Pinning is best-effort: callers treat a negative return as "not
+ * pinned" and continue.
  */
 
 #ifndef _JITTERENTROPY_ARCH_THREAD_H
@@ -68,74 +69,14 @@
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 
 /*
- * Execution environment selection. A freestanding target is the Linux
- * kernel (__KERNEL__), the FreeBSD kernel (_KERNEL) or a baremetal/EFI
- * environment. The latter is detected from -ffreestanding
- * (__STDC_HOSTED__ == 0, as used by gnu-efi and similar baremetal
- * toolchains) or requested explicitly with JENT_BAREMETAL. The FreeBSD
- * kernel is matched before the generic baremetal test because it also
- * builds freestanding. Everything else is treated as hosted userspace.
+ * Include after jitterentropy.h, which is where the threading back-end and the
+ * execution environment are selected (JENT_PTHREAD / JENT_WIN_THREADS and the
+ * JENT_ARCH_THREAD_* macros) and where struct jent_notime_ctx and
+ * jent_notime_start_routine are defined - both are part of the public
+ * interface, since a consumer installing its own thread handler is handed that
+ * context. This header only declares what arch/jitterentropy-arch-thread.c
+ * implements on top of them.
  */
-#if defined(__KERNEL__) || defined(LINUX_KERNEL)
-	/*
-	 * Match both the kernel's own __KERNEL__ and the build-system macro
-	 * LINUX_KERNEL used by every other arch file, so a TU compiled with
-	 * only one of them cannot pair the kernel memory backend with the
-	 * hosted thread backend.
-	 */
-# define JENT_ARCH_THREAD_LINUX_KERNEL
-#elif defined(_KERNEL) && defined(__FreeBSD__)
-# define JENT_ARCH_THREAD_FREEBSD_KERNEL
-#elif defined(JENT_BAREMETAL) || \
-      (defined(__STDC_HOSTED__) && (__STDC_HOSTED__ == 0))
-# define JENT_ARCH_THREAD_BAREMETAL
-#else
-# define JENT_ARCH_THREAD_HOSTED
-#endif
-
-#if defined(JENT_ARCH_THREAD_HOSTED)
-
-/* Threading back-end: pthreads or C11 threads (see jitterentropy.h) */
-#ifdef JENT_PTHREAD
-# include <pthread.h>
-struct jent_notime_ctx {
-	pthread_attr_t notime_pthread_attr;	/* pthreads library */
-	pthread_t notime_thread_id;		/* pthreads thread ID */
-	unsigned long notime_cpu;		/* CPU the thread pins to */
-	int notime_thread_started;		/* thread successfully created? */
-};
-
-typedef void *(*jent_notime_start_routine)(void *);
-#else
-# ifdef __STDC_NO_THREADS__
-	/*
-	 * No auto-fallback to pthreads here: JENT_PTHREAD changes the callback
-	 * signature of the public struct jent_notime_thread (jitterentropy.h),
-	 * so it must be selected consistently by the build system for every
-	 * translation unit including external consumers, not silently by this
-	 * header.
-	 */
-#  error "C11 <threads.h> is unavailable (__STDC_NO_THREADS__); build with -DJENT_PTHREAD and link against pthreads instead"
-# endif
-# include <threads.h>
-struct jent_notime_ctx {
-	thrd_t notime_thread_id;		/* thread ID */
-	unsigned long notime_cpu;		/* CPU the thread pins to */
-	int notime_thread_started;		/* thread successfully created? */
-};
-
-typedef int (*jent_notime_start_routine)(void *);
-#endif
-
-#else /* freestanding: LINUX_KERNEL / FREEBSD_KERNEL / BAREMETAL */
-
-struct jent_notime_ctx {
-	unsigned long notime_cpu;		/* CPU the thread pins to */
-};
-
-typedef int (*jent_notime_start_routine)(void *);
-
-#endif /* JENT_ARCH_THREAD_HOSTED */
 
 /* Definitions in arch/jitterentropy-arch-thread.c. */
 int jent_thread_pin_to_cpu(unsigned long cpu);
