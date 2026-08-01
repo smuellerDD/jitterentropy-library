@@ -5,6 +5,7 @@
  * Jitter RNG core: add Linux kernel support header files and conditionally compile support code that is already offered by the Linux kernel
  * Architecture-specific code: Revamp code implementing C files and restructuring the code into per-mechanism type support code
  * Linux kernel: add support for kernel crypto API, HW-RAND and character device files along with full test code matching user space (see linux_kernel/README.md)
+ * Linux kernel: add DKMS support so the kernel module is rebuilt automatically on kernel updates (see linux_kernel/README.md)
 
 3.7.0
  * Add secure memory implementation for Linux and {Net,Open,Free}BSD, MacOS and Windows

@@ -82,6 +82,54 @@ so reading the `flags` sysfs file reports the effective configuration. Example:
 
 	insmod jitter_rng.ko ntg1=1 osr=3
 
+## Build with DKMS
+
+A module built as above is bound to the kernel it was compiled against and has
+to be rebuilt by hand after every kernel update. DKMS removes that step: the
+source is registered once and rebuilt automatically for each kernel installed
+afterwards.
+
+The DKMS source is the whole Jitter RNG tree, not just this directory —
+`Kbuild.source` compiles the entropy core from `../src` and the architecture
+backends from `../arch`. `dkms.conf` therefore sits in the project root, and
+the commands below are run from there:
+
+	VERSION=$(awk '/define[ \t]+JENT_(MAJVERSION|MINVERSION|PATCHLEVEL)/ \
+		       { printf "%s%s", sep, $3; sep="." }' jitterentropy.h)
+	sudo cp -a . /usr/src/jitterentropy-$VERSION
+	sudo dkms install -m jitterentropy -v $VERSION
+
+`dkms status` then reports the module as installed, and `modprobe jitter_rng`
+loads it. Removal, including the copy installed for every kernel:
+
+	sudo dkms remove -m jitterentropy -v $VERSION --all
+	sudo rm -rf /usr/src/jitterentropy-$VERSION
+
+The build requires the kernel headers of the target kernel
+(`linux-headers-$(uname -r)` on Debian and Ubuntu, `kernel-devel` on Fedora and
+openSUSE). Where DKMS puts the built module is the distribution's choice —
+`/lib/modules/<kernel>/updates/dkms` on Debian and Ubuntu, `/lib/modules/<kernel>/extra`
+on Fedora — and `depmod` is run by DKMS either way, so `modprobe` finds it.
+
+### Configuration
+
+The build is configured through `Kbuild.config` as in every other build, but
+the file to edit is the copy in the DKMS source tree:
+
+	/usr/src/jitterentropy-<version>/linux_kernel/Kbuild.config
+
+Configuration passed on a `make` command line would only reach a single manual
+build; the automatic rebuilds DKMS performs on a kernel update read that file.
+After changing it, rebuild the currently installed kernels:
+
+	sudo dkms remove -m jitterentropy -v $VERSION --all
+	sudo dkms install -m jitterentropy -v $VERSION
+
+`dkms.conf` carries the version as a literal `PACKAGE_VERSION`, since DKMS names
+both the `/usr/src` directory and its own build tree after it. When the library
+version in `jitterentropy.h` changes, that literal has to follow; CI fails the
+build if the two disagree.
+
 ## Build in Tree
 
 When the use of the Jitter RNG as a kernel module is insufficient, e.g. when its
