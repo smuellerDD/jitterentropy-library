@@ -38,7 +38,7 @@ min_pair_deterministic=""
 min_triple_deterministic=""
 while [ $size -le 20 ]
 do
-	det=$(grep H_original $RESULTS_DIR/jent-raw-noise_memaccloop_deterministic${size}-0001.minentropy_FF_8bits.txt | grep min | cut -f2 -d":")
+	det=$(grep H_original $RESULTS_DIR/jent-raw-noise_memaccloop_deterministic${size}-0001.minentropy_*_8bits.txt | grep min | cut -f2 -d":")
 
 	tmp_det=$(Rscript --vanilla processdata_minentropy.r $ENTROPYDATA_DIR/jent-raw-noise_memaccloop_deterministic${size}-0001.data 2>/dev/null| cut -d " " -f 2)
 

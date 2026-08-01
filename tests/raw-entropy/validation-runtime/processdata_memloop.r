@@ -3,9 +3,26 @@
 #
 
 # Data to be modified: provide the cache size here in bytes
-L1 <- 128 * 1024
-L2 <- 32 * 1024 * 1024
+
+# Apple M4Max - Performance Cores
+# L1 <- 128 * 1024
+# L2 <- 32 * 1024 * 1024
+# L3 <- 0
+
+# Intel 14th gen
+L1 <- 48 * 1024
+L2 <- 2 * 1024 * 1024
 L3 <- 24 * 1024 * 1024
+
+# Spacemit K1 RISC-V
+# L1 <- 32 * 1024
+# L2 <- 512 * 1024
+# L3 <- 0
+
+# Intel Atom Z530
+#L1 <- 24 * 1024
+#L2 <- 512 * 1024
+#L3 <- 0
 
 # Load the file created by processdata_memloop.sh
 args <- commandArgs(trailingOnly = TRUE)
@@ -59,7 +76,7 @@ abline(v=log2(L1) - 9, col = "green", lwd = 1)
 # L2 boundary = L2 + L1
 abline(v=log2(L2 + L1) - 9, col = "green", lwd = 1)
 # L3 boundary = L3 + L2 + L1
-#abline(v=log2(L3 + L2 + L1) - 9, col = "green", lwd = 1)
+abline(v=log2(L3 + L2 + L1) - 9, col = "green", lwd = 1)
 
 legend("topleft", legend = c(coln, "L1 / L2 / L3 Cache Boundaries"),
        col = c("red", "blue", "cyan", "orange", "green"),

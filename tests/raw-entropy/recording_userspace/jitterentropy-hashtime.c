@@ -190,7 +190,8 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 #ifdef JENT_RANDOM_MEMACCESS
 	(void)jent_memaccess_deterministic;
 	printf("Random memory access - Memory size: %" PRIu32 " - Hashloop count: %" PRIu32 "\n",
-	       ec->memmask + 1, ec->hashloopcnt * JENT_HASH_LOOP_INIT);
+	       ec->memmask + 1,
+	       ec->hashloopcnt * (jent_es == jent_common ? 0 : JENT_HASH_LOOP_INIT));
 #else
 	(void)jent_memaccess_pseudorandom;
 	printf("Deterministic memory access - Memory size: %" PRIu32 " - Hashloop count: %" PRIu32 "\n",
