@@ -465,6 +465,145 @@ jobs:
           ls -l linux_kernel/jitter_rng.ko
           modinfo linux_kernel/jitter_rng.ko
 
+  # DKMS is how an out-of-tree module survives a distribution kernel update: the
+  # source is registered once under /usr/src and rebuilt automatically for every
+  # kernel installed afterwards. dkms.conf therefore sits in the project root
+  # rather than in linux_kernel/ - Kbuild.source compiles ../src and ../arch, so
+  # a DKMS tree holding only linux_kernel/ would have no entropy core to build.
+  #
+  # The job runs what an administrator runs (copy to /usr/src, dkms add, build,
+  # install, remove) instead of only checking that the file parses, because
+  # every part of dkms.conf that can be wrong - the build directory the module
+  # is expected in, the module name DKMS looks for afterwards, whether the
+  # clean command survives being invoked from DKMS - only shows up when the
+  # real flow is walked end to end.
+  linux-dkms:
+    name: Linux / DKMS / ${{ matrix.os }} / ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        # Kbuild.config as shipped, and the same file edited in the /usr/src
+        # copy. The second case is the configuration path documented for DKMS
+        # users: a make command line reaches a one-off build only, while the
+        # copied Kbuild.config is what the automatic rebuilds read as well.
+        config: [ default, test-interface ]
+        include:
+          - config: default
+            testinterface: 'false'
+          - config: test-interface
+            testinterface: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install DKMS and kernel headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dkms linux-headers-generic
+
+      - name: Check dkms.conf against the library version
+        run: |
+          # PACKAGE_VERSION is a literal in dkms.conf - DKMS names the /usr/src
+          # directory and the /var/lib/dkms tree after it, and cannot compute
+          # it. Catch the two drifting apart here rather than in a release.
+          eval "$(awk '$2 ~ /^JENT_(MAJVERSION|MINVERSION|PATCHLEVEL)$/ \
+                       { print $2 "=" $3 }' jitterentropy.h)"
+          header="$JENT_MAJVERSION.$JENT_MINVERSION.$JENT_PATCHLEVEL"
+          conf=$(. ./dkms.conf >/dev/null; echo "$PACKAGE_VERSION")
+          echo "jitterentropy.h: $header, dkms.conf: $conf"
+          if [ "$header" != "$conf" ]; then
+            echo "::error file=dkms.conf::PACKAGE_VERSION=$conf does not" \
+                 "match the version in jitterentropy.h ($header)"
+            exit 1
+          fi
+          echo "VERSION=$header" >> "$GITHUB_ENV"
+
+      - name: Register the source tree
+        run: |
+          # As in linux-kmod: the runner's own kernel has no installable
+          # headers package, so the module is built for the kernel whose
+          # headers were just installed. DKMS resolves a kernel version through
+          # /lib/modules/<version>/build, which the headers package normally
+          # provides - it is created here only if that is missing.
+          KDIR=$(ls -d /usr/src/linux-headers-*-generic | sort -V | tail -n 1)
+          KVER=${KDIR#/usr/src/linux-headers-}
+          echo "Building for $KVER against $KDIR"
+          if [ ! -e "/lib/modules/$KVER/build" ]; then
+            sudo mkdir -p "/lib/modules/$KVER"
+            sudo ln -sfn "$KDIR" "/lib/modules/$KVER/build"
+          fi
+          echo "KVER=$KVER" >> "$GITHUB_ENV"
+
+          sudo mkdir -p "/usr/src/jitterentropy-$VERSION"
+          sudo cp -a . "/usr/src/jitterentropy-$VERSION/"
+
+          if [ "${{ matrix.testinterface }}" = "true" ]; then
+            config=/usr/src/jitterentropy-$VERSION/linux_kernel/Kbuild.config
+            sudo sed -i \
+              's/^# *\(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y\)/\1/' \
+              "$config"
+            # A renamed or reworded option would leave the sed above matching
+            # nothing, and the job would then silently test the default
+            # configuration twice.
+            grep -q '^CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y' "$config"
+          fi
+
+          sudo dkms add -m jitterentropy -v "$VERSION"
+
+      - name: Build and install
+        run: |
+          sudo dkms build -m jitterentropy -v "$VERSION" -k "$KVER"
+          sudo dkms install -m jitterentropy -v "$VERSION" -k "$KVER"
+          dkms status
+
+      - name: Show and check the installed module
+        run: |
+          # Searched for rather than looked up at a fixed path: DKMS picks the
+          # destination itself (/updates/dkms on Debian and Ubuntu, /extra on
+          # Fedora, DEST_MODULE_LOCATION where the distribution has no rule of
+          # its own), and Ubuntu may compress the module, so neither the
+          # directory nor the extension is ours to predict. What matters is
+          # that exactly one module ended up somewhere depmod covers.
+          mapfile -t kos < <(find /lib/modules/"$KVER" -name 'jitter_rng.ko*' \
+                                  -not -path '*/build/*')
+          echo "installed as: ${kos[*]:-nothing}"
+          test "${#kos[@]}" = 1
+          ko=${kos[0]}
+          ls -l "$ko"
+          modinfo "$ko"
+
+          # testing_osr is a parameter of jitterentropy_testing.c, so its
+          # presence tells whether the edited Kbuild.config actually reached
+          # the build DKMS ran - the module links either way.
+          #
+          # modinfo is run on its own rather than piped into grep: these steps
+          # run under pipefail, and grep -q exiting at the first match can
+          # leave modinfo killed by SIGPIPE, which would fail the pipeline
+          # precisely when the parameter is there.
+          parm=$(modinfo -F parm "$ko")
+          if grep -q '^testing_osr' <<< "$parm"; then
+            found=true
+          else
+            found=false
+          fi
+          echo "test interface built in: $found" \
+               "(expected ${{ matrix.testinterface }})"
+          [ "$found" = "${{ matrix.testinterface }}" ]
+
+      - name: Remove
+        run: |
+          sudo dkms remove -m jitterentropy -v "$VERSION" --all
+          dkms status
+          # Removal has to take the installed module with it: a module left
+          # behind would still be loaded by a later modprobe, with nothing in
+          # the DKMS tree left to rebuild it for the next kernel.
+          left=$(find /lib/modules/"$KVER" -name 'jitter_rng.ko*' \
+                      -not -path '*/build/*')
+          echo "left behind: ${left:-nothing}"
+          test -z "$left"
+          test ! -d "/var/lib/dkms/jitterentropy/$VERSION/$KVER"
+
   # The linux-kmod job above varies the interface options but builds against a
   # single kernel - whichever linux-headers-generic Ubuntu currently ships. The
   # module's other axis of breakage is the kernel API itself, which moves under
