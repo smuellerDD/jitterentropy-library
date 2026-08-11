@@ -100,3 +100,14 @@ endfunction()
 testprogram(jitterentropy-hashtime AMALGAMATED)
 testprogram(jitterentropy-osr)
 testprogram(jitterentropy-rng)
+
+# The CPU information tool only queries the operating system about the CPUs -
+# it does not link against the library.
+add_executable(jitterentropy-cpuinfo jitterentropy-cpuinfo.c)
+target_compile_options(jitterentropy-cpuinfo PRIVATE ${JITTER_C_FLAGS})
+if(WIN32)
+    # The model of each CPU is read from the registry with RegGetValueA(), which
+    # MSVC pulls in through its default libraries but MinGW does not.
+    target_link_libraries(jitterentropy-cpuinfo "advapi32")
+endif()
+install(TARGETS jitterentropy-cpuinfo)

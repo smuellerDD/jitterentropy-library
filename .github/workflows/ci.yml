@@ -57,6 +57,14 @@ jobs:
         run: |
           echo "RLIMIT_MEMLOCK soft=$(ulimit -Sl) hard=$(ulimit -Hl)"
           ./build/tests/gcd/gcd
+          cpuinfo=./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+          "$cpuinfo"
+          # The machine-readable form of the same data has to parse. The writer
+          # is platform-independent, so one job checking it covers all of them;
+          # the others only run it.
+          "$cpuinfo" --json | python3 -c 'import json,sys; json.load(sys.stdin)'
+          # The summary of the same machine, which is a second table writer.
+          "$cpuinfo" --summary
           export LD_LIBRARY_PATH="$PWD/build:$LD_LIBRARY_PATH"
           for opt in "" "--all-caches" "--force-internal-timer"; do
             ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
@@ -105,6 +113,7 @@ jobs:
         run: |
           file build/tests/gcd/gcd | grep -q '32-bit' || { echo "not a 32-bit build"; exit 1; }
           ./build/tests/gcd/gcd
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
           for opt in "--all-caches" "--force-internal-timer"; do
             ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
           done
@@ -219,6 +228,7 @@ jobs:
           }
 
           ./build/tests/gcd/gcd
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
           for opt in "" "--all-caches" "--force-internal-timer"; do
             ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
           done
@@ -1100,6 +1110,7 @@ jobs:
           }
 
           ./build/tests/gcd/gcd
+          "$bin/jitterentropy-cpuinfo"
           for opt in "" "--all-caches" "--force-internal-timer"; do
             "$bin/jitterentropy-rng" 256 $opt > /dev/null
           done
@@ -1256,6 +1267,16 @@ jobs:
       - name: Build
         run: make -j 4
 
+      # The recording tools have one Makefile each, which no other job builds.
+      # jitterentropy-cpuinfo can also be run here: it links nothing and
+      # describes the runner, so it needs neither the library nor a tolerated
+      # failure path.
+      - name: Build and run the CPU information tool
+        working-directory: tests/raw-entropy/recording_userspace
+        run: |
+          make -f Makefile.cpuinfo
+          ./jitterentropy-cpuinfo
+
       - name: Link and run against the built library
         run: |
           cat > smoke.c <<'EOF'
@@ -1324,6 +1345,8 @@ jobs:
       - name: Run tests
         run: |
           ./build/tests/gcd/gcd
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo --json > /dev/null
           export DYLD_LIBRARY_PATH="$PWD/build:$DYLD_LIBRARY_PATH"
           for opt in "" "--all-caches" "--force-internal-timer"; do
             ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
@@ -1588,6 +1611,7 @@ jobs:
           # PATH.
           export PATH="$PWD/build/Release:$PATH"
           ./build/tests/gcd/Release/gcd.exe
+          ./build/tests/raw-entropy/recording_userspace/Release/jitterentropy-cpuinfo.exe
           rng=./build/tests/raw-entropy/recording_userspace/Release/jitterentropy-rng.exe
           for opt in "" "--all-caches" "--force-internal-timer"; do
             "$rng" 256 $opt > /dev/null
@@ -1654,6 +1678,7 @@ jobs:
       - name: Run tests
         run: |
           ./build/tests/gcd/gcd.exe
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo.exe
           rng=./build/tests/raw-entropy/recording_userspace/jitterentropy-rng.exe
           for opt in "" "--all-caches" "--force-internal-timer"; do
             "$rng" 256 $opt > /dev/null

@@ -1,0 +1,43 @@
+# Compile the CPU information tool
+#
+# The tool only queries the operating system about the CPUs; it does not use
+# any Jitter RNG code and therefore needs neither the library nor its headers.
+
+CC ?= gcc
+CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
+#Hardening
+CFLAGS +=-fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
+ifneq (Darwin,$(shell uname))
+LDFLAGS +=-Wl,-z,relro,-z,now
+endif
+
+GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
+ifeq "$(GCCVERSIONFORMAT)" "3"
+  GCC_GTEQ_490 := $(shell expr `$(CC) -dumpversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
+else
+  GCC_GTEQ_490 := $(shell expr `$(CC) -dumpfullversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/'` \>= 40900)
+endif
+
+ifeq "$(GCC_GTEQ_490)" "1"
+  CFLAGS += -fstack-protector-strong
+else
+  CFLAGS += -fstack-protector-all
+endif
+
+program_NAME := jitterentropy-cpuinfo
+program_C_SRCS := jitterentropy-cpuinfo.c
+program_C_OBJS := ${program_C_SRCS:.c=.o}
+program_OBJS := $(program_C_OBJS)
+
+.PHONY: all clean distclean
+
+all: $(program_NAME)
+
+$(program_NAME): $(program_OBJS)
+	$(CC) $(program_OBJS) -o $(program_NAME) $(LDFLAGS)
+
+clean:
+	@- $(RM) $(program_NAME)
+	@- $(RM) $(program_OBJS)
+
+distclean: clean

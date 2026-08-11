@@ -13,7 +13,7 @@
       forAllSystems = f: lib.genAttrs systems (system: f system);
 
       # Userspace library and tools, built with the project's CMake build.
-      # Installs jitterentropy-{hashtime,osr,rng}, gcd, extractlsb,
+      # Installs jitterentropy-{cpuinfo,hashtime,osr,rng}, gcd, extractlsb,
       # getrawentropy and jitterentropy-chardev-status into bin.
       toolsFor = pkgs:
         pkgs.stdenv.mkDerivation {
@@ -594,8 +594,9 @@
 
             # The CMake-built userspace tools are on PATH.
             for tool in ("jitterentropy-rng", "jitterentropy-osr",
-                         "jitterentropy-hashtime", "gcd", "extractlsb",
-                         "getrawentropy", "jitterentropy-chardev-status"):
+                         "jitterentropy-hashtime", "jitterentropy-cpuinfo",
+                         "gcd", "extractlsb", "getrawentropy",
+                         "jitterentropy-chardev-status"):
                 machine.succeed(f"command -v {tool}")
           '';
         };
