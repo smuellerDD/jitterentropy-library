@@ -1632,6 +1632,66 @@ jobs:
               echo "::warning::jitterentropy-rng $opt failed on this machine"
           done
 
+  # clang-cl is the one compiler this workflow builds that is Clang and MSVC at
+  # once: CMAKE_C_COMPILER_ID reports Clang, so CMakeLists.txt sets CLANG, while
+  # CMake also sets MSVC because the driver takes cl's command line. Every other
+  # job sets at most one of the two, so the branches that test them together are
+  # reached here and nowhere else - and one of them was wrong until this job
+  # existed, handing a GCC-style -fstack-protector-strong to a driver that
+  # ignores it.
+  #
+  # It is also Clang's codegen against the Windows headers and the MSVC ABI,
+  # which no other entry covers: the MinGW jobs are Clang-free, and the Linux
+  # and macOS Clang jobs compile entirely different back-ends in
+  # arch/. Diagnostics differ as well - /W4 selects clang's own analyses, not
+  # cl's - so this is the job that would notice a Windows-only construct only
+  # Clang objects to.
+  #
+  # -T ClangCL selects the toolset Visual Studio ships, so the generator, the
+  # --config Release build and the per-config binary layout stay identical to
+  # the MSVC job above and nothing has to set up an MSVC environment by hand.
+  # x64 alone: what is distinct here is the front end, and windows-msvc already
+  # covers both architectures with the same sources.
+  windows-clang-cl:
+    name: Windows / clang-cl
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Which Clang the toolset resolved to is not pinned here and need not be:
+      # configure prints it as "The C compiler identification is Clang <version>
+      # with MSVC-like command-line", so a failure that turns out to be
+      # version-specific can be read off this step's log.
+      - name: Configure
+        run: cmake -S . -B build -T ClangCL
+
+      - name: Build
+        run: cmake --build build --config Release -j
+
+      - name: Run tests
+        run: |
+          ./build/tests/gcd/Release/gcd.exe
+          ./build/tests/raw-entropy/recording_userspace/Release/jitterentropy-cpuinfo.exe
+          rng=./build/tests/raw-entropy/recording_userspace/Release/jitterentropy-rng.exe
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            "$rng" 256 $opt > /dev/null
+          done
+
+          # The two compliance modes are run as well but not gated on. They imply
+          # JENT_FORCE_SECURE_MEM, so they are what reaches the mlock path in
+          # arch/jitterentropy-arch-memory.c and, before it, the limit raising the
+          # recording tools do for exactly these modes
+          # (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h). They can
+          # also fail for reasons that are properties of the machine rather than
+          # defects in the code: a memory lock limit lower than the collector needs,
+          # or a startup whose health tests do not converge on the block size derived
+          # from this CPU's caches. Such a failure is reported as a warning so it
+          # stays visible without turning the run red.
+          for opt in "--force-fips" "--ntg1"; do
+            "$rng" 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
   # MinGW is a distinct Windows target rather than a variation of MSVC: it is
   # the GCC side of the Win32 thread back-end (__stdcall on a GCC front end,
   # _beginthreadex() out of the mingw-w64 CRT rather than the UCRT), and it has

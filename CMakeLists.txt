@@ -153,7 +153,19 @@ if(STACK_PROTECTOR)
         else()
             set(JITTER_SSP_FLAG -fstack-protector-all)
         endif()
-    elseif(CLANG)
+    # "NOT MSVC" excludes clang-cl, which is Clang - CMAKE_C_COMPILER_ID says so
+    # and CLANG is set for it - behind a cl-compatible driver that does not take
+    # GCC-style spellings. It answers -fstack-protector-strong with "unknown
+    # argument ignored in clang-cl" and carries on, which the probe below reads
+    # as success: the flag would be added to every compile and link command, be
+    # dropped by each of them, and leave a build that reports hardening it does
+    # not have. cl itself never reached here - neither GCC nor CLANG is set for
+    # it - so this only ever concerned the one compiler that is both.
+    #
+    # Nothing is substituted for it. The equivalent is /GS, which clang-cl
+    # enables by default exactly as cl does, so the MSVC builds already have the
+    # protection this branch would otherwise ask for.
+    elseif(CLANG AND NOT MSVC)
         set(JITTER_SSP_FLAG -fstack-protector-strong)
     endif()
 
