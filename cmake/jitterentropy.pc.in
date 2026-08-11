@@ -11,4 +11,4 @@ Libs: -L${libdir} @JITTER_PC_LIBS@
 Libs.private: @JITTER_PC_LIBS_PRIVATE@
 Requires: @JITTER_PC_REQUIRES@
 Requires.private: @JITTER_PC_REQUIRES_PRIVATE@
-Cflags: -I${includedir}
+Cflags: -I${includedir}@JITTER_PC_CFLAGS@

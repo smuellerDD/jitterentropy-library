@@ -1322,6 +1322,284 @@ jobs:
           cc -std=c11 -I. smoke.c libjitterentropy.a $LIBS -o smoke
           ./smoke
 
+      # The Makefile is also the only build system here that produces a
+      # versioned shared object with a soname and the two symlinks that point
+      # at it, and install-shared is the only place those are created. Linking
+      # against the installed tree is what says they name each other correctly:
+      # -ljitterentropy resolves through libjitterentropy.so, and the loader
+      # then has to find the SONAME recorded in the binary.
+      #
+      # install-static is a separate target that "make install" deliberately
+      # does not pull in, so both are named here.
+      - name: Link and run against the installed library
+        run: |
+          # Rebuilt rather than installed on top of the step above, because on
+          # macOS PREFIX is baked into the library at link time: SONAME_FLAGS
+          # passes it to -install_name, which is the absolute path the loader
+          # will later look the dylib up by. Installing a library linked
+          # against the default /usr/local into some other prefix leaves it
+          # answering to a path that holds nothing.
+          make clean
+          make -j 4 PREFIX="$PWD/prefix"
+          make install install-static PREFIX="$PWD/prefix"
+          ls -l prefix/lib
+          # Same split as the step above: librt only exists on Linux.
+          case "${{ runner.os }}" in
+            Linux) LIBS="-pthread -lrt" ;;
+            *)     LIBS="-pthread" ;;
+          esac
+          # Shared: -l prefers the shared object over the archive beside it.
+          # The rpath is what makes the run independent of the loader
+          # environment variables, which macOS strips under system integrity
+          # protection.
+          cc -std=c11 -Iprefix/include \
+            tests/linking/jitterentropy-linktest.c \
+            -Lprefix/lib -ljitterentropy $LIBS \
+            -Wl,-rpath,"$PWD/prefix/lib" -o linktest-shared
+          ./linktest-shared
+          # Static: the archive is named directly, because -l would keep
+          # choosing the shared object.
+          cc -std=c11 -Iprefix/include \
+            tests/linking/jitterentropy-linktest.c \
+            prefix/lib/libjitterentropy.a $LIBS -o linktest-static
+          ./linktest-static
+
+  # Every other job here builds this repository and runs binaries out of its
+  # own build tree, where the library is a CMake target and the public header
+  # is reached through the source directory. A consumer sees none of that. It
+  # gets an install tree, and its link succeeds or fails on the installed
+  # header, on the set of symbols the library still exports, and on what the
+  # CMake package and the .pc file say the link needs. nix-consumers answers
+  # that for two real downstream projects, but only on Linux, only through
+  # nixpkgs' packaging of this library, and it never runs what it builds.
+  #
+  # This job installs the library with "cmake --install" and builds
+  # tests/linking/jitterentropy-linktest.c against the result - once resolved
+  # with find_package(), once with pkg-config - and runs it. That program calls
+  # every function jitterentropy.h declares, so a symbol that stops being
+  # exported fails the link here instead of in somebody's build.
+  #
+  # Both linkages are built because they break in different places. Only the
+  # shared one exercises the dllexport/dllimport split in the public header and
+  # the ELF/Mach-O visibility, where a declaration that lost its
+  # JENT_PRIVATE_STATIC is simply not in the library. Only the static one makes
+  # the consumer name the transitive dependencies - bcrypt, pthread, the
+  # stack-protector runtime - on its own link line, and on Windows it is the
+  # one that has to reach the header with JENT_STATIC_LIB set, or every
+  # declaration in it says dllimport and the archive has no __imp_ symbols to
+  # satisfy it.
+  linking:
+    name: Linking / ${{ matrix.os }} / shared=${{ matrix.shared }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      # CMAKE_INSTALL_LIBDIR is pinned so that the steps below can name the
+      # install tree. GNUInstallDirs otherwise derives it from the
+      # distribution - lib, lib64, or a multiarch lib/<triple> - and what is
+      # under test here is the linkage, not rediscovering where files landed.
+      #
+      # The prefix is converted to a native path on Windows: cmake there is a
+      # Windows program and does not understand the /d/... form Git bash
+      # reports. It is carried to the later steps in the environment, while
+      # PATH and the loader variables keep using the bash form, which is the
+      # one those need.
+      #
+      # CMAKE_BUILD_TYPE has to name the configuration the install below asks
+      # for, or the package installs without the half of it that says where the
+      # library is. install(EXPORT) writes the target definitions in two files:
+      # jitterentropyTargets.cmake, installed unconditionally, and a per-
+      # configuration jitterentropyTargets-<config>.cmake carrying
+      # IMPORTED_LOCATION, whose install rule is guarded on the configuration
+      # being installed. A single-config generator with no CMAKE_BUILD_TYPE
+      # builds the "noconfig" one, which "cmake --install --config Release" then
+      # does not match, leaving find_package() with an imported target that has
+      # no file behind it - "IMPORTED_LOCATION or IMPORTED_IMPLIB not set". The
+      # macOS and Linux runners default to such a generator; Windows uses the
+      # multi-config Visual Studio one, where the build type comes from --config
+      # and this variable is ignored.
+      - name: Build and install the library
+        run: |
+          prefix="$PWD/prefix"
+          case "${{ runner.os }}" in
+          Windows) prefix=$(cygpath -m "$prefix") ;;
+          esac
+          echo "JENT_PREFIX=$prefix" >> "$GITHUB_ENV"
+          cmake -S . -B build \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$prefix" \
+            -DCMAKE_INSTALL_LIBDIR=lib
+          cmake --build build --config Release --parallel 4
+          cmake --install build --config Release
+
+      # tests/linking is a project of its own rather than a target of this
+      # build: configured from inside this tree it would resolve the library
+      # directly and say nothing about the installed package.
+      - name: Link and run through the CMake package
+        run: |
+          cmake -S tests/linking -B build-cmake -DCMAKE_PREFIX_PATH="$JENT_PREFIX"
+          cmake --build build-cmake --config Release --parallel 4
+          # The Visual Studio generator is multi-config and puts the binary in
+          # a per-config subdirectory; the single-config generators used
+          # elsewhere put it in the build directory.
+          case "${{ runner.os }}" in
+          Windows)
+            # The import library sits in lib/ but the DLL is installed to
+            # bin/, and Windows resolves it from PATH.
+            export PATH="$PWD/prefix/bin:$PATH"
+            ./build-cmake/Release/jitterentropy-linktest.exe
+            ;;
+          *)
+            export LD_LIBRARY_PATH="$PWD/prefix/lib:$LD_LIBRARY_PATH"
+            export DYLD_LIBRARY_PATH="$PWD/prefix/lib:$DYLD_LIBRARY_PATH"
+            ./build-cmake/jitterentropy-linktest
+            ;;
+          esac
+
+      # Whether the two configurations really produced two different linkages,
+      # rather than both quietly ending up the same way. Without this, a build
+      # in which BUILD_SHARED_LIBS stopped being honoured would run one linkage
+      # twice and still report a green matrix.
+      #
+      # Windows is left out because nothing there could differ: a static
+      # configuration produces no DLL and a shared one produces no archive, so
+      # the linkage is settled by which file exists.
+      - name: Check the linkage
+        if: runner.os != 'Windows'
+        run: |
+          bin=./build-cmake/jitterentropy-linktest
+          case "${{ runner.os }}" in
+          macOS) deps=$(otool -L "$bin") ;;
+          *)     deps=$(ldd "$bin") ;;
+          esac
+          echo "$deps"
+          if [ "${{ matrix.shared }}" = ON ]; then
+            if ! grep -q libjitterentropy <<<"$deps"; then
+              echo "::error::shared build has no libjitterentropy dependency"
+              exit 1
+            fi
+          elif grep -q libjitterentropy <<<"$deps"; then
+            echo "::error::static build has a libjitterentropy dependency"
+            exit 1
+          else
+            echo "no libjitterentropy dependency, as expected of a static link"
+          fi
+
+      # MSVC ships no pkg-config and would not understand the flags one prints.
+      # The MinGW half of Windows, which does have both, is covered by
+      # linking-mingw below.
+      - name: Link and run through pkg-config
+        if: runner.os != 'Windows'
+        run: |
+          # The macOS images do not always carry pkg-config; the Linux ones do.
+          command -v pkg-config > /dev/null || brew install pkg-config
+          export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig"
+          pkg-config --exists jitterentropy || {
+            echo "::error::no jitterentropy.pc under $PKG_CONFIG_PATH"
+            exit 1
+          }
+          echo "modversion: $(pkg-config --modversion jitterentropy)"
+          # A static build names the library and its private dependencies on
+          # the Libs.private line, which only --static prints. Without it the
+          # answer is a bare -L with nothing to link.
+          if [ "${{ matrix.shared }}" = ON ]; then
+            libs=$(pkg-config --libs jitterentropy)
+          else
+            libs=$(pkg-config --static --libs jitterentropy)
+          fi
+          cflags=$(pkg-config --cflags jitterentropy)
+          echo "cflags: $cflags"
+          echo "libs:   $libs"
+          # The -L in there only affects the link. The run needs the directory
+          # recorded in the binary as well, because macOS' system integrity
+          # protection strips DYLD_LIBRARY_PATH from the environment of
+          # anything /bin/sh starts. Harmless in the static case, where the
+          # binary has nothing to look up.
+          cc -std=c11 $cflags tests/linking/jitterentropy-linktest.c $libs \
+            -Wl,-rpath,"$PWD/prefix/lib" -o linktest-pc
+          ./linktest-pc
+
+  # The MinGW half of Windows, which the job above cannot fold into its matrix:
+  # it needs a different shell, and that is a job-level setting.
+  #
+  # It is also the only Windows toolchain with a pkg-config, which makes it the
+  # only place the .pc file's Windows-specific entries are exercised. Both
+  # exist because the exported CMake target carries things the .pc file does
+  # not inherit: -lbcrypt, without which a static consumer is left with an
+  # undefined BCryptGenRandom, and -DJENT_STATIC_LIB, without which the
+  # installed header declares every function __declspec(dllimport) while the
+  # archive defines them undecorated.
+  linking-mingw:
+    name: Linking / MinGW-w64 / shared=${{ matrix.shared }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shared: [ 'ON', 'OFF' ]
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      # UCRT64 alone: windows-mingw already builds both environments, and what
+      # is distinct here is the consumer side, which they share.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+
+      # cmake and pkgconf are both native Windows programs here, so paths
+      # handed to them go through cygpath; PATH stays in the MSYS form, which
+      # is what MSYS2 translates for the processes it starts.
+      - name: Build and install the library
+        run: |
+          prefix=$(cygpath -m "$PWD/prefix")
+          echo "JENT_PREFIX=$prefix" >> "$GITHUB_ENV"
+          cmake -S . -B build -G Ninja \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
+            -DCMAKE_INSTALL_PREFIX="$prefix" \
+            -DCMAKE_INSTALL_LIBDIR=lib
+          cmake --build build --parallel 4
+          cmake --install build
+
+      - name: Link and run through the CMake package
+        run: |
+          cmake -S tests/linking -B build-cmake -G Ninja \
+            -DCMAKE_PREFIX_PATH="$JENT_PREFIX"
+          cmake --build build-cmake --parallel 4
+          PATH="$PWD/prefix/bin:$PATH" ./build-cmake/jitterentropy-linktest.exe
+
+      - name: Link and run through pkg-config
+        run: |
+          export PKG_CONFIG_PATH="$JENT_PREFIX/lib/pkgconfig"
+          pkg-config --exists jitterentropy || {
+            echo "::error::no jitterentropy.pc under $PKG_CONFIG_PATH"
+            exit 1
+          }
+          if [ "${{ matrix.shared }}" = ON ]; then
+            libs=$(pkg-config --libs jitterentropy)
+          else
+            libs=$(pkg-config --static --libs jitterentropy)
+          fi
+          cflags=$(pkg-config --cflags jitterentropy)
+          echo "cflags: $cflags"
+          echo "libs:   $libs"
+          gcc -std=c11 $cflags tests/linking/jitterentropy-linktest.c $libs \
+            -o linktest-pc.exe
+          PATH="$PWD/prefix/bin:$PATH" ./linktest-pc.exe
+
   # Both macOS architectures: they select different jent_get_nstime() back-ends
   # (cntvct_el0 on Apple Silicon, rdtsc on Intel) and different cache sysctls
   # (the hw.perflevel0.* names exist only on Apple Silicon).

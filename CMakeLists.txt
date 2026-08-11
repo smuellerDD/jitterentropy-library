@@ -61,6 +61,10 @@ else()
   set(JITTER_PC_LIBS_PRIVATE "-l${CMAKE_PROJECT_NAME}")
 endif()
 
+# Appended to the Cflags line of the .pc file. Only the Windows static build
+# has anything to put here; see the JENT_STATIC_LIB branch further down.
+set(JITTER_PC_CFLAGS "")
+
 if(WIN32)
     if(MSVC)
         # _CRT_SECURE_NO_WARNINGS: MSVC deprecates the standard C library in
@@ -326,6 +330,15 @@ if(WIN32)
         target_compile_definitions(${PROJECT_NAME} PRIVATE JENT_BUILDING_DLL)
     else()
         target_compile_definitions(${PROJECT_NAME} PUBLIC JENT_STATIC_LIB)
+
+        # The same for pkg-config consumers. PUBLIC above covers the exported
+        # CMake target - the definition is carried in its
+        # INTERFACE_COMPILE_DEFINITIONS - but nothing propagates it into the
+        # .pc file, and without it the public header declares the functions
+        # __declspec(dllimport) while the archive defines them undecorated, so
+        # a MinGW consumer building through pkg-config was left looking for
+        # __imp_ symbols that a static library never has.
+        set(JITTER_PC_CFLAGS " -DJENT_STATIC_LIB")
     endif()
 endif()
 # Only jitterentropy.h is installed (as PUBLIC_HEADER below). The arch/ headers
@@ -340,10 +353,16 @@ install(TARGETS ${PROJECT_NAME}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
+# The package subdirectory in the destination is not cosmetic. find_package()
+# in config mode searches <prefix>/<lib|share>/cmake/<name>*/ under every entry
+# of CMAKE_PREFIX_PATH; a bare lib/cmake/ is not one of the places it looks, so
+# a package installed directly there was only findable by pointing
+# CMAKE_PREFIX_PATH at lib/cmake itself. tests/linking is the consumer that
+# would have to do that.
 install(EXPORT jitterentropyTargets
   FILE jitterentropyTargets.cmake
   NAMESPACE jitterentropy::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -429,6 +448,17 @@ endif()
 set(JITTER_THREAD_LIBRARIES "")
 if(INTERNAL_TIMER AND NOT ANDROID AND NOT WIN32)
     set(JITTER_THREAD_LIBRARIES -pthread)
+
+    # And once more for pkg-config consumers of the static library, for the
+    # same reason -lbcrypt is added to this variable on Windows: the exported
+    # CMake target carries the dependency as $<LINK_ONLY:pthread>, while the
+    # .pc file inherits nothing. The omission stays invisible wherever the
+    # pthread symbols live in the C library - glibc 2.34 and later, Apple's
+    # libSystem, bionic - and surfaces on everything older, which is most of
+    # the enterprise distributions still in support.
+    if(NOT BUILD_SHARED_LIBS)
+        set(JITTER_PC_LIBS_PRIVATE "${JITTER_PC_LIBS_PRIVATE} -pthread")
+    endif()
 endif()
 
 # testing/validation tools
@@ -454,10 +484,13 @@ install(FILES
 )
 
 # cmake
+#
+# Same destination as the targets file above - the config file includes it by
+# CMAKE_CURRENT_LIST_DIR, so the two have to stay together.
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/jitterentropyConfig.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/jitterentropyConfig.cmake
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/jitterentropyConfigVersion.cmake
@@ -467,7 +500,7 @@ write_basic_package_version_file(
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/jitterentropyConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/jitterentropyConfigVersion.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
 # man page(s)
