@@ -57,11 +57,31 @@
  *     Cygwin)
  *   - Linux Kernel                   -> 1 (we do not need a timer thread)
  *   - other (e.g. baremetal)         -> 1 (timer thread will be disabled)
+ *
+ * Provides jent_cpu_highest() returning the highest of those CPU numbers - the
+ * one a thread may be pinned to - or a negative errno. Not the count minus
+ * one: the CPUs a thread may run on are a set, and one confined to a cpuset
+ * need not hold the numbers the count would name. Only Linux can tell the two
+ * apart; elsewhere the count minus one is all there is.
  */
 
 #ifndef _JITTERENTROPY_ARCH_NCPU_H
 #define _JITTERENTROPY_ARCH_NCPU_H
 
+/*
+ * Largest CPU set the Linux affinity paths grow to, in CPUs; the highest CPU
+ * number handled is therefore one below it. The bound is shared by
+ * jent_cpu_highest() and jent_thread_pin_to_cpu(), so every CPU the first can
+ * name is one the second can pin to - held to a fixed cpu_set_t the second
+ * refuses everything from CPU_SETSIZE (1024 on glibc) up, on precisely the
+ * machines where naming the highest CPU rather than the count differs at all.
+ *
+ * Far above the CONFIG_NR_CPUS of any kernel built today, and a set of this
+ * size is a short-lived 8 KiB allocation.
+ */
+#define JENT_NCPU_SET_MAX	(1U << 16)
+
 long jent_ncpu(void);
+long jent_cpu_highest(void);
 
 #endif /* _JITTERENTROPY_ARCH_NCPU_H */

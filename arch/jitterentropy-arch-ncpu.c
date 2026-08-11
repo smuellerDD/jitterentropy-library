@@ -99,6 +99,59 @@
 
 #endif /* LINUX_KERNEL */
 
+#ifdef JENT_ARCH_NCPU_LINUX_AFFINITY
+/*
+ * Read the affinity mask of the calling thread and report both questions asked
+ * of it: @count how many CPUs it holds, @highest the largest number among them
+ * (-1 for an empty mask). Returns 0 or a negative errno.
+ *
+ * The set grows on retry: sched_getaffinity(2) fails with EINVAL when it is
+ * smaller than the CPU mask of the kernel, as on a machine with more CPUs than
+ * CPU_SETSIZE. A fixed set would not merely lose the highest CPU there, it
+ * would answer neither question - which is why both callers read the mask
+ * through here rather than each with a set of its own.
+ */
+static int jent_affinity_mask(long *count, long *highest)
+{
+	unsigned int ncpu_set;
+
+	for (ncpu_set = CPU_SETSIZE; ncpu_set <= JENT_NCPU_SET_MAX;
+	     ncpu_set *= 2) {
+		size_t size = CPU_ALLOC_SIZE(ncpu_set);
+		cpu_set_t *set = CPU_ALLOC(ncpu_set);
+		int ret;
+
+		if (!set)
+			return -ENOMEM;
+
+		ret = sched_getaffinity(0, size, set) ? errno : 0;
+		if (!ret) {
+			unsigned int i = ncpu_set;
+
+			*count = CPU_COUNT_S(size, set);
+			*highest = -1;
+			while (i-- > 0) {
+				if (CPU_ISSET_S(i, size, set)) {
+					*highest = (long)i;
+					break;
+				}
+			}
+		}
+
+		CPU_FREE(set);
+
+		if (ret == EINVAL)
+			continue;	/* set too small - try a larger one */
+		if (ret)
+			return -ret;
+
+		return 0;
+	}
+
+	return -EINVAL;
+}
+#endif /* JENT_ARCH_NCPU_LINUX_AFFINITY */
+
 #ifdef JENT_ARCH_NCPU_LINUX_SYSFS
 /*
  * Parse /sys/devices/system/cpu/online and return the number of online
@@ -176,25 +229,10 @@ long jent_ncpu(void)
 #elif defined(JENT_ARCH_NCPU_POSIX)
 # ifdef JENT_ARCH_NCPU_LINUX_AFFINITY
 	{
-		size_t cpu_set_alloc_size = CPU_ALLOC_SIZE(CPU_SETSIZE);
-		cpu_set_t *cpu_set = CPU_ALLOC(CPU_SETSIZE);
-		long count = 0;
+		long count = 0, highest = -1;
 
-		/* only get affinity if allocation was successful */
-		if (cpu_set &&
-		    sched_getaffinity(0,
-				      cpu_set_alloc_size,
-				      cpu_set) == 0) {
-			count = CPU_COUNT_S(cpu_set_alloc_size, cpu_set);
-		}
-
-		if (cpu_set) {
-			CPU_FREE(cpu_set);
-		}
-
-		if (count > 0) {
+		if (!jent_affinity_mask(&count, &highest) && count > 0)
 			return count;
-		}
 		/* fall through to sysfs / sysconf */
 	}
 # endif
@@ -238,4 +276,39 @@ long jent_ncpu(void)
 	 */
 	return 1;
 #endif
+}
+
+long jent_cpu_highest(void)
+{
+#ifdef JENT_ARCH_NCPU_LINUX_AFFINITY
+	/*
+	 * The mask is a set, not a range - counting its members and naming the
+	 * last of them are different questions, and only the latter yields a
+	 * CPU a thread can be pinned to.
+	 */
+	{
+		long count = 0, highest = -1;
+
+		if (!jent_affinity_mask(&count, &highest) && highest >= 0)
+			return highest;
+		/* fall through to the count below */
+	}
+#endif
+
+	/*
+	 * Everywhere else the count is all there is, and the CPU numbers are
+	 * taken to be the dense range it describes - true for the flat Windows
+	 * numbering, which jent_thread_pin_to_cpu() resolves in the same order,
+	 * and unavoidable without an affinity API.
+	 */
+	{
+		long ncpu = jent_ncpu();
+
+		if (ncpu < 0)
+			return ncpu;
+		if (ncpu == 0)
+			return -EFAULT;
+
+		return ncpu - 1;
+	}
 }
