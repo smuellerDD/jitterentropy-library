@@ -916,6 +916,100 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 	}
 }
 
+/*
+ * The timestamp must get larger when the measured loops get larger.
+ * RCT/APT/lag/GCD already accept any live-looking monotonic function of the
+ * call index (a cubic, a counter with mixed low bits, a bounded Fibonacci
+ * increment). Those functions do not observe the hash or memory work, so
+ * stretching loop_cnt must not stretch their deltas.
+ *
+ * This is not an entropy estimate. It only asks whether the stopwatch is
+ * attached to the work.
+ *
+ * jent_measure_jitter stamps after memaccess and before hash_loop, so a
+ * sample's delta is (previous hash_loop) + (this memaccess). A light
+ * sample therefore needs loop_cnt==1 on both the previous and the current
+ * call; a heavy sample needs the high count on both. The discarded call
+ * in the middle switches the pending hash_loop count.
+ */
+#define JENT_WORKTRACK_LIGHT		1ULL
+#define JENT_WORKTRACK_HEAVY		32ULL
+#define JENT_WORKTRACK_BLOCKS		16
+#define JENT_WORKTRACK_MIN_SCALE	12
+
+static int jent_timer_tracks_work(struct rand_data *ec)
+{
+	unsigned int ok = 0;
+	unsigned int i;
+
+	for (i = 0; i < JENT_WORKTRACK_BLOCKS; i++) {
+		uint64_t light = 0, heavy = 0;
+
+		jent_measure_jitter(ec, JENT_WORKTRACK_LIGHT, NULL);
+		jent_measure_jitter(ec, JENT_WORKTRACK_LIGHT, &light);
+		jent_measure_jitter(ec, JENT_WORKTRACK_HEAVY, NULL);
+		jent_measure_jitter(ec, JENT_WORKTRACK_HEAVY, &heavy);
+
+		if (light && (heavy / light) >= 2)
+			ok++;
+	}
+
+	if (ok < JENT_WORKTRACK_MIN_SCALE)
+		return EINCONSISTENT;
+
+	return 0;
+}
+
+/*
+ * TPAUSE sleeps until a hardware TSC deadline. Then jent_get_nstime must
+ * have moved by about as much as the TSC actually slept. A closed form in
+ * the call index moves by one f(n) step, not by the wait.
+ *
+ * The deadline is always raw RDTSC, never the software stamp: passing
+ * n^3+n into TPAUSE would wait until the real TSC reached that value.
+ *
+ * Windows wakes TPAUSE early. Compare against the observed TSC sleep,
+ * and retry until that sleep is long enough to judge.
+ */
+#define JENT_TPAUSE_REQUEST	2000000ULL
+#define JENT_TPAUSE_MIN_SLEEP	1000000ULL
+#define JENT_TPAUSE_TRIES	8
+
+static int jent_timer_tracks_tpause(void)
+{
+	unsigned int i;
+
+	if (!jent_tpause_supported())
+		return 0;
+
+	for (i = 0; i < JENT_TPAUSE_TRIES; i++) {
+		uint64_t t0 = 0, t1 = 0, raw0, raw1, hooked, slept;
+
+		jent_get_nstime(&t0);
+		raw0 = jent_raw_tsc();
+		jent_tpause_until(raw0 + JENT_TPAUSE_REQUEST);
+		jent_get_nstime(&t1);
+		raw1 = jent_raw_tsc();
+
+		if (raw1 <= raw0 || t1 <= t0)
+			continue;
+
+		slept = raw1 - raw0;
+		hooked = t1 - t0;
+
+		if (slept < JENT_TPAUSE_MIN_SLEEP)
+			continue;
+
+		if (hooked < slept / 2 || hooked > slept * 8)
+			return EINCONSISTENT;
+
+		return 0;
+	}
+
+	/* Every try was interrupted. Do not fail a real CPU. */
+	return 0;
+}
+
 int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 {
 	struct rand_data *ec;
@@ -959,6 +1053,8 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
 	 * loop counts may show some slight skew leading to false positives.
+	 * jent_timer_tracks_work() below is not one of those: it only checks
+	 * that stretching the work stretches the stamp.
 	 */
 
 	/*
@@ -1044,6 +1140,11 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	 */
 	if (JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT) < count_stuck)
 		ret = ESTUCK;
+
+	if (!ret)
+		ret = jent_timer_tracks_work(ec);
+	if (!ret)
+		ret = jent_timer_tracks_tpause();
 
 out:
 	jent_gcd_fini(delta_history, JENT_POWERUP_TESTLOOPCOUNT);

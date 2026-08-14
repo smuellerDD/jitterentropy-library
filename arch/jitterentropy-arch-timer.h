@@ -100,4 +100,18 @@
 
 void jent_get_nstime(uint64_t *out);
 
+/*
+ * WAITPKG TPAUSE helpers. Used by init to see whether jent_get_nstime
+ * advances in the same ballpark as a real TSC wait. On non-x86, or when
+ * the CPU lacks WAITPKG, jent_tpause_supported() is 0 and the others
+ * are no-ops.
+ *
+ * jent_raw_tsc() is the instruction, not jent_get_nstime(): the deadline
+ * must be a hardware TSC value or TPAUSE can sleep for seconds / forever
+ * if the software stamp is a closed form in the call index.
+ */
+int jent_tpause_supported(void);
+uint64_t jent_raw_tsc(void);
+void jent_tpause_until(uint64_t deadline);
+
 #endif /* _JITTERENTROPY_ARCH_TIMER_H */

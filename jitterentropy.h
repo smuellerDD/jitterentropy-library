@@ -483,6 +483,7 @@ void jent_notime_fini(void *ctx);
 #define EHASH		11 /* Hash self test failed */
 #define EMEM		12 /* Can't allocate memory for initialization */
 #define EGCD		13 /* GCD self-test failed */
+#define EINCONSISTENT	14 /* Timer does not track the work it claims to measure */
 /* -- END error codes for init function -- */
 
 /* -- BEGIN error masks for health tests -- */

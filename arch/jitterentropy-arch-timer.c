@@ -381,3 +381,67 @@ void jent_get_nstime(uint64_t *out)
 
 #endif
 }
+
+#if (defined(__x86_64__) || defined(__i386__) || \
+     defined(_M_X64) || defined(_M_IX86)) && !defined(LINUX_KERNEL)
+
+int jent_tpause_supported(void)
+{
+	uint32_t a, b, c, d;
+
+#if defined(_MSC_VER)
+	int regs[4];
+
+	__cpuidex(regs, 7, 0);
+	(void)a;
+	(void)b;
+	(void)d;
+	return ((unsigned int)regs[2] >> 5) & 1u;
+#else
+	__asm__ __volatile__("cpuid"
+			     : "=a" (a), "=b" (b), "=c" (c), "=d" (d)
+			     : "a" (7), "c" (0));
+	return (c >> 5) & 1u;
+#endif
+}
+
+uint64_t jent_raw_tsc(void)
+{
+#if defined(_MSC_VER)
+	return (uint64_t)__rdtsc();
+#else
+	return (uint64_t)__rdtsc();
+#endif
+}
+
+void jent_tpause_until(uint64_t deadline)
+{
+	uint32_t lo = (uint32_t)deadline;
+	uint32_t hi = (uint32_t)(deadline >> 32);
+	/* C0.1: light wait. r32 in ECX; EDX:EAX is the absolute TSC deadline. */
+	uint32_t ctrl = 0;
+
+	__asm__ __volatile__(".byte 0x66, 0x0f, 0xae, 0xf1"
+			     :
+			     : "c" (ctrl), "a" (lo), "d" (hi)
+			     : "memory");
+}
+
+#else /* !x86 userspace */
+
+int jent_tpause_supported(void)
+{
+	return 0;
+}
+
+uint64_t jent_raw_tsc(void)
+{
+	return 0;
+}
+
+void jent_tpause_until(uint64_t deadline)
+{
+	(void)deadline;
+}
+
+#endif
