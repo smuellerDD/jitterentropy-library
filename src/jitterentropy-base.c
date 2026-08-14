@@ -960,6 +960,56 @@ static int jent_timer_tracks_work(struct rand_data *ec)
 	return 0;
 }
 
+/*
+ * TPAUSE sleeps until a hardware TSC deadline. Then jent_get_nstime must
+ * have moved by about as much as the TSC actually slept. A closed form in
+ * the call index moves by one f(n) step, not by the wait.
+ *
+ * The deadline is always raw RDTSC, never the software stamp: passing
+ * n^3+n into TPAUSE would wait until the real TSC reached that value.
+ *
+ * Windows wakes TPAUSE early. Compare against the observed TSC sleep,
+ * and retry until that sleep is long enough to judge.
+ */
+#define JENT_TPAUSE_REQUEST	2000000ULL
+#define JENT_TPAUSE_MIN_SLEEP	1000000ULL
+#define JENT_TPAUSE_TRIES	8
+
+static int jent_timer_tracks_tpause(void)
+{
+	unsigned int i;
+
+	if (!jent_tpause_supported())
+		return 0;
+
+	for (i = 0; i < JENT_TPAUSE_TRIES; i++) {
+		uint64_t t0 = 0, t1 = 0, raw0, raw1, hooked, slept;
+
+		jent_get_nstime(&t0);
+		raw0 = jent_raw_tsc();
+		jent_tpause_until(raw0 + JENT_TPAUSE_REQUEST);
+		jent_get_nstime(&t1);
+		raw1 = jent_raw_tsc();
+
+		if (raw1 <= raw0 || t1 <= t0)
+			continue;
+
+		slept = raw1 - raw0;
+		hooked = t1 - t0;
+
+		if (slept < JENT_TPAUSE_MIN_SLEEP)
+			continue;
+
+		if (hooked < slept / 2 || hooked > slept * 8)
+			return EINCONSISTENT;
+
+		return 0;
+	}
+
+	/* Every try was interrupted. Do not fail a real CPU. */
+	return 0;
+}
+
 int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 {
 	struct rand_data *ec;
@@ -1091,6 +1141,8 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 
 	if (!ret)
 		ret = jent_timer_tracks_work(ec);
+	if (!ret)
+		ret = jent_timer_tracks_tpause();
 
 out:
 	jent_gcd_fini(delta_history, JENT_POWERUP_TESTLOOPCOUNT);
