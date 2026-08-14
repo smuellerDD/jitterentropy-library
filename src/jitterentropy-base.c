@@ -1050,7 +1050,9 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	/* To initialize the prior time. */
 	jent_measure_jitter(ec, 0, NULL);
 
-	/* Statistical tests on this short window false-positive too easily.
+	/* We could perform statistical tests here, but the problem is
+	 * that we only have a few loop counts to do testing. These
+	 * loop counts may show some slight skew leading to false positives.
 	 * jent_timer_tracks_work() below is not one of those: it only checks
 	 * that stretching the work stretches the stamp.
 	 */
