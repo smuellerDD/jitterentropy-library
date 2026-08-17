@@ -1,11 +1,20 @@
 3.7.1-prerelease
+ * Jitter RNG core: add jent_crypto_selftest to the API, running the SHA3-256 and XDRBG-256 known answer tests of the conditioning component on their own. jent_entropy_init* has always run them at startup; a long-running consumer such as the ESDM has to repeat them periodically, which so far meant re-running the whole startup including its statistical tests. The call is reentrant - stack-local state only, no allocation, no blocking - so it can run in parallel with entropy collection
+ * Jitter RNG core: add JENT_ERR_* definitions for all error codes returned by jent_read_entropy and jent_read_entropy_safe - the numeric values are unchanged
+ * Jitter RNG core: fix the monotonicity check of jent_entropy_init*, which could not detect a timer running backwards. It compared the reading a measurement ended on against prev_time - delta, a reconstruction from an unsigned delta that jent_measure_jitter has already divided by the common timer divisor - so the comparison reduced to "delta > 0", which the coarseness check had already established. It now compares the readings the two measurements actually ended on, and ENOMONOTONIC is reachable
+ * Jitter RNG core: fix reporting of a permanent RCT failure during jent_entropy_init* - it was reported as EHEALTH instead of ERCT
+ * Health tests: extend the APT cutoff tables from osr 15 to JENT_MAX_OSR, which every other cutoff table already covered. Above osr 15 the APT used to reuse the osr 15 entry; under NTG.1, where that entry is not yet the 512 cap, this made the test tighter than the oversampling rate calls for. A build assertion now fails the compilation of any table that does not cover the full osr range
+ * Health tests: implement the permanent failure of the lag predictor test, which was defined as JENT_LAG_FAILURE_PERMANENT but never raised. The cutoffs use alpha=2^-44, the square of the intermittent alpha, following the convention of the RCT and APT
+ * Jitter RNG core: extract the sysfs cache attribute parsing, the online-CPU list parsing and the FIPS indicator read into separate functions, so the shapes they have to handle can be tested without the file they normally come from
+ * Jitter RNG core: reject a sysfs cache size whose unit suffix would overflow the shift rather than computing an undefined value
+ * Jitter RNG core: jent_zfree() tolerates a NULL pointer, as free() does
+ * Jitter RNG core: jent_status() stops appending once the buffer is full instead of walking the rest of the document one no-op snprintf at a time
+ * Health tests: add jent_health_insert_timestamp to run the health tests over externally obtained time stamps, so a raw entropy recording can be judged by the very tests that judge the noise source at runtime. Internal rather than part of the API
+ * Health tests: the health tests can now be tested themselves with tests/health/health.c - the induced failure testing SP800-90B validations require, driving every health test to both its intermittent and its permanent cutoff, and replaying a file of time stamps through them with --replay (issue #167)
  * Jitter RNG core: apply LLM code review -> add sanity checks
  * Jitter RNG core: add UUID generation and update status printing
  * Jitter RNG core: try to pin the timer thread to one CPU
  * Jitter RNG core: add Linux kernel support header files and conditionally compile support code that is already offered by the Linux kernel
- * Architecture-specific code: Revamp code implementing C files and restructuring the code into per-mechanism type support code
- * Linux kernel: add support for kernel crypto API, HW-RAND and character device files along with full test code matching user space (see linux_kernel/README.md)
- * Linux kernel: add DKMS support so the kernel module is rebuilt automatically on kernel updates (see linux_kernel/README.md)
 
 3.7.0
  * Add secure memory implementation for Linux and {Net,Open,Free}BSD, MacOS and Windows
