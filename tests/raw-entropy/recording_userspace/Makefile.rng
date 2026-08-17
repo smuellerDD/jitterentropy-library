@@ -1,7 +1,7 @@
 # Compile Noise Source as user space application
 
 CC ?= gcc
-CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0 
+CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
 #Hardening
 CFLAGS +=-fwrapv --param ssp-buffer-size=4
 ifneq (Darwin,$(shell uname))
@@ -37,7 +37,8 @@ OBJS := $(addprefix $(OBJDIR)/,$(notdir $(C_SRCS:.c=.o)))
 
 vpath %.c $(JENT_DIR)/src $(JENT_DIR)/arch
 
-INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src
+# $(JENT_DIR)/tests is for jitterentropy-memlock.h, shared with the unit tests.
+INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src $(JENT_DIR)/tests
 LIBRARY_DIRS :=
 # macOS has no librt; the clock/timer functions live in libSystem.
 ifeq (Darwin,$(shell uname))
