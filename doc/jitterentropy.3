@@ -236,8 +236,8 @@ swap space. It is then treated as insecure memory: the
 entry of
 .BR jent_status ()
 reports
-.IR false ,
-and the enhanced backtracking operation is kept. With the flag the
+.IR false .
+With the flag the
 allocation fails instead, which is what an environment not permitting
 locking - a CI system or a restricted container with a too small
 .IR RLIMIT_MEMLOCK ,
