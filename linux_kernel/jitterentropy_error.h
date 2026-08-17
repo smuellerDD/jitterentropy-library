@@ -19,10 +19,12 @@
  * all interfaces, so the behaviour does not depend on which one observed the
  * failure.
  *
- * Only SP800-90B permanent health test failures are a module error, which
- * under fips=1 the whole kernel must panic on. The intermittent ones reach
- * here only after jent_read_entropy_safe() gave up recovering them, and map to
- * -EAGAIN as they do in the upstream kernel Jitter RNG.
+ * The permanent failures - the SP800-90B permanent health test failures and a
+ * failed self test bound to the instance - are sticky for the affected
+ * instance, and under fips=1 the whole kernel must panic on them. The
+ * intermittent ones reach here only after jent_read_entropy_safe() gave up
+ * recovering them, and map to -EAGAIN as they do in the upstream kernel
+ * Jitter RNG.
  *
  * @ret: negative return code from jent_read_entropy_safe()
  * Return: kernel errno (always negative)

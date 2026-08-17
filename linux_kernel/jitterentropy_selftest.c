@@ -14,6 +14,7 @@
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/workqueue.h>
 
 #include "jitterentropy.h"
@@ -23,19 +24,19 @@
 extern unsigned int verbose;
 
 /*
- * Seconds between two runs of the known answer tests. 0 by default, leaving
- * the run at module load and no timer: repeating the tests bounds the window
- * in which a conditioning component that broke after the load keeps handing
- * out data, which is an audit regime's call to make rather than every system's.
- * Where it is wanted, one hour is a sensible value - a run costs two Keccak
- * computations.
+ * Seconds between two runs of the known answer tests of each instance. 0 by
+ * default, leaving the library's run at load and no timers: repeating the tests
+ * bounds the window in which a conditioning component that broke after the
+ * load keeps handing out data, which is an audit regime's call to make rather
+ * than every system's. Where it is wanted, one hour is a sensible value - a
+ * run costs two Keccak computations.
  *
  * Read-only at runtime and reported in /proc/jitterentropy/statistics.
  */
 static unsigned int selftest_interval;
 module_param(selftest_interval, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(selftest_interval,
-		 "Seconds between two runs of the cryptographic self test (default 0, no periodic run)");
+		 "Seconds between two runs of the cryptographic self test of each instance (default 0, no periodic run)");
 
 /*
  * The upper bound exists so the delay computation below stays within an
@@ -44,28 +45,19 @@ MODULE_PARM_DESC(selftest_interval,
  */
 #define JENT_SELFTEST_INTERVAL_MAX (30U * 24U * 60U * 60U)
 
-static struct delayed_work jent_selftest_work;
-
 /*
- * The error state. Written only by the work item below, and only ever from
- * false to true; read by the entropy delivery paths of all interfaces.
+ * Statistics across all instances, so what
+ * /proc/jitterentropy/statistics reports is every run that happened.
  */
-static bool jent_selftest_error;
-
-/* Statistics, written only by the work item, read by procfs. */
 static atomic64_t jent_selftest_runs = ATOMIC64_INIT(0);
+static atomic64_t jent_selftest_failures = ATOMIC64_INIT(0);
 static unsigned long jent_selftest_last_run;
-
-bool jent_selftest_failed(void)
-{
-	return READ_ONCE(jent_selftest_error);
-}
 
 void jent_selftest_get_stats(struct jent_selftest_stats *stats)
 {
 	stats->interval = selftest_interval;
 	stats->runs = (u64)atomic64_read(&jent_selftest_runs);
-	stats->failed = jent_selftest_failed();
+	stats->failures = (u64)atomic64_read(&jent_selftest_failures);
 
 	/*
 	 * The subtraction is jiffies arithmetic and therefore correct across
@@ -76,31 +68,34 @@ void jent_selftest_get_stats(struct jent_selftest_stats *stats)
 		(u64)((jiffies - READ_ONCE(jent_selftest_last_run)) / HZ) : 0;
 }
 
-static void jent_selftest_schedule(void)
-{
-	/*
-	 * A periodic timer with no deadline of its own, so it should not be
-	 * what wakes an idle CPU on a kernel in power-efficient mode. That
-	 * workqueue always exists; without the mode it is the per-CPU system
-	 * workqueue.
-	 */
-	queue_delayed_work(system_power_efficient_wq, &jent_selftest_work,
-			   (unsigned long)selftest_interval * HZ);
-}
-
 /*
- * One run of the known answer tests, shared by the timer below and the
- * on-demand run of the JENT_IOCSELFTEST ioctl. Both count towards the
- * statistics, so what is reported there is every run that happened.
+ * One run of the known answer tests, bound to @ec or unbound with NULL,
+ * shared by the per-instance timers and the on-demand runs of the
+ * JENT_IOCSELFTEST ioctl. Called with the instance lock held when @ec is
+ * bound.
+ *
+ * A failing known answer test means the conditioning component no longer
+ * computes what it is specified to compute. Under fips=1 the entire kernel
+ * acts as a FIPS 140 module and must panic on it, as it does on a permanent
+ * health test failure (see jitterentropy_error.h). Otherwise a bound run
+ * marks its instance (the library's JENT_ERR_SELFTEST gate), which from then
+ * on refuses output - every other instance keeps delivering.
  */
-static bool jent_selftest_execute(void)
+static int jent_selftest_execute(struct rand_data *ec)
 {
+	/* " (instance " UUID ")", or empty for a run that cannot be named. */
+	char instance[JENT_UUID_STRLEN + 12];
+	char uuid[JENT_UUID_STRLEN];
+	int ret = jent_selftest(ec);
+
 	/*
-	 * Unbound run: the kernel interfaces share the module-global error
-	 * state below across all their collectors instead of binding the
-	 * verdict to a single instance.
+	 * Name the instance in every verdict logged - an unbound run carries
+	 * no UUID and goes unnamed.
 	 */
-	int ret = jent_selftest(NULL);
+	if (ec && !jent_uuid(ec, uuid, sizeof(uuid)) && uuid[0])
+		snprintf(instance, sizeof(instance), " (instance %s)", uuid);
+	else
+		instance[0] = '\0';
 
 	/*
 	 * The timestamp first: a reader that sees a non-zero run count then
@@ -111,86 +106,136 @@ static bool jent_selftest_execute(void)
 
 	if (!ret) {
 		if (verbose)
-			pr_info("jitterentropy: cryptographic self test passed\n");
+			pr_info("jitterentropy: cryptographic self test passed%s\n",
+				instance);
 
-		return true;
+		return 0;
 	}
 
-	/*
-	 * Enter the error state before reporting it, so no interface can
-	 * deliver data between the log message and the flag.
-	 */
-	WRITE_ONCE(jent_selftest_error, true);
+	atomic64_inc(&jent_selftest_failures);
 
-	/*
-	 * A failing known answer test means the conditioning component no
-	 * longer computes what it is specified to compute. Under fips=1 the
-	 * entire kernel acts as a FIPS 140 module and must panic on it, as it
-	 * does on a permanent health test failure (see jitterentropy_error.h).
-	 */
 	if (fips_enabled)
-		panic("jitterentropy: cryptographic self test failed: %d\n",
-		      ret);
+		panic("jitterentropy: cryptographic self test failed: %d%s\n",
+		      ret, instance);
 
-	pr_err("jitterentropy: cryptographic self test failed: %d - no further entropy is delivered\n",
-	       ret);
+	if (instance[0])
+		pr_err("jitterentropy: cryptographic self test failed: %d%s - the instance delivers no further entropy\n",
+		       ret, instance);
+	else
+		pr_err("jitterentropy: cryptographic self test failed: %d\n",
+		       ret);
 
-	return false;
+	return -EFAULT;
+}
+
+static void jent_selftest_instance_schedule(struct jent_selftest_instance *st)
+{
+	/*
+	 * A periodic timer with no deadline of its own, so it should not be
+	 * what wakes an idle CPU on a kernel in power-efficient mode. That
+	 * workqueue always exists; without the mode it is the per-CPU system
+	 * workqueue.
+	 */
+	queue_delayed_work(system_power_efficient_wq, &st->work,
+			   (unsigned long)selftest_interval * HZ);
+}
+
+static void jent_selftest_instance_work_fn(struct work_struct *work)
+{
+	struct jent_selftest_instance *st =
+		container_of(to_delayed_work(work),
+			     struct jent_selftest_instance, work);
+	bool failed;
+
+	/*
+	 * The instance lock is what pauses this instance's output for the
+	 * duration of its run - the delivery paths generate under it - and
+	 * pins the collector pointer against reallocation. No other instance
+	 * is touched.
+	 */
+	mutex_lock(st->lock);
+	if (!st->failed && jent_selftest_execute(*st->entropy_collector))
+		st->failed = true;
+	failed = st->failed;
+	mutex_unlock(st->lock);
+
+	/*
+	 * Not rescheduled after a failure (of this run, or of an on-demand
+	 * run since this one was queued): the instance is out of service and
+	 * further runs could not lift that.
+	 */
+	if (!failed)
+		jent_selftest_instance_schedule(st);
+}
+
+void jent_selftest_instance_init(struct jent_selftest_instance *st,
+				 struct mutex *lock,
+				 struct rand_data **entropy_collector)
+{
+	st->lock = lock;
+	st->entropy_collector = entropy_collector;
+	st->failed = false;
+
+	/*
+	 * Initialized even when the periodic run is disabled, so the exit
+	 * path can cancel unconditionally.
+	 */
+	INIT_DELAYED_WORK(&st->work, jent_selftest_instance_work_fn);
+
+	if (selftest_interval)
+		jent_selftest_instance_schedule(st);
+}
+
+void jent_selftest_instance_exit(struct jent_selftest_instance *st)
+{
+	/*
+	 * Also handles the work requeueing itself: on return it is neither
+	 * pending nor executing.
+	 */
+	cancel_delayed_work_sync(&st->work);
+}
+
+int jent_selftest_instance_run(struct jent_selftest_instance *st)
+{
+	int ret;
+
+	if (mutex_lock_interruptible(st->lock))
+		return -ERESTARTSYS;
+
+	/*
+	 * The failure is sticky, so another run could only confirm it.
+	 * Report it without spending the work or repeating the log message.
+	 */
+	if (st->failed) {
+		ret = -EFAULT;
+	} else {
+		ret = jent_selftest_execute(*st->entropy_collector);
+		if (ret)
+			st->failed = true;
+	}
+
+	mutex_unlock(st->lock);
+
+	return ret;
 }
 
 int jent_selftest_run_now(void)
 {
-	/*
-	 * The error state is sticky, so another run could only confirm it.
-	 * Report it without spending the work or repeating the log message.
-	 */
-	if (jent_selftest_failed())
-		return -EFAULT;
-
-	return jent_selftest_execute() ? 0 : -EFAULT;
+	return jent_selftest_execute(NULL);
 }
 
-static void jent_selftest_work_fn(struct work_struct *work)
+void __init jent_selftest_init(void)
 {
 	/*
-	 * An on-demand run may have entered the error state since this one was
-	 * queued. Nothing left to establish, and nothing to reschedule.
+	 * No run of the module's own at load: jent_entropy_init_ex() has just
+	 * run the same known answer tests from the library's initialization,
+	 * refusing the load on failure, and every instance runs them for
+	 * itself from then on. Only the interval the instances schedule with
+	 * is validated here, before any of them exists.
 	 */
-	if (jent_selftest_failed())
-		return;
-
-	/*
-	 * Not rescheduled on failure either: the state the run just entered is
-	 * sticky, so further runs could not lift it.
-	 */
-	if (jent_selftest_execute())
-		jent_selftest_schedule();
-}
-
-int __init jent_selftest_init(void)
-{
-	/*
-	 * Initialized even when the periodic run is disabled, so the exit path
-	 * can cancel unconditionally.
-	 */
-	INIT_DELAYED_WORK(&jent_selftest_work, jent_selftest_work_fn);
-
-	/*
-	 * The first run, before any interface is registered.
-	 * jent_entropy_init_ex() has run the same tests, but not the error
-	 * state, the statistics and the fips=1 handling kept here - two Keccak
-	 * computations to have those rest on a run of this module's own. It
-	 * happens whether or not the periodic run is enabled.
-	 *
-	 * On failure the module must not load: under fips=1 the run has
-	 * panicked already, and a module that delivers nothing serves no one.
-	 */
-	if (!jent_selftest_execute())
-		return -EFAULT;
-
 	if (!selftest_interval) {
 		pr_info("jitterentropy: periodic cryptographic self test disabled\n");
-		return 0;
+		return;
 	}
 
 	if (selftest_interval > JENT_SELFTEST_INTERVAL_MAX) {
@@ -199,16 +244,6 @@ int __init jent_selftest_init(void)
 		selftest_interval = JENT_SELFTEST_INTERVAL_MAX;
 	}
 
-	/* The run above was the first one, the next is one interval away. */
-	jent_selftest_schedule();
-
-	pr_info("jitterentropy: cryptographic self test scheduled every %u seconds\n",
+	pr_info("jitterentropy: cryptographic self test scheduled every %u seconds for every instance\n",
 		selftest_interval);
-
-	return 0;
-}
-
-void jent_selftest_exit(void)
-{
-	cancel_delayed_work_sync(&jent_selftest_work);
 }

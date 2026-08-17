@@ -41,17 +41,20 @@ int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
 			 struct jent_ioctl_field *out);
 
 /*
- * JENT_IOCSELFTEST, for both interfaces. Unlike everything above it does not
- * read an instance but runs the cryptographic self test of the module - hence
- * the privilege and no instance lock. The check lives here rather than in
- * either dispatcher so the two cannot come to demand different privileges.
+ * JENT_IOCSELFTEST, for both interfaces. Unlike everything above it is an
+ * action - hence the privilege, which lives here rather than in either
+ * dispatcher so the two cannot come to demand different privileges. The
+ * character device passes the self test of the instance the ioctl arrived on;
+ * the debugfs test interface passes NULL, as its raw-noise instances have no
+ * conditioned output to bind a verdict to, and gets the unbound run. Called
+ * without the instance lock, which a bound run takes itself.
  */
-static inline long jent_ioctl_selftest(void)
+static inline long jent_ioctl_selftest(struct jent_selftest_instance *st)
 {
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	return jent_selftest_run_now();
+	return st ? jent_selftest_instance_run(st) : jent_selftest_run_now();
 }
 
 #endif /* JITTERENTROPY_IOCTL_H */

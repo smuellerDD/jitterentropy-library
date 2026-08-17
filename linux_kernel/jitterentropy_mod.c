@@ -94,19 +94,16 @@ static int __init jent_mod_init(void)
 	}
 
 	/*
-	 * Run the cryptographic known answer tests once and repeat them
-	 * periodically from now on. Before the interfaces are registered, so
-	 * none of them can deliver data before the module error state it
-	 * maintains exists. A failing first run has nothing to unwind - the
-	 * periodic run is only queued once it passed.
+	 * Validate the interval the interfaces' instances schedule their own
+	 * periodic self test runs with, before any of them is registered. The
+	 * known answer tests themselves have just run inside
+	 * jent_entropy_init_ex() above, which refused the load on failure.
 	 */
-	ret = jent_selftest_init();
-	if (ret)
-		return ret;
+	jent_selftest_init();
 
 	ret = jent_proc_init();
 	if (ret)
-		goto err_selftest;
+		return ret;
 
 	ret = jent_kcapi_init();
 	if (ret)
@@ -148,8 +145,6 @@ err_crypto:
 	jent_kcapi_exit();
 err:
 	jent_proc_exit();
-err_selftest:
-	jent_selftest_exit();
 	return ret;
 }
 
@@ -160,10 +155,9 @@ static void __exit jent_mod_exit(void)
 	 * device and the hwrng must precede jent_proc_exit(): they remove
 	 * status files below /proc/jitterentropy, which it removes
 	 * recursively, and a proc_remove() on an already-removed entry would
-	 * act on freed memory. The self test goes first, as its state is what
-	 * /proc/jitterentropy/statistics reports.
+	 * act on freed memory. Each interface stops the self tests of its own
+	 * instances as it tears them down.
 	 */
-	jent_selftest_exit();
 	jent_chardev_exit();
 	jent_testing_exit();
 	jent_hwrng_exit();

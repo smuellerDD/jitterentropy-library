@@ -36,11 +36,19 @@ extern unsigned int verbose;
 struct jitterentropy {
 	struct mutex jent_lock;
 	struct rand_data *entropy_collector;
+	/* This instance's own periodic self test. */
+	struct jent_selftest_instance selftest;
 };
 
 static void jent_kcapi_tfm_cleanup(struct crypto_tfm *tfm)
 {
 	struct jitterentropy *rng = crypto_tfm_ctx(tfm);
+
+	/*
+	 * Before the collector goes away, and outside jent_lock: stopping the
+	 * self test waits for a run in progress, which takes jent_lock.
+	 */
+	jent_selftest_instance_exit(&rng->selftest);
 
 	mutex_lock(&rng->jent_lock);
 
@@ -108,6 +116,9 @@ static int jent_kcapi_tfm_init(struct crypto_tfm *tfm)
 		return -ENOMEM;
 	}
 
+	jent_selftest_instance_init(&rng->selftest, &rng->jent_lock,
+				    &rng->entropy_collector);
+
 	/*
 	 * Best-effort verbose logging: a failure to allocate the status buffer
 	 * must not fail the tfm initialization.
@@ -128,13 +139,10 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 	int ret;
 
 	/*
-	 * The module error state: a failed periodic cryptographic self test
-	 * ends entropy delivery through every interface. Checked here as well
-	 * as in the hwrng and character device read paths.
+	 * jent_lock also serializes against this instance's own self test:
+	 * no data leaves while its run is in progress, and after a failed run
+	 * the library refuses with JENT_ERR_SELFTEST, mapped below.
 	 */
-	if (jent_selftest_failed())
-		return -EFAULT;
-
 	mutex_lock(&rng->jent_lock);
 
 	ec = rng->entropy_collector;
