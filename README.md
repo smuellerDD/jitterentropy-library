@@ -18,6 +18,11 @@ The API is documented in the man page jitterentropy.3.
 
 To use the Jitter RNG, the header file jitterentropy.h must be included.
 
+That header is the whole of the API: on the platforms whose linker takes a
+version script the shared library exports exactly the functions declared in
+it, listed in `version.lds`, and nothing else. The list is checked against the
+header at configure time, so the two cannot drift apart unnoticed.
+
 # Build Instructions
 
 To generate the shared library `make` followed by `make install`.
@@ -27,16 +32,110 @@ This may eases cross compiling or setting the relevant options for BSI's
 functionality class NTG.1, like:
 
 ```sh
-mkdir build
-cd build
-cmake -DINTERNAL_TIMER=off -DEXTERNAL_CRYPTO=OPENSSL ..
-make
+cmake -S . -B build -DINTERNAL_TIMER=off -DEXTERNAL_CRYPTO=OPENSSL
+cmake --build build
 ```
 CMake may also be used on platforms like Windows or MacOS to ease compilation.
 
 On Linux you may omit the `EXTERNAL_CRYPTO` setting, as the default
 memory handling implementation already implements secure erase and swap
 prevention.
+
+## Build Options
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `BUILD_SHARED_LIBS` | `OFF` | Build a shared library instead of a static one |
+| `INTERNAL_TIMER` | `ON` | Compile the thread based internal timer, used where no high-resolution timer is available |
+| `EXTERNAL_CRYPTO` | unset | Use an external libcrypto for hashing and secure memory: `AWSLC`, `OPENSSL` or `LIBGCRYPT` |
+| `STACK_PROTECTOR` | `ON` | Compile with the stack protector enabled |
+| `AARCH64_NSTIME_REGISTER` | unset | Name of the register `jent_get_nstime()` should read on AArch64 |
+| `ENABLE_SANITIZERS` | `OFF` | Address and undefined behavior sanitizers (development only) |
+| `ENABLE_COVERAGE` | `OFF` | Instrument for code coverage and add the `coverage` target (development only) |
+| `MOCK_TIMER` | `OFF` | Let the caller replace the time source with a callback (testing only - such a build produces no entropy of its own) |
+| `ENABLE_TOOLS` | `ON` | Build and install the recording and validation tools, which live under `tests/` |
+| `BUILD_TESTING` | `ON` | Build the test programs and register the CTest suite |
+
+The two are independent. `ENABLE_TOOLS` decides what is installed for a user
+to run - `jitterentropy-rng`, `jitterentropy-osr`, `jitterentropy-hashtime`,
+`getrawentropy`, `extractlsb`, `gcd`, `jitterentropy-health` and the
+`jitterentropy-chardev-*` tools - and `BUILD_TESTING`, the name CMake projects
+conventionally use, decides what CTest is given. Three of the tools are also
+what the suite drives, so they are built whenever either option is on and
+installed only for the first:
+
+```sh
+cmake -S . -B build -DENABLE_TOOLS=OFF    # the suite, nothing installed but the library
+cmake -S . -B build -DBUILD_TESTING=OFF   # the tools, no test programs built
+cmake -S . -B build -DENABLE_TOOLS=OFF -DBUILD_TESTING=OFF   # the library alone
+```
+
+With both off the install tree is the library, its header, the pkg-config and
+CMake package files and the man page.
+
+Packaging commonly passes `-DBUILD_TESTING=OFF` on its own - the nixpkgs cmake
+hook does - and that is now exactly what it says: the tools keep being built
+and installed. The option is defined directly rather than through
+`include(CTest)`, which would also pull in the CDash submission machinery.
+
+## Running the Test Suite
+
+The CMake build registers the test programs with CTest:
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The suite has two halves. The deterministic tests - the GCD self test, the unit
+tests for `src/` and `arch/`, and the induced failure tests of the health tests
+- compute over fixed inputs and answer the same everywhere. The entropy
+generation tests exercise the real noise source and can fail for reasons that
+are properties of the machine rather than defects in the code: a memory lock
+limit lower than the collector needs, or a startup whose health tests do not
+converge on the block size derived from this CPU's caches. They carry the
+`unreliable` label so that a gating run can leave them out:
+
+```sh
+ctest --test-dir build --output-on-failure -LE unreliable   # gating set
+ctest --test-dir build --output-on-failure -L unreliable    # only those
+```
+
+This is what the CI workflow gates on. Useful selections:
+
+```sh
+ctest --test-dir build -N              # list the tests without running them
+ctest --test-dir build -R unit-        # only the src/ and arch/ unit tests
+ctest --test-dir build -R health-      # only the induced failure tests
+ctest --test-dir build -R unit-sha3 -V # one test with its full output
+ctest --test-dir build -j "$(nproc)"   # in parallel
+```
+
+On a multi-configuration generator such as Visual Studio, name the
+configuration that was built: `ctest --test-dir build -C Release`.
+
+Each test directory also carries a standalone Makefile for trees without CMake:
+`make -C tests/unit check` and `make -C tests/health check`.
+
+See `tests/README.md` for what the individual test programs cover.
+
+## Code Coverage
+
+Configuring with `ENABLE_COVERAGE` instruments the build and adds a `coverage`
+target that runs the suite and writes a browsable HTML report to
+`<build>/coverage/index.html`. It needs either `gcovr` or `lcov` together with
+`genhtml`, and a separate build directory - the instrumentation forces `-O0`:
+
+```sh
+cmake -S . -B build-coverage -DENABLE_COVERAGE=ON
+cmake --build build-coverage
+cmake --build build-coverage --target coverage
+```
+
+The target runs the whole suite, the `unreliable` tests included, since they
+are what reaches the noise source and the health tests at runtime; their result
+is not propagated, so a machine that cannot run them still gets a report.
 
 # Operational Considerations
 
@@ -68,7 +167,12 @@ guarded by the appropriate architecture macros.
 
 # Testing and Entropy Rate Validation
 
-See `tests/raw-entropy/README.md`.
+See `tests/README.md` for the test suite and how to run it, and
+`tests/raw-entropy/README.md` for the raw entropy gathering and the SP800-90B
+entropy rate analysis.
+
+Induced failure testing of the health tests, as FIPS 140-3 / SP800-90B
+validations require, is provided by `tests/health` - see `tests/README.md`.
 
 # Specific Configuration Requirements
 

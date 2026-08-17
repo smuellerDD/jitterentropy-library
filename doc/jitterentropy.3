@@ -27,6 +27,8 @@ jitterentropy \- CPU Jitter Random Number Generator
 .sp
 .BI "int jent_entropy_init_ex(unsigned int " osr ", unsigned int " flags );
 .sp
+.BI "int jent_crypto_selftest(" void ");
+.sp
 .BI "struct rand_data *jent_entropy_collector_alloc(unsigned int " osr ",
 .BI "                                               unsigned int " flags );
 .sp
@@ -127,6 +129,22 @@ When specifying an oversampling rate
 .IR osr
 different than the default, the startup test honor this value and adjust
 the self-test cut-off thresholds to the same values as used at runtime.
+.LP
+.BR jent_crypto_selftest ()
+runs the known answer tests of the conditioning component, SHA3-256 and
+XDRBG-256. These are the tests
+.BR jent_entropy_init ()
+performs before any other, offered separately for callers that have to repeat
+them periodically over the lifetime of a long-running process, as FIPS 140-3
+requires of a module that is not restarted. The call returns
+.IR 0
+on success and
+.IR EHASH
+on failure, the same code
+.BR jent_entropy_init ()
+reports for it. The tests run on stack-local state alone, allocate nothing and
+never block; they may therefore be called from any thread at any time,
+including in parallel with entropy collection and before initialization.
 .LP
 .BR jent_entropy_collector_alloc ()
 allocates a CPU Jitter entropy collector instance and returns the handle
@@ -258,27 +276,44 @@ must ensure that
 is at least als big as
 .IR len
 indicates. The function returns the number of bytes generated
-when the request is successfully completed. If the function returns
-the error code
-.IR -1
+when the request is successfully completed. In case of an error, one of
+the following negative error codes is returned. Each of them has a
+symbolic definition in
+.IR jitterentropy.h .
+If the function returns the error code
+.B JENT_ERR_EINVAL
+.RI ( -1 )
 then the caller handed in a non-initialized (i.e. NULL value)
 for the entropy collector. The return code of
-.IR -2
+.B JENT_ERR_RCT
+.RI ( -2 )
 indicates the SP800-90B repetition count online health test failed.
 The error code of
-.IR -3
+.B JENT_ERR_APT
+.RI ( -3 )
 specifies that the SP800-90B adaptive proportion online health test
 failed.
-.IR -4
+.B JENT_ERR_NOTIME
+.RI ( -4 )
 marks that the internal timer generator cannot be initialized.
-.IR -5
+.B JENT_ERR_LAG
+.RI ( -5 )
 specifies that the LAG predictor health test failed.
-.IR -6
+.B JENT_ERR_RCT_PERMANENT
+.RI ( -6 )
 indicates that the Repetitive Count Test (RCT) failed permanently.
-.IR -7
+.B JENT_ERR_APT_PERMANENT
+.RI ( -7 )
 indicates that the Adaptive Proportion Test (APT) failed permanently.
-.IR -8
+.B JENT_ERR_LAG_PERMANENT
+.RI ( -8 )
 indicates that the LAG prediction test failed permanently.
+.B JENT_ERR_RCT_MEM
+.RI ( -9 )
+indicates that the Repetition Count Test with memory failed.
+.B JENT_ERR_RCT_MEM_PERMANENT
+.RI ( -10 )
+indicates that the Repetition Count Test with memory failed permanently.
 .LP
 When either online health test fails the Jitter RNG will not
 have any data provided in
