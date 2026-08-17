@@ -48,10 +48,20 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	if (!buf || buflen == 0)
 		return -1;
 
+	/*
+	 * Append to what is already in @buf, stopping once it is full.
+	 *
+	 * The guard is "used + 1 < buflen", not "used < buflen": snprintf()
+	 * always terminates within the size it is given, so strlen(buf) never
+	 * reaches buflen and the latter would be true at every call site
+	 * below, walking the rest of the document one useless snprintf() at a
+	 * time. The output is the same either way - an snprintf() with a size
+	 * of one writes only the NUL that is already there.
+	 */
 	#define jent_add_to_status(...)					\
 	{								\
 		used = strlen(buf);					\
-		if (used < buflen)					\
+		if (used + 1 < buflen)					\
 			snprintf(buf + used, buflen - used, __VA_ARGS__);\
 	}
 
@@ -162,6 +172,19 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 
 	jent_add_to_status("\t\t\"secureMemory\": %s,\n", jent_memory_is_secure(ec->flags) ? "true" : "false");
 	jent_add_to_status("\t\t\"internalTimer\": %s,\n", ec->enable_notime ? "true" : "false");
+	/*
+	 * Whether this build can have its time source replaced by the caller -
+	 * a property of the build, not of whether a callback is registered
+	 * right now, as a status taken between two replays would otherwise
+	 * claim nothing was ever mocked.
+	 */
+#ifdef JENT_CONF_ENABLE_MOCK_TIMER
+	jent_add_to_status("\t\t\"mockedTimerBuild\": true,\n");
+	jent_add_to_status("\t\t\"mockedTimerActive\": %s,\n",
+			   jent_mock_timer_active() ? "true" : "false");
+#else
+	jent_add_to_status("\t\t\"mockedTimerBuild\": false,\n");
+#endif
 	jent_add_to_status("\t\t\"fipsMode\": %s,\n", ec->is_fips_enabled ? "true" : "false");
 	jent_add_to_status("\t\t\"ntg1Mode\": %s,\n", !!(ec->flags & JENT_NTG1) ? "true" : "false");
 

@@ -32,7 +32,7 @@
 /*
  * CPU the counting thread pins itself to. When the caller has not set one
  * via jent_notime_set_cpu(), jent_notime_init() defaults to the
- * highest-numbered online CPU.
+ * highest-numbered CPU the caller may run on.
  */
 static int jent_notime_cpu_configured = 0;
 static unsigned long jent_notime_cpu = 0;
@@ -55,20 +55,30 @@ static int jent_notime_init_flags(void **ctx, unsigned int flags)
 
 	/*
 	 * Pin the counting thread to a dedicated CPU - the caller-configured
-	 * one, or by default the highest-numbered online CPU. The consumer
-	 * thread is left unpinned, so on the >= 2 CPUs guaranteed above the
-	 * scheduler keeps the two on separate cores and the counter keeps
-	 * ticking while the consumer busy-waits.
+	 * one, or the highest-numbered CPU this thread may run on. The
+	 * consumer is left unpinned, so on the >= 2 CPUs required above the
+	 * scheduler keeps the two apart and the counter keeps ticking while
+	 * the consumer busy-waits.
 	 *
-	 * Pinning is advisory: jent_thread_pin_to_cpu() reports -ENOTSUP on
-	 * platforms without an affinity API (OpenBSD, and macOS on Apple
-	 * Silicon). There the two threads are merely left to the scheduler,
-	 * which the >= 2 CPU requirement above still makes workable.
+	 * Advisory only: jent_thread_pin_to_cpu() reports -ENOTSUP where there
+	 * is no affinity API (OpenBSD, macOS on Apple Silicon), and both
+	 * threads are then left to the scheduler.
 	 */
-	if (jent_notime_cpu_configured)
+	if (jent_notime_cpu_configured) {
 		thread_ctx->notime_cpu = jent_notime_cpu;
-	else
-		thread_ctx->notime_cpu = (unsigned long)(ncpu - 1);
+	} else {
+		/*
+		 * The highest CPU the thread may run on, not the count minus
+		 * one: those CPUs are a set and need not start at zero, so
+		 * under a cpuset the count names a CPU pinning is refused for.
+		 * See jent_cpu_highest().
+		 */
+		long highest = jent_cpu_highest();
+
+		thread_ctx->notime_cpu = (highest >= 0) ?
+					 (unsigned long)highest :
+					 (unsigned long)(ncpu - 1);
+	}
 
 	*ctx = thread_ctx;
 
