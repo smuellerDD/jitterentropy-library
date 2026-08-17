@@ -76,7 +76,8 @@ The module offers the following load-time parameters:
   `flags`.
 
 * `selftest_interval`: seconds between two runs of the cryptographic self test
-  (default `0`, no periodic run; maximum 2592000). See
+  of each Jitter RNG instance (default `0`, no periodic runs; maximum
+  2592000). See
   [Periodic Cryptographic Self Test](#linux-kernel-jitter-rng-periodic-cryptographic-self-test)
   below.
 
@@ -262,9 +263,8 @@ its argument, so it serves both interfaces.
 
 `JENT_IOCSELFTEST` runs the cryptographic self test - the SHA3-256 and
 XDRBG-256 known answer tests of the conditioning component - and reports the
-verdict. It is the one ioctl that is not about the instance it arrives on: the
-tests and the state they keep are module-wide. It therefore requires
-`CAP_SYS_ADMIN` and fails with `-EPERM` without it. Both the character device
+verdict. It is an action rather than a query and therefore requires
+`CAP_SYS_ADMIN`, failing with `-EPERM` without it. Both the character device
 and the debugfs test interface implement it, and it takes no argument:
 
 	#include "jitterentropy_uapi.h"
@@ -274,16 +274,24 @@ and the debugfs test interface implement it, and it takes no argument:
 	if (ioctl(fd, JENT_IOCSELFTEST) == 0)
 		puts("conditioning component verified");
 
-The call returns 0 when the tests pass. A failure gives `-EFAULT` and is
-handled exactly as a failing periodic run is, panic under `fips=1` included:
-the module enters the error state described in
+On the character device the run is that of the instance the ioctl arrives on,
+handled exactly as a failing periodic run of that instance is, panic under
+`fips=1` included: the call returns 0 when the tests pass, and a failure gives
+`-EFAULT` and permanently stops the output of this instance - reads on this
+open file description fail from then on, while every other instance keeps
+delivering (see
 [Periodic Cryptographic Self Test](#linux-kernel-jitter-rng-periodic-cryptographic-self-test)
-below and stops delivering entropy. A call made after the state was entered
-gives `-EFAULT` without running anything.
+below). A call made after a failed run of this instance gives `-EFAULT`
+without running anything.
 
-The module runs the same tests on a timer by itself; this ioctl is for a
-caller that wants them run at a moment of its own choosing - after resume, say,
-or on the schedule of an audit regime that is not the module's.
+On the debugfs test interface the run is unbound: its instances record raw,
+unconditioned noise, so there is no output to stop and only the verdict of
+this run is returned.
+
+Each instance runs the same tests on a timer by itself when
+`selftest_interval` is set; this ioctl is for a caller that wants them run at
+a moment of its own choosing - after resume, say, or on the schedule of an
+audit regime that is not the module's.
 
 # Linux Kernel Jitter RNG Hardware RNG (hwrng)
 
@@ -398,7 +406,7 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 				"intervalSeconds": 3600,
 				"runs": 12,
 				"secondsSinceLastRun": 87,
-				"failed": false
+				"failures": 0
 			}
 		}
 
@@ -406,11 +414,13 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
   is the total number of opens since the module was loaded.
 
   `intervalSeconds` is the effective `selftest_interval` module parameter
-  (`0` when the periodic run is disabled), `runs` the number of runs completed
-  since the module was loaded and `secondsSinceLastRun` the age of the last one.
-  Both count the run made at module load, so `runs` is at least 1 and
-  `secondsSinceLastRun` - `null` before the first run - is always a number here.
-  `failed` reports the module error state described below.
+  (`0` when the periodic runs are disabled), `runs` the number of self test
+  runs completed since the module was loaded - across all instances, the
+  on-demand ones included - and `secondsSinceLastRun` the age of the last one,
+  `null` before the first run. Neither counts the known answer tests
+  `jent_entropy_init_ex()` ran at module load, which belong to the library's
+  initialization. `failures` is the number of failed runs; each failed run has
+  permanently stopped the instance it was bound to, as described below.
 
 * `hwrng_status`: the JSON status string of the single hwrng instance (only
   present when the hwrng interface is enabled, see above).
@@ -436,43 +446,53 @@ Example usage:
 # Linux Kernel Jitter RNG Periodic Cryptographic Self Test
 
 The known answer tests of the conditioning component - SHA3-256 and XDRBG-256 -
-run at module load, before any interface is registered. `jent_entropy_init_ex()`
-has run the same tests, but from the library's own code path, without the error
-state, the statistics and the `fips=1` handling described below. A failure of
-that run makes the module refuse to load with `EFAULT`.
+run once at module load inside `jent_entropy_init_ex()`, the library's
+initialization; a failure makes the module refuse to load with `EFAULT`. The
+module schedules no additional run of its own at load.
 
 A module that is loaded once and then keeps running for months can repeat them,
 which bounds the window in which a conditioning component that broke after the
-load keeps delivering data. The `selftest_interval` module parameter sets the
-period in seconds; it is `0` by default, leaving the run at module load and no
-timer, as the repetition is a regime to opt into rather than something every
-system needs. Where it is wanted, one hour is a sensible value: the tests are
-two Keccak
-computations over a handful of bytes, so their cost is not measurable at any
+load keeps delivering data. Every Jitter RNG instance repeats them for itself:
+each open character device instance, the hwrng instance and each crypto API
+instance queues its own work item, which runs the tests bound to that
+instance's collector (`jent_selftest()`, see the library documentation). There
+is no module-wide self test machinery behind the instances and no instance
+waits for another: a run takes only the lock of its own instance, so that one
+instance hands out no data while its own test is running - a blocking reader
+waits the two Keccak computations out, a non-blocking one sees "no data" - and
+every other instance stays untouched.
+
+The `selftest_interval` module parameter sets the period in seconds; it is `0`
+by default, leaving the library's run at load and no timers, as the repetition
+is a regime to opt into rather than something every system needs. Where it is
+wanted, one hour is a sensible value: the tests are two Keccak computations
+over a handful of bytes per instance, so their cost is not measurable at any
 sensible interval. They run on the power-efficient workqueue, so on a kernel
 running in power-efficient mode (`CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y` or the
 `workqueue.power_efficient` kernel parameter) they do not by themselves wake an
 idle CPU. That workqueue always exists; without that mode it is the ordinary
 per-CPU system workqueue.
 
-Should a run ever fail, the module enters its error state:
+Should a run of an instance ever fail:
 
 * When the kernel was booted with `fips=1`, the whole kernel acts as a FIPS 140
   module and the failure is a `panic()`, exactly as a permanent health test
   failure is.
 
-* Otherwise the failure is logged as `cryptographic self test failed`
-  and the module stops delivering entropy through every interface - the
-  character device, the hwrng and the kernel crypto API all fail with `EFAULT`
-  from that point on. The debugfs test interface is not covered: it delivers
-  raw, unconditioned noise, which does not involve the conditioning component
-  that failed.
+* Otherwise the failure is logged as `cryptographic self test failed`, naming
+  the instance by its UUID where it has one, and that instance permanently
+  stops delivering: the library marks it and its reads fail with
+  `JENT_ERR_SELFTEST`, surfacing as `EFAULT`. Every other instance - and every
+  instance created later - keeps delivering, each vouched for by its own runs.
+  The debugfs test interface is not covered: it delivers raw, unconditioned
+  noise, which does not involve the conditioning component.
 
-The error state is sticky and no further run is scheduled; only reloading the
-module clears it, which runs the tests again during initialization and
-therefore refuses to load if they still fail. The state is visible as the
-`selfTest.failed` field of `/proc/jitterentropy/statistics`, along with the
-number of runs completed and the age of the last one.
+The failure is sticky for the instance and its timer stops; a character device
+reader recovers by closing and re-opening (a fresh instance), the hwrng and
+crypto API instances by reloading the module or reinstantiating the tfm. The
+count of failed runs is visible as the `selfTest.failures` field of
+`/proc/jitterentropy/statistics`, along with the number of runs completed
+across all instances and the age of the last one.
 
 The same tests can be run on demand through the `JENT_IOCSELFTEST` ioctl (see
 [Self test ioctl](#self-test-ioctl) above), for a caller that wants them at a

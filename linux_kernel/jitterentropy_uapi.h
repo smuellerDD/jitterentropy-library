@@ -107,16 +107,20 @@ struct jent_output_ioctl {
 /*
  * Run the cryptographic self test - the SHA3-256 and XDRBG-256 known answer
  * tests of the conditioning component - and report the verdict. Implemented by
- * the character device and the debugfs test interface; takes no argument.
+ * the character device and the debugfs test interface; takes no argument. An
+ * action rather than a query, which is why it requires CAP_SYS_ADMIN and gives
+ * -EPERM without it.
  *
- * An action rather than a query, and the only ioctl here that acts on the
- * module rather than on the instance it arrives on, which is why it requires
- * CAP_SYS_ADMIN and gives -EPERM without it.
+ * On the character device the run is that of the instance the ioctl arrives
+ * on. Returns 0 when the tests pass. A failure gives -EFAULT and permanently
+ * stops the output of this instance - reads on this open file fail from then
+ * on, every other instance keeps delivering, and under fips=1 it is a panic. A
+ * call made after a failed run of this instance gives -EFAULT without running
+ * anything.
  *
- * Returns 0 when the tests pass. A failure gives -EFAULT and puts the module
- * into its error state - no interface delivers entropy any more, only a reload
- * recovers, and under fips=1 it is a panic. A call made afterwards gives
- * -EFAULT without running anything.
+ * On the debugfs test interface the run is unbound: its instances record raw
+ * noise that never passes the conditioning component, so there is no output to
+ * stop, and only the verdict of this run is returned.
  */
 #define JENT_IOCSELFTEST _IO(JENT_IOC_MAGIC, 0x0a)
 

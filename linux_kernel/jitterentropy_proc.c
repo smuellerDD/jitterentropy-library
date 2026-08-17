@@ -211,17 +211,17 @@ static int jent_proc_statistics_show(struct seq_file *m, void *v)
 		   (unsigned long long)selftest.runs);
 	/*
 	 * Null rather than 0 before the first run: no time has elapsed since a
-	 * run that has not happened. Not reachable as things stand - the first
-	 * run happens in jent_selftest_init(), before this file exists - but
-	 * the field is documented to be able to say so.
+	 * run that has not happened. Reached with the periodic runs disabled
+	 * and no on-demand run made - the module schedules no run of its own
+	 * at load.
 	 */
 	if (selftest.runs)
 		seq_printf(m, "\t\t\"secondsSinceLastRun\": %llu,\n",
 			   (unsigned long long)selftest.seconds_since_last_run);
 	else
 		seq_puts(m, "\t\t\"secondsSinceLastRun\": null,\n");
-	seq_printf(m, "\t\t\"failed\": %s\n",
-		   selftest.failed ? "true" : "false");
+	seq_printf(m, "\t\t\"failures\": %llu\n",
+		   (unsigned long long)selftest.failures);
 	seq_puts(m, "\t}\n");
 	seq_puts(m, "}\n");
 

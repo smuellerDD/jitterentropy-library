@@ -520,8 +520,8 @@ static long jent_testing_ioctl(struct file *file, unsigned int cmd,
 	case JENT_IOCLOOPCNT:
 		return jent_testing_ioctl_loopcnt(ctx, (void __user *)arg);
 	case JENT_IOCSELFTEST:
-		/* Module-wide, so neither ctx nor its lock is involved. */
-		return jent_ioctl_selftest();
+		/* Unbound: a raw instance has no conditioned output to stop. */
+		return jent_ioctl_selftest(NULL);
 	default:
 		if (jent_ioctl_is_field(cmd))
 			return jent_testing_ioctl_field(ctx, cmd,
