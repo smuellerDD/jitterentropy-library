@@ -225,8 +225,48 @@
 # endif
 #endif
 
+#ifdef JENT_CONF_ENABLE_MOCK_TIMER
+/*
+ * The mocked time source. See arch/jitterentropy-arch-timer.h for what it is
+ * for and why it is not compiled unless asked for.
+ *
+ * Deliberately not guarded by a lock or an atomic: the callback is registered
+ * before the collector that uses it is allocated, and replaying a recording
+ * through the Jitter RNG is a single-threaded operation - the same one
+ * jent_read_entropy() already requires per collector.
+ */
+static jent_mock_timer_cb jent_mock_timer;
+static void *jent_mock_timer_arg;
+
+int jent_set_mock_timer(jent_mock_timer_cb cb, void *arg)
+{
+	jent_mock_timer = cb;
+	jent_mock_timer_arg = arg;
+	return 0;
+}
+
+int jent_mock_timer_active(void)
+{
+	return jent_mock_timer != NULL;
+}
+
+#endif /* JENT_CONF_ENABLE_MOCK_TIMER */
+
 void jent_get_nstime(uint64_t *out)
 {
+#ifdef JENT_CONF_ENABLE_MOCK_TIMER
+	/*
+	 * The dispatch is inside the one definition rather than wrapping it,
+	 * so that this function sits at the same source line whether or not
+	 * the mock is compiled in - coverage tooling merging the two builds
+	 * would otherwise see one name at two places and refuse.
+	 */
+	if (jent_mock_timer) {
+		jent_mock_timer(jent_mock_timer_arg, out);
+		return;
+	}
+#endif /* JENT_CONF_ENABLE_MOCK_TIMER */
+
 #if defined(JENT_ARCH_TIMER_WINDOWS_QPC)
 
 	LARGE_INTEGER ticks;

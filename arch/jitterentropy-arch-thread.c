@@ -87,6 +87,8 @@
 # define JENT_ARCH_THREAD_PIN_WINDOWS
 #elif defined(__linux__)
 # include <sched.h>
+/* CPU_ALLOC() below is __sched_cpualloc() on glibc, but calloc() on musl. */
+# include <stdlib.h>
 # define JENT_ARCH_THREAD_PIN_LINUX
 #elif defined(__APPLE__)
 # include <mach/mach.h>
@@ -227,15 +229,50 @@ int jent_thread_pin_to_cpu(unsigned long cpu)
 	free(buffer);
 	return ret;
 #elif defined(JENT_ARCH_THREAD_PIN_LINUX)
-	cpu_set_t set;
+	/*
+	 * A cpu_set_t holds CPU_SETSIZE bits - 1024 on glibc - while
+	 * jent_cpu_highest() names CPUs up to JENT_NCPU_SET_MAX. Above
+	 * CPU_SETSIZE the set is therefore allocated wide enough for @cpu,
+	 * which is also what sched_setaffinity(2) wants of a kernel with a
+	 * larger CPU mask; refusing those CPUs would drop the pinning on
+	 * exactly the machines the distinction is drawn for.
+	 *
+	 * The fixed set below stays for the common case, so the counting
+	 * thread - started and stopped on every entropy request - does not
+	 * allocate on its way to a CPU.
+	 */
+	if (cpu < (unsigned long)CPU_SETSIZE) {
+		cpu_set_t set;
 
-	if (cpu >= (unsigned long)CPU_SETSIZE)
-		return -EINVAL;
-	CPU_ZERO(&set);
-	CPU_SET((size_t)cpu, &set);
-	if (sched_setaffinity(0, sizeof(set), &set))
-		return -errno;
-	return 0;
+		CPU_ZERO(&set);
+		CPU_SET((size_t)cpu, &set);
+		if (sched_setaffinity(0, sizeof(set), &set))
+			return -errno;
+		return 0;
+	} else {
+		unsigned int ncpu_set = CPU_SETSIZE;
+		cpu_set_t *set;
+		size_t size;
+		int ret;
+
+		if (cpu >= JENT_NCPU_SET_MAX)
+			return -EINVAL;
+
+		while ((unsigned long)ncpu_set <= cpu)
+			ncpu_set *= 2;
+
+		size = CPU_ALLOC_SIZE(ncpu_set);
+		set = CPU_ALLOC(ncpu_set);
+		if (!set)
+			return -ENOMEM;
+
+		CPU_ZERO_S(size, set);
+		CPU_SET_S((size_t)cpu, size, set);
+		ret = sched_setaffinity(0, size, set) ? -errno : 0;
+		CPU_FREE(set);
+
+		return ret;
+	}
 #elif defined(JENT_ARCH_THREAD_PIN_MACOS)
 	/*
 	 * macOS exposes no CPU pinning API at all. THREAD_AFFINITY_POLICY is

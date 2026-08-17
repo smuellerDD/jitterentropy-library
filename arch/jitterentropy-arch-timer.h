@@ -100,4 +100,42 @@
 
 void jent_get_nstime(uint64_t *out);
 
+#ifdef JENT_CONF_ENABLE_MOCK_TIMER
+/*
+ * A mocked time source, for replaying a recorded or constructed sequence of
+ * time stamps through the library instead of measuring the machine.
+ *
+ * It is what makes the parts of the library that only run on a machine with an
+ * unusable timer reachable at all - the startup test rejecting a timer that
+ * does not move, is too coarse or is not monotonic, and the health tests
+ * reaching their cutoffs - and what lets a raw entropy recording be replayed
+ * through the health tests that will judge it. See tests/README.md.
+ *
+ * NOT compiled unless JENT_CONF_ENABLE_MOCK_TIMER is defined, and it must not
+ * be enabled in a build anybody relies on for entropy: a Jitter RNG whose time
+ * source the caller supplies has no entropy beyond what that function
+ * provides. The build option is the whole of the protection - a runtime check
+ * would be defeatable by whoever already has this compiled in. It is off by
+ * default and jent_status() reports a build that carries it.
+ *
+ * Declared here rather than in jitterentropy.h deliberately: not part of the
+ * API, reachable only from inside the library and from the tests, which
+ * compile these sources into themselves. A shared build exports no symbol for
+ * it even when the option is on.
+ *
+ * @arg is the pointer handed to jent_set_mock_timer(), and @out is where the
+ * callback writes the next time stamp.
+ */
+typedef void (*jent_mock_timer_cb)(void *arg, uint64_t *out);
+
+/*
+ * Register @cb as the time source, or NULL to return to the platform one.
+ * Returns 0. Call before allocating the collector that is to use it.
+ */
+int jent_set_mock_timer(jent_mock_timer_cb cb, void *arg);
+
+/* Whether a callback is currently registered. */
+int jent_mock_timer_active(void);
+#endif /* JENT_CONF_ENABLE_MOCK_TIMER */
+
 #endif /* _JITTERENTROPY_ARCH_TIMER_H */

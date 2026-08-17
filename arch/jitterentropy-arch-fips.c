@@ -85,21 +85,25 @@ int jent_fips_enabled(void)
 # define JENT_ARCH_FIPS_PROC
 #endif
 
-int jent_fips_enabled(void)
-{
-#ifdef LIBGCRYPT
-	return gcry_fips_mode_active();
-#elif defined(AWSLC)
-	return FIPS_mode();
-#elif defined(OPENSSL)
-	return EVP_default_properties_is_fips_enabled(NULL);
-#elif defined(JENT_ARCH_FIPS_PROC)
+#ifdef JENT_ARCH_FIPS_PROC
 #define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
+
+/*
+ * Read the kernel's FIPS indicator out of @file. The path is a parameter so
+ * this can be checked against a file the caller controls: the real one exists
+ * only on a CONFIG_CRYPTO_FIPS kernel, so "present and 1", "present and 0" and
+ * "absent" would otherwise go untested.
+ *
+ * An unreadable or empty file means not enabled, as does a kernel without the
+ * indicator.
+ */
+static int jent_fips_enabled_file(const char *file)
+{
 	char buf[2] = "0";
 	int fd = 0;
 	ssize_t rlen;
 
-	if ((fd = open(FIPS_MODE_SWITCH_FILE, O_RDONLY)) >= 0) {
+	if ((fd = open(file, O_RDONLY)) >= 0) {
 		do {
 			rlen = read(fd, buf, sizeof(buf));
 		} while (rlen < 0 && errno == EINTR);
@@ -111,6 +115,19 @@ int jent_fips_enabled(void)
 		return 1;
 	else
 		return 0;
+}
+#endif /* JENT_ARCH_FIPS_PROC */
+
+int jent_fips_enabled(void)
+{
+#ifdef LIBGCRYPT
+	return gcry_fips_mode_active();
+#elif defined(AWSLC)
+	return FIPS_mode();
+#elif defined(OPENSSL)
+	return EVP_default_properties_is_fips_enabled(NULL);
+#elif defined(JENT_ARCH_FIPS_PROC)
+	return jent_fips_enabled_file(FIPS_MODE_SWITCH_FILE);
 #undef FIPS_MODE_SWITCH_FILE
 #else
 	/*

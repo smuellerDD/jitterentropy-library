@@ -21,4 +21,4 @@
         advertise a range no toolchain can produce.
     -->
     <uses-sdk android:minSdkVersion="21" />
-</manifest> 
+</manifest>
