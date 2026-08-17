@@ -355,30 +355,18 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	}
 
 	/*
-	 * Enhanced backtracking support: At this point, the hash state
-	 * contains the digest of the previous Jitter RNG collection round
-	 * which is inserted there by jent_read_random_block with the SHA
-	 * update operation. At the current code location we completed
-	 * one request for a caller and we do not know how long it will
-	 * take until a new request is sent to us. To guarantee enhanced
-	 * backtracking resistance at this point (i.e. ensure that an attacker
-	 * cannot obtain information about prior random numbers we generated),
-	 * but still stirring the hash state with old data the Jitter RNG
-	 * obtains a new message digest from its state and re-inserts it.
-	 * After this operation, the Jitter RNG state is still stirred with
-	 * the old data, but an attacker who gets access to the memory after
-	 * this point cannot deduce the random numbers produced by the
-	 * Jitter RNG prior to this point.
+	 * Enhanced backtracking resistance needs nothing done here: it is a
+	 * property of the XDRBG-256 generate operation itself. Every
+	 * jent_read_random_block() call above consumed the state V' into one
+	 * XOF invocation whose output is the successor state V followed by
+	 * the returned bits, and only V is retained - the sponge is reset and
+	 * the temporary buffer is zeroized. Recovering returned data from V
+	 * would require inverting the XOF or knowing the consumed V', so an
+	 * attacker who obtains the memory after this point cannot deduce
+	 * output the instance produced before it. The explicit ratchet the
+	 * pre-XDRBG design performed here is gone with the design: only its
+	 * retained pool state allowed the last output to be recomputed.
 	 */
-	/*
-	 * If we use secured memory, where backtracking support may not be
-	 * needed because the state is protected in a different method,
-	 * it is permissible to drop this support. But strongly weigh the
-	 * pros and cons considering that the SHA3 operation is not that
-	 * expensive.
-	 */
-	if (!jent_memory_is_secure(ec->flags))
-		jent_read_random_block(ec, NULL, 0);
 
 err:
 	jent_notime_unsettick(ec);
