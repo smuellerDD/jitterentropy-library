@@ -133,8 +133,14 @@ SONAME_FLAGS = -Wl,-soname,$(SONAME)
 # -z relro / -z now are GNU ld and lld spellings. Apple's ld64 is handled by
 # the Darwin branch above; the Solaris link editor takes neither in this form,
 # so the hardening is applied only where it is known to be understood.
+#
+# --version-script is the same set of linkers, and it is what limits the
+# shared library to the API of jitterentropy.h (see version.lds). Only the
+# shared link takes it: an archive has no dynamic symbol table to restrict.
 ifneq (,$(filter $(UNAME_S),Linux FreeBSD OpenBSD NetBSD DragonFly))
 LDFLAGS += -Wl,-z,relro,-z,now
+VERSION_SCRIPT := version.lds
+SO_LDFLAGS += -Wl,--version-script=$(VERSION_SCRIPT)
 endif
 INSTALL_STRIP ?= install -s
 STRIP_SHARED := :
@@ -152,8 +158,9 @@ all: $(NAME) $(NAME)-static
 lib$(NAME).a: $(OBJS)
 	$(AR) rcs lib$(NAME).a $(OBJS)
 
-$(SOFILE): $(OBJS)
-	$(CC) -shared $(SONAME_FLAGS) -o $(SOFILE) $(OBJS) $(LDFLAGS)
+$(SOFILE): $(OBJS) $(VERSION_SCRIPT)
+	$(CC) -shared $(SONAME_FLAGS) -o $(SOFILE) $(OBJS) $(LDFLAGS) \
+		$(SO_LDFLAGS)
 
 $(NAME)-static: lib$(NAME).a
 $(NAME): $(SOFILE)
