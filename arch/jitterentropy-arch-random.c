@@ -130,6 +130,17 @@
 
 #endif /* LINUX_KERNEL */
 
+/*
+ * Whether this build selected a backend at all. Not a promise that a call
+ * succeeds - a /dev/urandom that is absent from a chroot still fails - only
+ * that there is something to ask.
+ */
+#if defined(JENT_RANDOM_LINUX_KERNEL) || defined(JENT_RANDOM_WINDOWS) || \
+    defined(JENT_RANDOM_ARC4RANDOM) || defined(JENT_RANDOM_GETRANDOM) || \
+    defined(JENT_RANDOM_DEVURANDOM)
+# define JENT_RANDOM_AVAILABLE
+#endif
+
 #if defined(JENT_RANDOM_GETRANDOM) || defined(JENT_RANDOM_DEVURANDOM)
 /*
  * Blocking read of @len bytes from @path. Returns 0 on success. The path is a
@@ -167,6 +178,16 @@ static int jent_random_dev_urandom(uint8_t *buf, size_t len)
 	return jent_random_read_file("/dev/urandom", buf, len);
 }
 #endif
+
+/* Does this build have a CSPRNG backend? */
+int jent_os_random_supported(void)
+{
+#ifdef JENT_RANDOM_AVAILABLE
+	return 1;
+#else
+	return 0;
+#endif
+}
 
 /* Fill @buf with @len CSPRNG bytes. Returns 0 on success, -1 if unavailable. */
 int jent_os_random_bytes(uint8_t *buf, size_t len)

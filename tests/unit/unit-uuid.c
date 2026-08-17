@@ -56,6 +56,9 @@
 #include "jitterentropy-arch-random.c"
 #include "jitterentropy-uuid.c"
 
+/* What jent_uuid_generate() formats when it has no bytes to format. */
+#define JENT_UT_NIL_UUID "00000000-0000-0000-0000-000000000000"
+
 /*
  * The UUID naming a collector instance in the status output. Checked against
  * the canonical 8-4-4-4-12 form and RFC 4122's version and variant nibbles,
@@ -91,6 +94,21 @@ static void test_uuid(void)
 	}
 	jent_ut_checks++;
 
+	/*
+	 * What the rest may assert depends on what the platform can answer.
+	 * Without a CSPRNG jent_uuid_generate() has no bytes to format and
+	 * says so with the nil UUID, which carries neither version nor variant
+	 * nibble and repeats.
+	 */
+	if (!jent_os_random_supported()) {
+		JENT_UT_TRUE(!strcmp(a, JENT_UT_NIL_UUID),
+			     "the nil UUID is generated where none exists");
+		return;
+	}
+
+	JENT_UT_TRUE(strcmp(a, JENT_UT_NIL_UUID),
+		     "a UUID is generated where a CSPRNG exists");
+
 	JENT_UT_EQ(a[14], '4', "the version nibble says version 4");
 	jent_ut_checks++;
 	if (a[19] != '8' && a[19] != '9' && a[19] != 'a' && a[19] != 'b')
@@ -101,7 +119,7 @@ static void test_uuid(void)
 		JENT_UT_FAIL("%s", "two UUIDs in a row are identical");
 }
 
-#if defined(JENT_UUID_GETRANDOM) || defined(JENT_UUID_DEVURANDOM)
+#if defined(JENT_RANDOM_GETRANDOM) || defined(JENT_RANDOM_DEVURANDOM)
 static void test_uuid_helpers(void)
 {
 	uint8_t b[16];
@@ -111,12 +129,13 @@ static void test_uuid_helpers(void)
 	jent_ut_group("the UUID helpers");
 
 	/*
-	 * The /dev/urandom fallback, which jent_uuid_random_bytes() only
-	 * reaches when getrandom() fails.
+	 * The /dev/urandom fallback, which jent_os_random_bytes() only reaches
+	 * when getrandom() fails.
 	 */
 	memset(b, 0, sizeof(b));
-	if (jent_uuid_dev_urandom(b, sizeof(b))) {
-		JENT_UT_SKIP("jent_uuid_dev_urandom", "/dev/urandom is unreadable");
+	if (jent_random_dev_urandom(b, sizeof(b))) {
+		JENT_UT_SKIP("jent_random_dev_urandom",
+			     "/dev/urandom is unreadable");
 	} else {
 		for (i = 0; i < sizeof(b); i++) {
 			if (b[i])
@@ -142,7 +161,7 @@ static void test_uuid_helpers(void)
 }
 #endif
 
-#if defined(JENT_UUID_GETRANDOM) || defined(JENT_UUID_DEVURANDOM)
+#if defined(JENT_RANDOM_GETRANDOM) || defined(JENT_RANDOM_DEVURANDOM)
 static void test_uuid_read_paths(void)
 {
 	uint8_t b[16];
@@ -151,15 +170,15 @@ static void test_uuid_read_paths(void)
 
 	jent_ut_group("the CSPRNG read behind the UUID");
 
-	JENT_UT_TRUE(jent_uuid_read_random_file("/nonexistent/jent/urandom", b,
-						sizeof(b)) != 0,
+	JENT_UT_TRUE(jent_random_read_file("/nonexistent/jent/urandom", b,
+					   sizeof(b)) != 0,
 		     "an absent source is an error");
 
 	/*
 	 * A directory opens but cannot be read, which is the read-error arm
 	 * rather than the end-of-file one below.
 	 */
-	JENT_UT_TRUE(jent_uuid_read_random_file("/tmp", b, sizeof(b)) != 0,
+	JENT_UT_TRUE(jent_random_read_file("/tmp", b, sizeof(b)) != 0,
 		     "a source that cannot be read is an error");
 
 	fd = mkstemp(path);
@@ -170,7 +189,7 @@ static void test_uuid_read_paths(void)
 	close(fd);
 
 	/* An empty file: end of file before the requested length. */
-	JENT_UT_TRUE(jent_uuid_read_random_file(path, b, sizeof(b)) != 0,
+	JENT_UT_TRUE(jent_random_read_file(path, b, sizeof(b)) != 0,
 		     "a source that ends early is an error");
 
 	/* A file with fewer bytes than asked for: the same. */
@@ -180,8 +199,8 @@ static void test_uuid_read_paths(void)
 		if (f) {
 			fputs("12345", f);
 			fclose(f);
-			JENT_UT_TRUE(jent_uuid_read_random_file(path, b,
-								sizeof(b)) != 0,
+			JENT_UT_TRUE(jent_random_read_file(path, b,
+							   sizeof(b)) != 0,
 				     "a source that is too short is an error");
 		}
 	}
@@ -196,8 +215,7 @@ static void test_uuid_read_paths(void)
 				fputc((int)(i + 1), f);
 			fclose(f);
 			memset(b, 0, sizeof(b));
-			JENT_UT_EQ(jent_uuid_read_random_file(path, b,
-							      sizeof(b)), 0,
+			JENT_UT_EQ(jent_random_read_file(path, b, sizeof(b)), 0,
 				   "a source with enough bytes succeeds");
 			JENT_UT_EQ(b[0], 1, "and the bytes are the ones read");
 			JENT_UT_EQ(b[15], 16, "through to the last");

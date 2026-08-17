@@ -43,7 +43,8 @@
 /*
  * Architecture / OS-specific access to the operating system's CSPRNG.
  *
- * Provides jent_os_random_bytes(). The backends are defined in
+ * Provides jent_os_random_bytes(), and jent_os_random_supported() to ask
+ * whether the platform has a backend behind it at all. Both are defined in
  * arch/jitterentropy-arch-random.c; the dispatch order is:
  *
  *   - Linux kernel              -> get_random_bytes()
@@ -79,5 +80,8 @@
  * failed, in which case @buf holds nothing worth using.
  */
 int jent_os_random_bytes(uint8_t *buf, size_t len);
+
+/* Whether one of those backends is compiled in. */
+int jent_os_random_supported(void);
 
 #endif /* _JITTERENTROPY_ARCH_RANDOM_H */
