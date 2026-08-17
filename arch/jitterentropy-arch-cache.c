@@ -459,9 +459,108 @@ static ssize_t jent_read_sysfs_attr(const char *file, char *buf, size_t buflen)
 	return rlen;
 }
 
-static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
+/*
+ * The three sysfs cache attributes, parsed separately from the reading of
+ * them. They are the whole of the interpretation this backend does, they are
+ * pure, and split out they can be checked against the shapes the kernel
+ * actually produces - and against the malformed ones it must not be fooled by
+ * - without a sysfs tree to read.
+ */
+
+/* Only data and unified caches are relevant; instruction caches are not. */
+static int jent_cache_type_is_data(const char *buf)
 {
-#define JENT_SYSFS_CPU_DIR "/sys/devices/system/cpu"
+	return !strncmp(buf, "Data", 4) || !strncmp(buf, "Unified", 7);
+}
+
+/*
+ * The "level" attribute, e.g. "1". Returns 0 and the level in @level, or -1
+ * when the attribute does not name one.
+ */
+static int jent_parse_cache_level(const char *buf, long *level)
+{
+	char *endptr;
+	long val;
+
+	errno = 0;
+	val = strtol(buf, &endptr, 10);
+	if (errno != 0 || endptr == buf || val < 1)
+		return -1;
+
+	*level = val;
+	return 0;
+}
+
+/*
+ * The "size" attribute, e.g. "32K" or "8M", converted to bytes. @buf is
+ * modified. @rlen is what the read returned and @buflen the size of the
+ * buffer. Returns 0 and the size in @size, or -1 when the attribute does not
+ * name one.
+ */
+static int jent_parse_cache_size(char *buf, size_t rlen, size_t buflen,
+				 long *size)
+{
+	unsigned int shift = 0;
+	char *ext, *endptr;
+	long val;
+
+	/*
+	 * A read filling the entire buffer may have truncated the K/M suffix;
+	 * parsing the bare number would undercount the cache size 1024-fold.
+	 * Skip it instead.
+	 */
+	if (rlen >= buflen)
+		return -1;
+
+	ext = strstr(buf, "K");
+	if (ext) {
+		shift = 10;
+		*ext = '\0';
+	} else {
+		ext = strstr(buf, "M");
+		if (ext) {
+			shift = 20;
+			*ext = '\0';
+		}
+	}
+
+	errno = 0;
+	val = strtol(buf, &endptr, 10);
+	if (errno != 0 || endptr == buf || val <= 0 || val == LONG_MAX)
+		return -1;
+
+	/*
+	 * Shifting the suffix in must not overflow. strtol() saturating at
+	 * LONG_MAX is rejected above, but a value merely large enough that
+	 * << 20 leaves the range is not, and signed overflow is undefined -
+	 * so a sysfs attribute reading "9999999999999M" would be a defect in
+	 * the reader rather than in what it read.
+	 */
+	if (val > (LONG_MAX >> shift))
+		return -1;
+
+	*size = val << shift;
+	return 0;
+}
+
+/*
+ * @cpudir is the sysfs directory holding the per-CPU trees, normally
+ * JENT_SYSFS_CPU_DIR. A parameter so the walk can be pointed at a tree the
+ * caller built: the shapes handled here - an instruction cache to skip, an
+ * attribute that does not parse, a hole in the index numbering - are ones a
+ * given machine does not present.
+ */
+static void jent_get_cachesize_sysfs_dir(const char *cpudir,
+					 long *l1, long *l2, long *l3)
+{
+/*
+ * Overridable, as jent_fips_enabled_file() takes its path: pointing the walk
+ * at nothing is the only way to reach the sysconf fallback of
+ * jent_get_cachesize_uncached() on a machine whose sysfs does answer.
+ */
+#ifndef JENT_SYSFS_CPU_DIR
+# define JENT_SYSFS_CPU_DIR "/sys/devices/system/cpu"
+#endif
 	long conf, cpu;
 
 	*l1 = 0;
@@ -501,8 +600,6 @@ static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 			char file[128];
 			long *slot, val, level;
 			ssize_t rlen;
-			char *ext, *endptr;
-			unsigned int shift = 0;
 
 			/*
 			 * Cache type - only Data and Unified are relevant. The
@@ -512,22 +609,19 @@ static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 			 */
 			snprintf(file, sizeof(file),
 				 "%s/cpu%ld/cache/index%u/type",
-				 JENT_SYSFS_CPU_DIR, cpu, idx);
+				 cpudir, cpu, idx);
 			if (jent_read_sysfs_attr(file, buf, sizeof(buf)) <= 0)
 				break;
-			if (strncmp(buf, "Data", 4) &&
-			    strncmp(buf, "Unified", 7))
+			if (!jent_cache_type_is_data(buf))
 				continue;
 
 			/* Cache level selects the L1/L2/L3 bucket. */
 			snprintf(file, sizeof(file),
 				 "%s/cpu%ld/cache/index%u/level",
-				 JENT_SYSFS_CPU_DIR, cpu, idx);
+				 cpudir, cpu, idx);
 			if (jent_read_sysfs_attr(file, buf, sizeof(buf)) <= 0)
 				continue;
-			errno = 0;
-			level = strtol(buf, &endptr, 10);
-			if (errno != 0 || endptr == buf || level < 1)
+			if (jent_parse_cache_level(buf, &level))
 				continue;
 			if (level == 1)
 				slot = l1;
@@ -539,44 +633,26 @@ static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
 			/* Size of the cache, carrying a K or M suffix. */
 			snprintf(file, sizeof(file),
 				 "%s/cpu%ld/cache/index%u/size",
-				 JENT_SYSFS_CPU_DIR, cpu, idx);
+				 cpudir, cpu, idx);
 			rlen = jent_read_sysfs_attr(file, buf, sizeof(buf));
 			if (rlen <= 0)
 				continue;
-			/*
-			 * A read filling the entire buffer may have truncated
-			 * the K/M suffix; parsing the bare number would
-			 * undercount the cache size 1024-fold. Skip it instead.
-			 */
-			if ((size_t)rlen == sizeof(buf))
+			if (jent_parse_cache_size(buf, (size_t)rlen,
+						  sizeof(buf), &val))
 				continue;
-
-			ext = strstr(buf, "K");
-			if (ext) {
-				shift = 10;
-				*ext = '\0';
-			} else {
-				ext = strstr(buf, "M");
-				if (ext) {
-					shift = 20;
-					*ext = '\0';
-				}
-			}
-
-			errno = 0;
-			val = strtol(buf, &endptr, 10);
-			if (errno != 0 || endptr == buf || val <= 0 ||
-			    val == LONG_MAX)
-				continue;
-			val <<= shift;
 
 			/* Keep the largest cache seen at this level. */
 			if (val > *slot)
 				*slot = val;
 		}
 	}
-#undef JENT_SYSFS_CPU_DIR
 }
+
+static void jent_get_cachesize_sysfs(long *l1, long *l2, long *l3)
+{
+	jent_get_cachesize_sysfs_dir(JENT_SYSFS_CPU_DIR, l1, l2, l3);
+}
+#undef JENT_SYSFS_CPU_DIR
 
 static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
 {
@@ -608,8 +684,6 @@ static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
 }
 
 #elif defined(JENT_ARCH_CACHE_APPLE)
-
-#define JENT_ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 /*
  * Return the first of @names that resolves, or 0 when none does.
@@ -678,8 +752,6 @@ static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3)
 	*l2 = jent_sysctl_cachesize(l2_names, JENT_ARRAY_SIZE(l2_names));
 	*l3 = jent_sysctl_cachesize(l3_names, JENT_ARRAY_SIZE(l3_names));
 }
-
-#undef JENT_ARRAY_SIZE
 
 #elif defined(JENT_ARCH_CACHE_WINDOWS)
 

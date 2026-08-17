@@ -99,6 +99,58 @@
 
 #endif /* LINUX_KERNEL */
 
+#ifdef JENT_ARCH_NCPU_LINUX_AFFINITY
+/*
+ * Read the affinity mask of the calling thread and report both questions asked
+ * of it: @count how many CPUs it holds, @highest the largest number among them
+ * (-1 for an empty mask). Returns 0 or a negative errno.
+ *
+ * The set grows on retry: sched_getaffinity(2) fails with EINVAL when it is
+ * smaller than the CPU mask of the kernel, as on a machine with more CPUs than
+ * CPU_SETSIZE. A fixed set would answer neither question there, which is why
+ * both callers read the mask through here.
+ */
+static int jent_affinity_mask(long *count, long *highest)
+{
+	unsigned int ncpu_set;
+
+	for (ncpu_set = CPU_SETSIZE; ncpu_set <= JENT_NCPU_SET_MAX;
+	     ncpu_set *= 2) {
+		size_t size = CPU_ALLOC_SIZE(ncpu_set);
+		cpu_set_t *set = CPU_ALLOC(ncpu_set);
+		int ret;
+
+		if (!set)
+			return -ENOMEM;
+
+		ret = sched_getaffinity(0, size, set) ? errno : 0;
+		if (!ret) {
+			unsigned int i = ncpu_set;
+
+			*count = CPU_COUNT_S(size, set);
+			*highest = -1;
+			while (i-- > 0) {
+				if (CPU_ISSET_S(i, size, set)) {
+					*highest = (long)i;
+					break;
+				}
+			}
+		}
+
+		CPU_FREE(set);
+
+		if (ret == EINVAL)
+			continue;	/* set too small - try a larger one */
+		if (ret)
+			return -ret;
+
+		return 0;
+	}
+
+	return -EINVAL;
+}
+#endif /* JENT_ARCH_NCPU_LINUX_AFFINITY */
+
 #ifdef JENT_ARCH_NCPU_LINUX_SYSFS
 /*
  * Parse /sys/devices/system/cpu/online and return the number of online
@@ -108,35 +160,18 @@
  * this file when sysfs is mounted, including on UP systems (where it
  * reads "0").
  */
-static long jent_ncpu_sysfs(void)
+/*
+ * Count the CPUs named by an "online" list, e.g. "0-3" or "0,2-5,8".
+ * Returns the count, or a negative errno when the list does not parse.
+ *
+ * Split from the reading of the file so the lists it has to handle - and the
+ * malformed ones it must reject - can be passed in directly; a given machine
+ * presents exactly one of them.
+ */
+static long jent_ncpu_parse_online(const char *p)
 {
-	char buf[256];
-	int fd;
-	ssize_t rlen;
 	long count = 0;
-	const char *p;
 
-	fd = open("/sys/devices/system/cpu/online", O_RDONLY);
-	if (fd < 0)
-		return -errno;
-	do {
-		rlen = read(fd, buf, sizeof(buf) - 1);
-	} while (rlen < 0 && errno == EINTR);
-	close(fd);
-	if (rlen <= 0)
-		return -EIO;
-	buf[rlen] = '\0';
-
-	/*
-	 * A read that fills the whole buffer without reaching the trailing
-	 * newline was truncated (a system with many discontiguous ranges can
-	 * exceed the buffer). Parsing the fragment would miscount the final
-	 * range, so report an error and let the caller fall back.
-	 */
-	if ((size_t)rlen == sizeof(buf) - 1 && buf[rlen - 1] != '\n')
-		return -EINVAL;
-
-	p = buf;
 	while (*p && *p != '\n') {
 		char *endp;
 		long start, end;
@@ -167,6 +202,41 @@ static long jent_ncpu_sysfs(void)
 		return -EINVAL;
 	return count;
 }
+
+/* @path is a parameter for the same reason as in jent_ncpu_parse_online(). */
+static long jent_ncpu_sysfs_file(const char *path)
+{
+	char buf[256];
+	int fd;
+	ssize_t rlen;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return -errno;
+	do {
+		rlen = read(fd, buf, sizeof(buf) - 1);
+	} while (rlen < 0 && errno == EINTR);
+	close(fd);
+	if (rlen <= 0)
+		return -EIO;
+	buf[rlen] = '\0';
+
+	/*
+	 * A read that fills the whole buffer without reaching the trailing
+	 * newline was truncated (a system with many discontiguous ranges can
+	 * exceed the buffer). Parsing the fragment would miscount the final
+	 * range, so report an error and let the caller fall back.
+	 */
+	if ((size_t)rlen == sizeof(buf) - 1 && buf[rlen - 1] != '\n')
+		return -EINVAL;
+
+	return jent_ncpu_parse_online(buf);
+}
+
+static long jent_ncpu_sysfs(void)
+{
+	return jent_ncpu_sysfs_file("/sys/devices/system/cpu/online");
+}
 #endif
 
 long jent_ncpu(void)
@@ -176,25 +246,10 @@ long jent_ncpu(void)
 #elif defined(JENT_ARCH_NCPU_POSIX)
 # ifdef JENT_ARCH_NCPU_LINUX_AFFINITY
 	{
-		size_t cpu_set_alloc_size = CPU_ALLOC_SIZE(CPU_SETSIZE);
-		cpu_set_t *cpu_set = CPU_ALLOC(CPU_SETSIZE);
-		long count = 0;
+		long count = 0, highest = -1;
 
-		/* only get affinity if allocation was successful */
-		if (cpu_set &&
-		    sched_getaffinity(0,
-				      cpu_set_alloc_size,
-				      cpu_set) == 0) {
-			count = CPU_COUNT_S(cpu_set_alloc_size, cpu_set);
-		}
-
-		if (cpu_set) {
-			CPU_FREE(cpu_set);
-		}
-
-		if (count > 0) {
+		if (!jent_affinity_mask(&count, &highest) && count > 0)
 			return count;
-		}
 		/* fall through to sysfs / sysconf */
 	}
 # endif
@@ -238,4 +293,39 @@ long jent_ncpu(void)
 	 */
 	return 1;
 #endif
+}
+
+long jent_cpu_highest(void)
+{
+#ifdef JENT_ARCH_NCPU_LINUX_AFFINITY
+	/*
+	 * The mask is a set, not a range - counting its members and naming the
+	 * last of them are different questions, and only the latter yields a
+	 * CPU a thread can be pinned to.
+	 */
+	{
+		long count = 0, highest = -1;
+
+		if (!jent_affinity_mask(&count, &highest) && highest >= 0)
+			return highest;
+		/* fall through to the count below */
+	}
+#endif
+
+	/*
+	 * Everywhere else the count is all there is, and the CPU numbers are
+	 * taken to be the dense range it describes - true for the flat Windows
+	 * numbering, which jent_thread_pin_to_cpu() resolves in the same order,
+	 * and unavoidable without an affinity API.
+	 */
+	{
+		long ncpu = jent_ncpu();
+
+		if (ncpu < 0)
+			return ncpu;
+		if (ncpu == 0)
+			return -EFAULT;
+
+		return ncpu - 1;
+	}
 }

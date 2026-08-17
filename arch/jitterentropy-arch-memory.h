@@ -45,14 +45,13 @@
  * Provides (defined in arch/jitterentropy-arch-memory.c):
  *   - jent_zalloc(len, flags): allocate zeroed memory, locked into RAM where
  *     the platform supports it (mlock, VirtualLock, libgcrypt secmem, OpenSSL
- *     secure heap, ...). flags are the collector flags; only
- *     JENT_FORCE_SECURE_MEM is consulted, which turns secure memory the
- *     environment does not grant from a (silent) fallback to ordinary memory
- *     into an allocation failure.
- *   - jent_zfree(ptr, len): zero and release memory previously allocated
- *     with jent_zalloc().
+ *     secure heap, ...). Of the collector flags only JENT_FORCE_SECURE_MEM is
+ *     consulted: it turns secure memory the environment does not grant from a
+ *     silent fallback to ordinary memory into an allocation failure.
+ *   - jent_zfree(ptr, len): zero and release such an allocation.
  *   - jent_memset_secure(s, n): wipe a buffer in a way the compiler may
  *     not optimize away.
+ *   - jent_secure_memory_supported(): whether the active path locks and wipes.
  *
  * The dispatch order is:
  *   - LIBGCRYPT     -> gcry_malloc_secure / gcry_free
@@ -61,44 +60,30 @@
  *   - Windows       -> VirtualAlloc + VirtualLock with PAGE_NOACCESS guard
  *                      pages around the payload
  *   - Linux/BSD/Mac -> mmap + mlock with PROT_NONE guard pages around the
- *                      payload; additionally excluded from core dumps via
- *                      madvise(MADV_DONTDUMP) on Linux and
- *                      madvise(MADV_NOCORE) on FreeBSD, best effort.
- *   - Linux Kernel  -> kvmalloc + kvfree_sensitive; counts as secure since
- *                      kernel memory is never paged out to swap, does not
- *                      appear in user space core dumps and is wiped on free
+ *                      payload; also excluded from core dumps via
+ *                      madvise(MADV_DONTDUMP) on Linux and MADV_NOCORE on
+ *                      FreeBSD, best effort
+ *   - Linux Kernel  -> kvmalloc + kvfree_sensitive; secure because kernel
+ *                      memory is never paged out to swap, does not appear in
+ *                      user space core dumps and is wiped on free
  *   - other         -> plain malloc
  *
- * Secure memory can be denied at runtime on four of these backends: Windows
- * and POSIX mlock, where the operating system refuses the memory lock, and
- * libgcrypt and OpenSSL, where the secure arena the allocation would come out
- * of is absent or exhausted. All four then fall back to ordinary memory unless
- * the caller set JENT_FORCE_SECURE_MEM, which makes the same situation fail
- * the allocation. Only that one property differs: on the mlock backends the
- * guard-page layout and the dump exclusion are established either way, and on
- * the crypto backends the free path tells the two kinds of pointer apart by
- * itself, which is why jent_zfree() does not take the flags.
+ * Four backends can be denied secure memory at runtime: the two mlock ones
+ * when the operating system refuses the lock, libgcrypt and OpenSSL when their
+ * secure arena is absent or exhausted. All four then fall back to ordinary
+ * memory unless JENT_FORCE_SECURE_MEM makes the same situation fail the
+ * allocation. Only that differs - the guard pages and the dump exclusion are
+ * established either way, and the free path tells the two kinds of pointer
+ * apart itself, which is why jent_zfree() does not take the flags.
  *
- * How much memory may be locked is a property of the environment that the
- * library does not change: RLIMIT_MEMLOCK on POSIX and the process working set
- * quota on Windows, both process-wide state that belongs to the application.
- * An application that needs a large collector locked (JENT_FORCE_SECURE_MEM
- * with JENT_CACHE_ALL, say) raises them itself before the allocation; the
- * recording tools do so in
- * tests/raw-entropy/recording_userspace/jitterentropy-memlock.h.
- *
- * The secure memory arenas of libgcrypt and OpenSSL are the same kind of
- * process-wide state and are likewise left to the application: libgcrypt's
- * secmem pool is created once with GCRYCTL_INIT_SECMEM and OpenSSL's secure
- * heap once with CRYPTO_secure_malloc_init(). A size chosen here would bound
- * every other user of those libraries in the process - and could not be
- * applied at all once the application had configured them itself - so
- * jent_zalloc() only checks that the allocation came out of a configured
- * arena. The recording tools configure the arena in the same header.
- *
- * Whether the active path provides locked / wiped memory is reported at
- * runtime by jent_secure_memory_supported() (defined in
- * arch/jitterentropy-arch-memory.c).
+ * How much memory may be locked (RLIMIT_MEMLOCK, the Windows working set
+ * quota) and how large the libgcrypt and OpenSSL arenas are is process-wide
+ * state belonging to the application, which the library does not change: a
+ * size chosen here would bound every other user of those libraries in the
+ * process. An application that needs a large collector locked raises the
+ * limits and configures the arena itself, as the test programs do in
+ * tests/jitterentropy-memlock.h; jent_zalloc() only checks that the allocation
+ * came out of a configured arena.
  */
 
 #ifndef _JITTERENTROPY_ARCH_MEMORY_H
@@ -106,6 +91,14 @@
 
 void jent_memset_secure(void *s, size_t n);
 void *jent_zalloc(size_t len, unsigned int flags);
+
+/*
+ * Releases what jent_zalloc() returned, wiping @len bytes first. @len must be
+ * the length the allocation was made with - the guard-page backends derive the
+ * extent of their mapping from it.
+ *
+ * A NULL @ptr is a no-op, as it is for free().
+ */
 void jent_zfree(void *ptr, size_t len);
 
 /*

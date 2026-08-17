@@ -248,6 +248,10 @@ void *jent_zalloc(size_t len, unsigned int flags)
 
 void jent_zfree(void *ptr, size_t len)
 {
+	/* See the NULL guard of the userspace variant below. */
+	if (!ptr)
+		return;
+
 	kvfree_sensitive(ptr, len);
 }
 
@@ -371,26 +375,19 @@ void *jent_zalloc(size_t len, unsigned int flags)
 		 * the same, so jent_zfree() needs no knowledge of the flag.
 		 *
 		 * VirtualLock() charges its pages against the process
-		 * *minimum* working set - "the maximum number of pages a
-		 * process can lock is equal to the number of pages in its
-		 * minimum working set minus a small overhead" - and fails
-		 * with ERROR_WORKING_SET_QUOTA once that budget is exhausted.
-		 * The default minimum is smaller than the memory block of a
-		 * collector asking for a large size (most visibly a
-		 * JENT_CACHE_ALL one, which asks for the summed L1+L2+L3
-		 * size), so with JENT_FORCE_SECURE_MEM such an allocation
-		 * fails unless the quota has been raised beforehand.
+		 * *minimum* working set and fails with ERROR_WORKING_SET_QUOTA
+		 * once that budget is exhausted. The default minimum is
+		 * smaller than the memory block of a collector asking for a
+		 * large size (a JENT_CACHE_ALL one most visibly), so with
+		 * JENT_FORCE_SECURE_MEM such an allocation fails unless the
+		 * quota was raised beforehand.
 		 *
-		 * Raising it is deliberately not done here: the working set
-		 * limits are process-wide state, extending them evicts the
-		 * working set the host application has reserved for itself,
-		 * and they cannot be restored on free (another thread may
-		 * have locked memory against the raised quota in the
-		 * meantime). That is the application's decision to make, just
-		 * as RLIMIT_MEMLOCK is on the POSIX path below. The recording
-		 * tools - which own their process - raise both for the
-		 * compliance modes in
-		 * tests/raw-entropy/recording_userspace/jitterentropy-memlock.h.
+		 * Raising it here is deliberately not done: the working set
+		 * limits are process-wide state, extending them evicts what
+		 * the host application reserved, and they cannot be restored
+		 * on free. That is the application's decision, as
+		 * RLIMIT_MEMLOCK is on the POSIX path below; the test programs
+		 * raise both in tests/jitterentropy-memlock.h.
 		 */
 		if (!VirtualLock(tmp, payload) &&
 		    (flags & JENT_FORCE_SECURE_MEM)) {
@@ -529,6 +526,16 @@ void *jent_zalloc(size_t len, unsigned int flags)
 
 void jent_zfree(void *ptr, size_t len)
 {
+	/*
+	 * A no-op, as free(NULL) is, so callers need not each guard. Here
+	 * rather than in the backends because every one of them would do
+	 * something worse than nothing with NULL: all wipe before releasing
+	 * through jent_memset_secure(), which dereferences unconditionally,
+	 * and the guard-page backends compute their base as ptr - page_size.
+	 */
+	if (!ptr)
+		return;
+
 #ifdef LIBGCRYPT
 
 	/*

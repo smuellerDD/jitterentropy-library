@@ -2,6 +2,7 @@
  * Non-physical true random number generator based on timing jitter.
  *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
+ * Copyright Markus Theil <theil.markus@gmail.com>, 2026
  *
  * License
  * =======
@@ -40,36 +41,43 @@
  */
 
 /*
- * Architecture / OS-specific UUID generation.
+ * Architecture / OS-specific access to the operating system's CSPRNG.
  *
- * Provides jent_uuid_generate() which formats an RFC 4122 version 4 (random)
- * UUID string. The 16 underlying bytes are obtained from the platform's native
- * cryptographically secure RNG:
+ * Provides jent_os_random_bytes(). The backends are defined in
+ * arch/jitterentropy-arch-random.c; the dispatch order is:
  *
  *   - Linux kernel              -> get_random_bytes()
  *   - Windows (MSVC / MinGW)    -> BCryptGenRandom()
  *   - Apple / *BSD              -> arc4random_buf()
  *   - Linux userspace           -> getrandom(), /dev/urandom fallback
  *   - other Unix-like           -> /dev/urandom
- *   - anything else (baremetal) -> no CSPRNG, emits the nil UUID
+ *   - anything else (baremetal) -> none, and the call fails
  *
- * The RFC 4122 version and variant bits are forced here for every backend, so
- * the result is a well-formed v4 UUID regardless of the byte source.
+ * Keeping the headers those need - <windows.h>, <bcrypt.h>, <sys/random.h>,
+ * the file reads - away from the callers is what this file is for, as
+ * elsewhere in arch/.
+ *
+ * None of it is an entropy source for the Jitter RNG and must never become
+ * one: the library exists to produce randomness on machines whose platform has
+ * none worth having, the last line of that table being a target it still has
+ * to work on. The bytes are for callers that want a value nobody outside the
+ * process can anticipate and can cope with the platform offering nothing.
  */
+#ifndef _JITTERENTROPY_ARCH_RANDOM_H
+#define _JITTERENTROPY_ARCH_RANDOM_H
 
-#ifndef _JITTERENTROPY_ARCH_UUID_H
-#define _JITTERENTROPY_ARCH_UUID_H
-
-/* Length of the canonical UUID string "8-4-4-4-12" including the NUL. */
-#ifndef JENT_UUID_STRLEN
-# define JENT_UUID_STRLEN 37
+#ifdef LINUX_KERNEL
+#include <linux/types.h>
+#else
+#include <stddef.h>
+#include <stdint.h>
 #endif
 
 /*
- * Generate an RFC 4122 version 4 UUID string into @out, which must hold at
- * least JENT_UUID_STRLEN bytes. If no platform CSPRNG is available the nil UUID
- * (all zeroes) is produced. Defined in arch/jitterentropy-arch-uuid.c.
+ * Fill @buf with @len bytes from whichever of the above this target has.
+ * Returns 0 on success and nonzero where there is none to ask or the ask
+ * failed, in which case @buf holds nothing worth using.
  */
-void jent_uuid_generate(char *out);
+int jent_os_random_bytes(uint8_t *buf, size_t len);
 
-#endif /* _JITTERENTROPY_ARCH_UUID_H */
+#endif /* _JITTERENTROPY_ARCH_RANDOM_H */
