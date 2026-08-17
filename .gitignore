@@ -5,3 +5,15 @@ build
 inst
 tests/raw-entropy/results-measurements/*.data
 /.vs
+build*/
+coverage/
+tests/gcd/gcd
+tests/health/health
+tests/unit/unit-sha3
+tests/unit/unit-gcd
+tests/unit/unit-arch
+tests/unit/unit-base
+tests/unit/unit-error
+tests/unit/unit-fault
+tests/unit/unit-notime
+tests/unit/unit-mock

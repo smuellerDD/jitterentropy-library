@@ -1,0 +1,41 @@
+# https://editorconfig.org - the indentation the existing tree already uses.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Kernel style: hard tabs, eight columns, 80 per line.
+[*.{c,h}]
+indent_style = tab
+indent_size = 8
+max_line_length = 80
+
+# Tabs here too.
+[*.sh]
+indent_style = tab
+indent_size = 8
+
+# Recipe lines must begin with a tab.
+[{Makefile,Makefile.*,*.mk,Kbuild,Kbuild.*}]
+indent_style = tab
+indent_size = 8
+
+[{CMakeLists.txt,*.cmake,*.cmake.in}]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,nix,json,xml}]
+indent_style = space
+indent_size = 2
+
+# Two trailing spaces are a hard line break in Markdown.
+[*.md]
+trim_trailing_whitespace = false
+
+# Recorded samples and man page source, kept as produced.
+[{tests/health/testdata/*,doc/*.3}]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
