@@ -95,7 +95,12 @@ static void jent_selftest_schedule(void)
  */
 static bool jent_selftest_execute(void)
 {
-	int ret = jent_crypto_selftest();
+	/*
+	 * Unbound run: the kernel interfaces share the module-global error
+	 * state below across all their collectors instead of binding the
+	 * verdict to a single instance.
+	 */
+	int ret = jent_selftest(NULL);
 
 	/*
 	 * The timestamp first: a reader that sees a non-zero run count then

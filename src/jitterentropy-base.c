@@ -255,6 +255,8 @@ static inline unsigned int jent_update_secure_mem(unsigned int flags)
  *	JENT_ERR_LAG_PERMANENT		(-8)  LAG permanent failure
  *	JENT_ERR_RCT_MEM		(-9)  RCT with memory failed
  *	JENT_ERR_RCT_MEM_PERMANENT	(-10) RCT with memory permanent failure
+ *	JENT_ERR_SELFTEST		(-11) A bound jent_selftest run failed,
+ *					      permanently
  */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
@@ -294,6 +296,20 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	while (len > 0) {
 		size_t tocopy;
 		unsigned int health_test_result;
+
+		/*
+		 * A conditioning self test bound to this instance failed. The
+		 * check does not go through jent_health_failure(): that path
+		 * only reports under FIPS, while the KAT verdict is about the
+		 * conditioning implementation, not the noise source, and must
+		 * stop the output in every mode. Checked per block so that a
+		 * self test failing on another thread stops a request already
+		 * in flight.
+		 */
+		if (ec->selftest_failed) {
+			ret = JENT_ERR_SELFTEST;
+			goto err;
+		}
 
 		jent_random_data(ec);
 
@@ -520,6 +536,13 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 		case JENT_ERR_APT_PERMANENT:
 		case JENT_ERR_LAG_PERMANENT:
 		case JENT_ERR_RCT_MEM_PERMANENT:
+
+			/*
+			 * A failed conditioning self test as well: it judges
+			 * the implementation, which a reallocation at a higher
+			 * oversampling rate cannot mend.
+			 */
+		case JENT_ERR_SELFTEST:
 			return ret;
 
 			/* Intermittent health errors */
@@ -1096,8 +1119,7 @@ out:
 }
 
 /**
- * jent_crypto_selftest() - Run the known answer tests of the conditioning
- *			    component
+ * jent_selftest() - Run the known answer tests of the conditioning component
  *
  * The SHA3-256 and XDRBG-256 tests that jent_entropy_init*() runs before
  * anything else, exposed separately for callers that have to repeat them over
@@ -1106,14 +1128,26 @@ out:
  * They run on stack-local state alone, touching nothing of the library, of a
  * collector or of the operating system, and are therefore reentrant: callable
  * at any time, from any thread, in parallel with entropy collection,
- * allocating nothing and never blocking.
+ * allocating nothing and never blocking. Only a failure writes to the bound
+ * collector, and nothing but this function ever sets that word.
+ *
+ * @param[in] ec Entropy collector the verdict is bound to: a failure puts the
+ *		 instance permanently out of service, jent_read_entropy*()
+ *		 returning JENT_ERR_SELFTEST instead of output from then on.
+ *		 May be NULL to obtain the verdict without binding it.
  *
  * @return 0 on success, EHASH if a known answer test failed.
  */
 JENT_PRIVATE_STATIC
-int jent_crypto_selftest(void)
+int jent_selftest(struct rand_data *ec)
 {
-	return jent_sha3_tester() ? EHASH : 0;
+	if (jent_sha3_tester()) {
+		if (ec)
+			ec->selftest_failed = 1;
+		return EHASH;
+	}
+
+	return 0;
 }
 
 /*
@@ -1128,7 +1162,7 @@ static inline int jent_entropy_init_common_pre(unsigned int flags)
 	jent_notime_block_switch();
 	jent_health_cb_block_switch();
 
-	ret = jent_crypto_selftest();
+	ret = jent_selftest(NULL);
 	if (ret)
 		return ret;
 

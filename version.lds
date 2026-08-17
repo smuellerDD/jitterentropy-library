@@ -9,7 +9,6 @@
  */
 {
 global:
-	jent_crypto_selftest;
 	jent_entropy_collector_alloc;
 	jent_entropy_collector_free;
 	jent_entropy_init;
@@ -21,6 +20,7 @@ global:
 	jent_read_entropy;
 	jent_read_entropy_safe;
 	jent_secure_memory_supported;
+	jent_selftest;
 	jent_set_fips_failure_callback;
 	jent_status;
 	jent_uuid;
