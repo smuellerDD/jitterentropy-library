@@ -55,12 +55,15 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
  * alpha=2^-30, but operate on much smaller window sizes. This larger selection
  * of alpha makes the behavior per-lag-window similar to the APT test.
  *
+ * The permanent cutoffs use alpha=2^(-44), i.e. the square of the intermittent
+ * alpha. This follows the convention of the RCT and the APT, which derive
+ * their permanent cutoff from alpha=2^-60 out of the intermittent alpha=2^-30.
+ *
  * The global cutoffs are calculated using the
  * InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
- * The local cutoffs are somewhat more complicated. For background, see Feller's
- * _Introduction to Probability Theory and It's Applications_ Vol. 1,
- * Chapter 13, section 7 (in particular see equation 7.11, where x is a root
- * of the denominator of equation 7.6).
+ * The local cutoffs are somewhat more complicated: the probability of no run
+ * of length r in n trials is (1 - p x) / ((r + 1 - r x) q) * x^-(n+1), where x
+ * is the root near 1 of 1 - x + q p^r x^(r+1).
  *
  * We'll proceed using the notation of SP 800-90B Section 6.3.8 (which is
  * developed in Kelsey-McKay-Turan paper "Predictive Models for Min-entropy
@@ -72,36 +75,65 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
  * JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE.
  *
  * We have to iteratively look for an appropriate value for the cutoff r.
+ *
+ * tests/health/cutoffs.py computes both tables, and --check compares them
+ * against the ones below.
  */
 static const unsigned int jent_lag_global_cutoff_lookup[20] =
 	{ 66443,  93504, 104761, 110875, 114707, 117330, 119237, 120686, 121823,
 	 122739, 123493, 124124, 124660, 125120, 125520, 125871, 126181, 126457,
 	 126704, 126926 };
+static const unsigned int jent_lag_global_cutoff_permanent_lookup[20] =
+	{ 66876,  93896, 105108, 111188, 114993, 117596, 119486, 120920, 122045,
+	 122951, 123696, 124318, 124847, 125301, 125695, 126041, 126346, 126617,
+	 126860, 127079 };
 static const unsigned int jent_lag_local_cutoff_lookup[20] =
 	{  38,  75, 111, 146, 181, 215, 250, 284, 318, 351,
 	  385, 419, 452, 485, 518, 551, 584, 617, 650, 683 };
+static const unsigned int jent_lag_local_cutoff_permanent_lookup[20] =
+	{  60, 119, 177, 234, 291,  347,  404,  460,  516,  571,
+	  627, 683, 738, 793, 848,  903,  958, 1013, 1068, 1123 };
 
 static void jent_lag_init(struct rand_data *ec, unsigned int osr)
 {
+	/* Every oversampling rate the library accepts needs an entry. */
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup) <
+			  JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_global_cutoff_permanent_lookup) <
+			  JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup) <
+			  JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_local_cutoff_permanent_lookup) <
+			  JENT_MAX_OSR);
+
 	/*
 	 * Establish the lag global and local cutoffs based on the presumed
 	 * entropy rate of 1/osr.
 	 */
-	/* TODO: add permanent health failure */
 	if (osr > JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
 		ec->lag_global_cutoff =
 			jent_lag_global_cutoff_lookup[
 				JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup) - 1];
+		ec->lag_global_cutoff_permanent =
+			jent_lag_global_cutoff_permanent_lookup[
+				JENT_ARRAY_SIZE(jent_lag_global_cutoff_permanent_lookup) - 1];
 	} else {
 		ec->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr - 1];
+		ec->lag_global_cutoff_permanent =
+			jent_lag_global_cutoff_permanent_lookup[osr - 1];
 	}
 
 	if (osr > JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup)) {
 		ec->lag_local_cutoff =
 			jent_lag_local_cutoff_lookup[
 				JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup) - 1];
+		ec->lag_local_cutoff_permanent =
+			jent_lag_local_cutoff_permanent_lookup[
+				JENT_ARRAY_SIZE(jent_lag_local_cutoff_permanent_lookup) - 1];
 	} else {
 		ec->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr - 1];
+		ec->lag_local_cutoff_permanent =
+			jent_lag_local_cutoff_permanent_lookup[osr - 1];
 	}
 }
 
@@ -163,9 +195,15 @@ static void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
 		ec->lag_prediction_success_count++;
 		ec->lag_prediction_success_run++;
 
-		/* TODO: add permanent health failure */
-		if ((ec->lag_prediction_success_run >= ec->lag_local_cutoff) ||
-		    (ec->lag_prediction_success_count >= ec->lag_global_cutoff))
+		if ((ec->lag_prediction_success_run >=
+		     ec->lag_local_cutoff_permanent) ||
+		    (ec->lag_prediction_success_count >=
+		     ec->lag_global_cutoff_permanent))
+			ec->health_failure |= JENT_LAG_FAILURE_PERMANENT;
+		else if ((ec->lag_prediction_success_run >=
+			  ec->lag_local_cutoff) ||
+			 (ec->lag_prediction_success_count >=
+			  ec->lag_global_cutoff))
 			ec->health_failure |= JENT_LAG_FAILURE;
 	} else {
 		/* The prediction wasn't correct. End any run of successes.*/
@@ -296,22 +334,29 @@ void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
  * symbols.)
  *
  * For the alpha < 2^-53, R cannot be used as it uses a float data type without
- * arbitrary precision. A SageMath script is used to calculate those cutoff
- * values.
+ * arbitrary precision. tests/health/cutoffs.py computes these tables with
+ * mpmath, and --check compares them against the ones below.
  *
- * For any value above 14, this yields the maximal allowable value of 512
- * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that
- * renders the test unable to fail).
+ * From osr 15 on this yields the maximal allowable value of 512 (by FIPS 140-2
+ * IG 7.19 Resolution # 16, we cannot choose a cutoff value that renders the
+ * test unable to fail). The tables cover osr 1 to JENT_MAX_OSR; the build
+ * assertion below keeps them doing so.
  */
-static const unsigned int jent_apt_cutoff_lookup[15]=
-	{ 325, 422, 459, 477, 488, 494, 499, 502,
-	  505, 507, 508, 509, 510, 511, 512 };
-static const unsigned int jent_apt_cutoff_permanent_lookup[15]=
-	{ 355, 447, 479, 494, 502, 507, 510, 512,
-	  512, 512, 512, 512, 512, 512, 512 };
+static const unsigned int jent_apt_cutoff_lookup[20]=
+	{ 325, 422, 459, 477, 488, 494, 499, 502, 505, 507,
+	  508, 509, 510, 511, 512, 512, 512, 512, 512, 512 };
+static const unsigned int jent_apt_cutoff_permanent_lookup[20]=
+	{ 355, 447, 479, 494, 502, 507, 510, 512, 512, 512,
+	  512, 512, 512, 512, 512, 512, 512, 512, 512, 512 };
 
 static void jent_apt_init(struct rand_data *ec)
 {
+	/* Every oversampling rate the library accepts needs an entry. */
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_lookup) <
+			  JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) <
+			  JENT_MAX_OSR);
+
 	/*
 	 * Establish the apt_cutoff based on the presumed entropy rate of
 	 * 1/osr.
@@ -336,15 +381,21 @@ static void jent_apt_init(struct rand_data *ec)
  * Example formula for R for intermediate cutoffs:
  * C = 2 + qbinom(1 - 2^(-30), 511, 2^(-8/osr))
  */
-static const unsigned int jent_apt_cutoff_lookup_ntg1[15]=
-	{ 17, 71, 136, 191, 236, 272, 301, 325,
-	  345, 361, 375, 388, 398, 407, 415 };
-static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1[15]=
-	{ 26, 92, 162, 221, 267, 303, 332, 355,
-	  375, 390, 404, 415, 425, 433, 440 };
+static const unsigned int jent_apt_cutoff_lookup_ntg1[20]=
+	{  17,  71, 136, 191, 236, 272, 301, 325, 345, 361,
+	  375, 388, 398, 407, 415, 422, 429, 434, 439, 444 };
+static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1[20]=
+	{  26,  92, 162, 221, 267, 303, 332, 355, 375, 390,
+	  404, 415, 425, 433, 440, 447, 453, 458, 462, 466 };
 
 static void jent_apt_init_ntg1(struct rand_data *ec)
 {
+	/* Every oversampling rate the library accepts needs an entry. */
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) <
+			  JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1) <
+			  JENT_MAX_OSR);
+
 	if (ec->osr >= JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1)) {
 		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[
 			JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) - 1];
@@ -444,14 +495,25 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  *
  * The test is defined to cover the window required non-rejected time deltas
  * to be generated for one output block of 256 bits of data. This window
- * is 321 * OSR as implemented by jent_random_data_one.
+ * is 321 * OSR as implemented by jent_random_data_one, of which tau = 3
+ * leaves n = 107 * OSR observations.
  *
- * The intermittent cutoff is defined by calculating
- * round(pnorm(2^(-(safety_factor)/OSR))*321*OSR)
- * where safety_factor is 1 for common case, 8 for the NTG.1.
+ * With p = 2^(1 - safety_factor/OSR), twice the 2^(-H) of the heuristic
+ * entropy H = safety_factor/OSR, and p' = min(p, 1/2), which holds the
+ * variance at its maximum once p passes one half, both cutoffs are
  *
- * The permanent cutoff is defined by calculating
- * round(pnorm(2^(-(safety_factor / 2)/OSR))*321*OSR)
+ *   floor(n*p + tau * sqrt(n * p' * (1 - p')))
+ *
+ * capped at n, and at n + 1 for the permanent one. tau is 4 for the
+ * intermittent and 5 for the permanent cutoff - the significance levels
+ * pnorm(-4) and pnorm(-5) named at the NTG.1 tables below - and safety_factor
+ * is 1 for the common case and 8 for NTG.1.
+ *
+ * In the common case p >= 1 at every OSR, so both cutoffs are the cap and the
+ * test cannot fail: that is what disables it there.
+ *
+ * tests/health/cutoffs.py computes all four tables from that formula, and
+ * --check compares them against the ones below.
  ***************************************************************************/
 
 /*
@@ -461,20 +523,23 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  */
 #define JENT_RCT_MEM_RECOVERY_LOOP_CNT 10
 
-/*
- * RCT with memory using tau = 3 - these values effectively disables the
- * health test.
- */
+/* RCT with memory, safety factor 1, tau = 4: the cap, so no failure. */
 static const unsigned short jent_rct_mem_cutoff_lookup[] =
 	{ 107,  214,  321,  428,  535,  642,  749,  856,  963, 1070,
 	  1177, 1284, 1391, 1498, 1605, 1712, 1819, 1926, 2033, 2140 };
-/* RCT with memory using tau = 3 */
+/* RCT with memory, safety factor 1, tau = 5: the cap, so no failure. */
 static const unsigned short jent_rct_mem_cutoff_permanent_lookup[] =
 	{ 108,  215,  322,  429,  536,  643,  750,  857,  964, 1071,
 	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 
 static void jent_rct_mem_init(struct rand_data *ec)
 {
+	/* Every oversampling rate the library accepts needs an entry. */
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup) <
+			  JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) <
+			  JENT_MAX_OSR);
+
 	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup)) {
 		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[
 			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup) - 1];
@@ -489,7 +554,7 @@ static void jent_rct_mem_init(struct rand_data *ec)
 }
 
 /*
- * For NTG.1: 8-fold security margin using tau 4 with a significance level
+ * For NTG.1: 8-fold security margin with tau = 4, a significance level of
  * pnorm(-4) yielding 3.17e-05 (roughly 2^-15) for first-order errors. Due to
  * the recovery loop we can afford such higher value.
  */
@@ -497,7 +562,7 @@ static const unsigned short jent_rct_mem_cutoff_lookup_ntg1[] =
 	{ 4,    46,   134,  255,  399,  560,  733,  856,  963,  1070,
 	  1177, 1284, 1391, 1498, 1605, 1712, 1819, 1926, 2033, 2140 };
 /*
- * For NTG.1: 8-fold security margin using tau 5 with a significance level of
+ * For NTG.1: 8-fold security margin with tau = 5, a significance level of
  * pnorm(-5) yielding about 2^-20.
  */
 static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1[] =
@@ -505,6 +570,12 @@ static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1[] =
 	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 static void jent_rct_mem_init_ntg1(struct rand_data *ec)
 {
+	/* Every oversampling rate the library accepts needs an entry. */
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) <
+			  JENT_MAX_OSR);
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1) <
+			  JENT_MAX_OSR);
+
 	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1)) {
 		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup_ntg1[
 			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) - 1];
@@ -742,6 +813,42 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	jent_rct_mem_insert(ec, stuck);
 
 	return stuck;
+}
+
+/**
+ * Insert an externally obtained time stamp into the health tests
+ *
+ * The delta against the previously inserted stamp is formed exactly as the
+ * noise source forms it - the division by the common timer divisor included -
+ * and every health test is run on it; the verdict is read back with
+ * jent_health_failure() as usual. Same code, so the same verdict the noise
+ * source would have reached. See jitterentropy-health.h for what for.
+ *
+ * The first stamp of a sequence only primes the reference and is reported as
+ * stuck, as the first measurement of a collector is.
+ *
+ * @param[in] ec Reference to entropy collector
+ * @param[in] timestamp Externally obtained time stamp
+ *
+ * @return Whether the resulting measurement is stuck
+ */
+unsigned int jent_health_insert_timestamp(struct rand_data *ec,
+					  uint64_t timestamp)
+{
+	/*
+	 * jent_entropy_collector_alloc() never leaves the divisor at zero - it
+	 * substitutes one when no common divisor was established - but a
+	 * caller that assembled the collector itself, as the induced failure
+	 * tests do, can. Substitute here too rather than dividing by it.
+	 */
+	uint64_t gcd = ec->jent_common_timer_gcd ?
+		       ec->jent_common_timer_gcd : 1;
+	uint64_t current_delta = jent_udiv64(jent_delta(ec->prev_time,
+							timestamp), gcd);
+
+	ec->prev_time = timestamp;
+
+	return jent_stuck(ec, current_delta);
 }
 
 /**
