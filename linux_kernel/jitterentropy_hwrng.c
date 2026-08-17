@@ -32,6 +32,7 @@
 #include "jitterentropy_error.h"
 #include "jitterentropy_hwrng.h"
 #include "jitterentropy_proc.h"
+#include "jitterentropy_selftest.h"
 
 /*
  * The OSR and flags used to allocate the Jitter RNG instance are shared with
@@ -92,6 +93,14 @@ static int jent_hwrng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 
 	if (!max)
 		return 0;
+
+	/*
+	 * The module error state: a failed periodic cryptographic self test
+	 * ends entropy delivery through every interface. Checked here as well
+	 * as in the character device and crypto API read paths.
+	 */
+	if (jent_selftest_failed())
+		return -EFAULT;
 
 	/*
 	 * Jitter entropy collection is CPU-bound and slow, and the mutex may be

@@ -58,4 +58,66 @@ struct jent_status_ioctl {
  */
 #define JENT_IOCLOOPCNT _IOW(JENT_IOC_MAGIC, 0x02, __u64)
 
+/*
+ * The single fields of the status document, for callers that want one value
+ * and no JSON parser: a second spelling of the same state, not a second
+ * source. Both interfaces implement all of them. Those describing an instance
+ * give -ENODATA without one, as does JENT_IOCUUID on a raw test instance,
+ * which skips the startup that assigns the UUID.
+ */
+
+/*
+ * The canonical UUID string with its NUL. Stated here so this header stays
+ * self-contained; the module checks it against JENT_UUID_STRLEN.
+ */
+#define JENT_UUID_IOCTL_LEN 37
+
+/* Argument for JENT_IOCUUID: the NUL-terminated instance UUID. */
+struct jent_uuid_ioctl {
+	__u8 uuid[JENT_UUID_IOCTL_LEN];
+};
+
+/* Argument for JENT_IOCOUTPUT: what this instance has delivered so far. */
+struct jent_output_ioctl {
+	__u64 invocations;	/* jent_read_entropy() calls served */
+	__u64 bytes;		/* random bytes delivered to callers */
+};
+
+/* The stable per-instance identifier, as the "uuid" status field. */
+#define JENT_IOCUUID	_IOR(JENT_IOC_MAGIC, 0x03, struct jent_uuid_ioctl)
+
+/* "version" as jent_version() encodes it: 3.7.1 is 3070100. */
+#define JENT_IOCVERSION	_IOR(JENT_IOC_MAGIC, 0x04, __u32)
+
+/* The effective oversampling rate, as "configuration.osr". */
+#define JENT_IOCOSR	_IOR(JENT_IOC_MAGIC, 0x05, __u32)
+
+/* "configuration.flags" as a raw mask; the bits are in jitterentropy.h. */
+#define JENT_IOCFLAGS	_IOR(JENT_IOC_MAGIC, 0x06, __u32)
+
+/* "healthFailure" as a raw JENT_*_FAILURE mask; zero when nothing fired. */
+#define JENT_IOCHEALTH	_IOR(JENT_IOC_MAGIC, 0x07, __u32)
+
+/* The lifetime output counters, as the "output" object. */
+#define JENT_IOCOUTPUT	_IOR(JENT_IOC_MAGIC, 0x08, struct jent_output_ioctl)
+
+/* "reinitializations": the UUID is preserved across them. */
+#define JENT_IOCREINIT	_IOR(JENT_IOC_MAGIC, 0x09, __u32)
+
+/*
+ * Run the cryptographic self test - the SHA3-256 and XDRBG-256 known answer
+ * tests of the conditioning component - and report the verdict. Implemented by
+ * the character device and the debugfs test interface; takes no argument.
+ *
+ * An action rather than a query, and the only ioctl here that acts on the
+ * module rather than on the instance it arrives on, which is why it requires
+ * CAP_SYS_ADMIN and gives -EPERM without it.
+ *
+ * Returns 0 when the tests pass. A failure gives -EFAULT and puts the module
+ * into its error state - no interface delivers entropy any more, only a reload
+ * recovers, and under fips=1 it is a panic. A call made afterwards gives
+ * -EFAULT without running anything.
+ */
+#define JENT_IOCSELFTEST _IO(JENT_IOC_MAGIC, 0x0a)
+
 #endif /* _UAPI_JITTERENTROPY_H */

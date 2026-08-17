@@ -75,6 +75,11 @@ The module offers the following load-time parameters:
   value of the `JENT_CACHE_ALL` flag bit. Equivalent to setting that bit in
   `flags`.
 
+* `selftest_interval`: seconds between two runs of the cryptographic self test
+  (default `0`, no periodic run; maximum 2592000). See
+  [Periodic Cryptographic Self Test](#linux-kernel-jitter-rng-periodic-cryptographic-self-test)
+  below.
+
 * `verbose`: enable verbose logging.
 
 The shortcut parameters are folded into `flags` during module initialization,
@@ -216,6 +221,70 @@ If the supplied buffer is too small the ioctl fails with `-EOVERFLOW` and
 `arg.length` is set to the number of bytes required (including the terminating
 NUL); on success `arg.length` holds the number of bytes written.
 
+### Single-field ioctls
+
+For callers that want one value and no JSON parser, the fields below are also
+available individually. Each reports exactly what the correspondingly named
+part of the status document reports - a second spelling of one state, not a
+second source - and each is implemented by the character device and by the
+debugfs test interface alike:
+
+| ioctl | argument | status field |
+| --- | --- | --- |
+| `JENT_IOCUUID` | `struct jent_uuid_ioctl` | `uuid` |
+| `JENT_IOCVERSION` | `__u32` | `version`, as `major * 1000000 + minor * 10000 + patchlevel * 100` |
+| `JENT_IOCOSR` | `__u32` | `configuration.osr` |
+| `JENT_IOCFLAGS` | `__u32` | `configuration.flags`, as the raw `JENT_*` bit mask |
+| `JENT_IOCHEALTH` | `__u32` | `healthFailure`, as the raw `JENT_*_FAILURE` bit mask |
+| `JENT_IOCOUTPUT` | `struct jent_output_ioctl` | `output.invocations` and `output.bytes` |
+| `JENT_IOCREINIT` | `__u32` | `reinitializations` |
+
+`JENT_IOCVERSION` describes the library and always answers. The rest describe
+an instance and fail with `-ENODATA` when there is none, as does
+`JENT_IOCUUID` on a raw instance of the test interface, which skips the
+startup that assigns the UUID.
+
+Example:
+
+	#include "jitterentropy_uapi.h"
+
+	struct jent_uuid_ioctl uuid;
+	int fd = open("/dev/jitterentropy", O_RDONLY);
+
+	if (ioctl(fd, JENT_IOCUUID, &uuid) == 0)
+		printf("%s\n", uuid.uuid);
+
+`jitterentropy-chardev-fields` in `tests/chardev` calls every one of them and
+checks each answer against the status document; it takes the file to query as
+its argument, so it serves both interfaces.
+
+### Self test ioctl
+
+`JENT_IOCSELFTEST` runs the cryptographic self test - the SHA3-256 and
+XDRBG-256 known answer tests of the conditioning component - and reports the
+verdict. It is the one ioctl that is not about the instance it arrives on: the
+tests and the state they keep are module-wide. It therefore requires
+`CAP_SYS_ADMIN` and fails with `-EPERM` without it. Both the character device
+and the debugfs test interface implement it, and it takes no argument:
+
+	#include "jitterentropy_uapi.h"
+
+	int fd = open("/dev/jitterentropy", O_RDONLY);
+
+	if (ioctl(fd, JENT_IOCSELFTEST) == 0)
+		puts("conditioning component verified");
+
+The call returns 0 when the tests pass. A failure gives `-EFAULT` and is
+handled exactly as a failing periodic run is, panic under `fips=1` included:
+the module enters the error state described in
+[Periodic Cryptographic Self Test](#linux-kernel-jitter-rng-periodic-cryptographic-self-test)
+below and stops delivering entropy. A call made after the state was entered
+gives `-EFAULT` without running anything.
+
+The module runs the same tests on a timer by itself; this ioctl is for a
+caller that wants them run at a moment of its own choosing - after resume, say,
+or on the schedule of an audit regime that is not the module's.
+
 # Linux Kernel Jitter RNG Hardware RNG (hwrng)
 
 The module can also register the Jitter RNG with the kernel `hw_random`
@@ -316,19 +385,32 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
   character device, debugfs test interface) was compiled in (the
   `CONFIG_EXTERNAL_JITTERENTROPY_*` options in `Kbuild.config`).
 
-* `statistics`: module-wide statistics in JSON format. It currently reports the
+* `statistics`: module-wide statistics in JSON format. It reports the
   character-device instances (one Jitter RNG entropy collector is allocated per
-  `open()` of `/dev/jitterentropy`):
+  `open()` of `/dev/jitterentropy`) and the periodic cryptographic self test:
 
 		{
 			"charDevice": {
 				"openInstances": 3,
 				"cumulativeOpens": 42
+			},
+			"selfTest": {
+				"intervalSeconds": 3600,
+				"runs": 12,
+				"secondsSinceLastRun": 87,
+				"failed": false
 			}
 		}
 
   `openInstances` is the number of instances open right now; `cumulativeOpens`
   is the total number of opens since the module was loaded.
+
+  `intervalSeconds` is the effective `selftest_interval` module parameter
+  (`0` when the periodic run is disabled), `runs` the number of runs completed
+  since the module was loaded and `secondsSinceLastRun` the age of the last one.
+  Both count the run made at module load, so `runs` is at least 1 and
+  `secondsSinceLastRun` - `null` before the first run - is always a number here.
+  `failed` reports the module error state described below.
 
 * `hwrng_status`: the JSON status string of the single hwrng instance (only
   present when the hwrng interface is enabled, see above).
@@ -350,6 +432,52 @@ Example usage:
 	cat /proc/jitterentropy/statistics | jq .
 	ls /proc/jitterentropy/instances/
 	cat /proc/jitterentropy/instances/$(ls /proc/jitterentropy/instances/ | head -1) | jq .
+
+# Linux Kernel Jitter RNG Periodic Cryptographic Self Test
+
+The known answer tests of the conditioning component - SHA3-256 and XDRBG-256 -
+run at module load, before any interface is registered. `jent_entropy_init_ex()`
+has run the same tests, but from the library's own code path, without the error
+state, the statistics and the `fips=1` handling described below. A failure of
+that run makes the module refuse to load with `EFAULT`.
+
+A module that is loaded once and then keeps running for months can repeat them,
+which bounds the window in which a conditioning component that broke after the
+load keeps delivering data. The `selftest_interval` module parameter sets the
+period in seconds; it is `0` by default, leaving the run at module load and no
+timer, as the repetition is a regime to opt into rather than something every
+system needs. Where it is wanted, one hour is a sensible value: the tests are
+two Keccak
+computations over a handful of bytes, so their cost is not measurable at any
+sensible interval. They run on the power-efficient workqueue, so on a kernel
+running in power-efficient mode (`CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y` or the
+`workqueue.power_efficient` kernel parameter) they do not by themselves wake an
+idle CPU. That workqueue always exists; without that mode it is the ordinary
+per-CPU system workqueue.
+
+Should a run ever fail, the module enters its error state:
+
+* When the kernel was booted with `fips=1`, the whole kernel acts as a FIPS 140
+  module and the failure is a `panic()`, exactly as a permanent health test
+  failure is.
+
+* Otherwise the failure is logged as `cryptographic self test failed`
+  and the module stops delivering entropy through every interface - the
+  character device, the hwrng and the kernel crypto API all fail with `EFAULT`
+  from that point on. The debugfs test interface is not covered: it delivers
+  raw, unconditioned noise, which does not involve the conditioning component
+  that failed.
+
+The error state is sticky and no further run is scheduled; only reloading the
+module clears it, which runs the tests again during initialization and
+therefore refuses to load if they still fail. The state is visible as the
+`selfTest.failed` field of `/proc/jitterentropy/statistics`, along with the
+number of runs completed and the age of the last one.
+
+The same tests can be run on demand through the `JENT_IOCSELFTEST` ioctl (see
+[Self test ioctl](#self-test-ioctl) above), for a caller that wants them at a
+moment of its own choosing. Those runs are counted in the statistics with the
+periodic ones, so what is reported there is every run that happened.
 
 # Linux Kernel Jitter RNG Testing
 

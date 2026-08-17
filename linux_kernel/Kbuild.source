@@ -50,15 +50,18 @@ jitter_rng-y += ../src/jitterentropy-base.o				       \
 		../src/jitterentropy-sha3.o				       \
 		../src/jitterentropy-status.o				       \
 		../src/jitterentropy-timer.o				       \
+		../src/jitterentropy-uuid.o				       \
 		../arch/jitterentropy-arch-memory.o			       \
 		../arch/jitterentropy-arch-timer.o			       \
 		../arch/jitterentropy-arch-sched.o			       \
 		../arch/jitterentropy-arch-cache.o			       \
 		../arch/jitterentropy-arch-fips.o			       \
 		../arch/jitterentropy-arch-ncpu.o			       \
-		../arch/jitterentropy-arch-uuid.o			       \
+		../arch/jitterentropy-arch-random.o			       \
 		jitterentropy_mod.o					       \
-		jitterentropy_proc.o
+		jitterentropy_ioctl.o					       \
+		jitterentropy_proc.o					       \
+		jitterentropy_selftest.o
 
 jitter_rng_c_args_zero = -O0 $(jitter_rng_c_args)
 
@@ -67,6 +70,8 @@ CFLAGS_../src/jitterentropy-gcd.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-health.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-noise.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_c_args)
+# The UUID is formatting, not measurement: it needs no -O0.
+CFLAGS_../src/jitterentropy-uuid.o = $(jitter_rng_c_args)
 CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
 CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_c_args)
@@ -89,9 +94,11 @@ CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_c_args)
 CFLAGS_../arch/jitterentropy-arch-ncpu.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-uuid.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-random.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_mod.o = $(jitter_rng_c_args)
+CFLAGS_jitterentropy_ioctl.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
+CFLAGS_jitterentropy_selftest.o = $(jitter_rng_c_args)
 
 ################### Kernel Crypto API Interface Compilation ####################
 

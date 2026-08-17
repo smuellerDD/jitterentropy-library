@@ -18,6 +18,7 @@
 #include "jitterentropy.h"
 #include "jitterentropy_error.h"
 #include "jitterentropy_kcapi.h"
+#include "jitterentropy_selftest.h"
 
 /*
  * The OSR and flags used to allocate the per-tfm Jitter RNG instances and the
@@ -125,6 +126,14 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 	bool reallocated;
 	ssize_t rc;
 	int ret;
+
+	/*
+	 * The module error state: a failed periodic cryptographic self test
+	 * ends entropy delivery through every interface. Checked here as well
+	 * as in the hwrng and character device read paths.
+	 */
+	if (jent_selftest_failed())
+		return -EFAULT;
 
 	mutex_lock(&rng->jent_lock);
 

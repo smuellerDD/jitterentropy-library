@@ -16,6 +16,7 @@
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"	/* JENT_MIN_OSR */
 #include "jitterentropy_proc.h"
+#include "jitterentropy_selftest.h"
 
 struct proc_dir_entry *jent_proc_dir;
 
@@ -193,12 +194,34 @@ void jent_proc_instance_dec(void)
  */
 static int jent_proc_statistics_show(struct seq_file *m, void *v)
 {
+	struct jent_selftest_stats selftest;
+
+	jent_selftest_get_stats(&selftest);
+
 	seq_puts(m, "{\n");
 	seq_puts(m, "\t\"charDevice\": {\n");
 	seq_printf(m, "\t\t\"openInstances\": %d,\n",
 		   atomic_read(&jent_open_instances));
 	seq_printf(m, "\t\t\"cumulativeOpens\": %llu\n",
 		   (unsigned long long)atomic64_read(&jent_cumulative_opens));
+	seq_puts(m, "\t},\n");
+	seq_puts(m, "\t\"selfTest\": {\n");
+	seq_printf(m, "\t\t\"intervalSeconds\": %u,\n", selftest.interval);
+	seq_printf(m, "\t\t\"runs\": %llu,\n",
+		   (unsigned long long)selftest.runs);
+	/*
+	 * Null rather than 0 before the first run: no time has elapsed since a
+	 * run that has not happened. Not reachable as things stand - the first
+	 * run happens in jent_selftest_init(), before this file exists - but
+	 * the field is documented to be able to say so.
+	 */
+	if (selftest.runs)
+		seq_printf(m, "\t\t\"secondsSinceLastRun\": %llu,\n",
+			   (unsigned long long)selftest.seconds_since_last_run);
+	else
+		seq_puts(m, "\t\t\"secondsSinceLastRun\": null,\n");
+	seq_printf(m, "\t\t\"failed\": %s\n",
+		   selftest.failed ? "true" : "false");
 	seq_puts(m, "\t}\n");
 	seq_puts(m, "}\n");
 

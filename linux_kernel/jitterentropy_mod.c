@@ -28,6 +28,7 @@
 #include "jitterentropy_hwrng.h"
 #include "jitterentropy_kcapi.h"
 #include "jitterentropy_proc.h"
+#include "jitterentropy_selftest.h"
 #include "jitterentropy_testing.h"
 
 /*
@@ -92,9 +93,20 @@ static int __init jent_mod_init(void)
 		return -EFAULT;
 	}
 
-	ret = jent_proc_init();
+	/*
+	 * Run the cryptographic known answer tests once and repeat them
+	 * periodically from now on. Before the interfaces are registered, so
+	 * none of them can deliver data before the module error state it
+	 * maintains exists. A failing first run has nothing to unwind - the
+	 * periodic run is only queued once it passed.
+	 */
+	ret = jent_selftest_init();
 	if (ret)
 		return ret;
+
+	ret = jent_proc_init();
+	if (ret)
+		goto err_selftest;
 
 	ret = jent_kcapi_init();
 	if (ret)
@@ -105,29 +117,22 @@ static int __init jent_mod_init(void)
 		goto err_crypto;
 
 	/*
-	 * Register the debugfs test interface before the character device:
-	 * only one of the two userspace-visible interfaces can be the last
-	 * fallible init step, and unwinding the debugfs file is the safer of
-	 * the two — the debugfs proxy fails its file operations after
-	 * debugfs_remove_recursive(), and unlike /dev/jitterentropy (created
-	 * and potentially opened by udev immediately) nothing opens the test
-	 * interface automatically in the window before the unwind. Being
-	 * after jent_entropy_init_ex() also keeps its reads from racing the
-	 * library initialization.
+	 * Of the two userspace-visible interfaces, the debugfs one is the
+	 * safer to unwind: its proxy fails all file operations after
+	 * debugfs_remove_recursive(), and nothing opens it automatically the
+	 * way udev opens /dev/jitterentropy. So it goes first and the
+	 * character device below is the last fallible step.
 	 */
 	ret = jent_testing_init();
 	if (ret)
 		goto err_hwrng;
 
 	/*
-	 * Register the character device as the very last step and after all
-	 * other fallible steps: misc_register() makes /dev/jitterentropy
-	 * openable by userspace (e.g. udev) immediately, and
-	 * misc_deregister() does not wait for open files. If a later init
-	 * step failed after the device went live, an already-open file would
-	 * keep pointing into a module that init failure frees. The hwrng
-	 * registration is safe to precede it as hwrng_unregister() drains all
-	 * readers before returning.
+	 * The very last step: misc_register() makes /dev/jitterentropy
+	 * openable immediately and misc_deregister() does not wait for open
+	 * files, so a later init failure could free the module under an
+	 * already-open file. The hwrng may precede it - hwrng_unregister()
+	 * drains its readers.
 	 */
 	ret = jent_chardev_init();
 	if (ret)
@@ -143,19 +148,22 @@ err_crypto:
 	jent_kcapi_exit();
 err:
 	jent_proc_exit();
+err_selftest:
+	jent_selftest_exit();
 	return ret;
 }
 
 static void __exit jent_mod_exit(void)
 {
 	/*
-	 * Tear down in reverse order of the registrations in jent_mod_init().
-	 * The relative order of the character device, hwrng and procfs teardown
-	 * matters: both interfaces remove their status files below the shared
-	 * /proc/jitterentropy directory, so their exits must run before
-	 * jent_proc_exit() removes that directory recursively (a later
-	 * proc_remove() on an already-removed entry would act on freed memory).
+	 * Reverse order of the registrations in jent_mod_init(). The character
+	 * device and the hwrng must precede jent_proc_exit(): they remove
+	 * status files below /proc/jitterentropy, which it removes
+	 * recursively, and a proc_remove() on an already-removed entry would
+	 * act on freed memory. The self test goes first, as its state is what
+	 * /proc/jitterentropy/statistics reports.
 	 */
+	jent_selftest_exit();
 	jent_chardev_exit();
 	jent_testing_exit();
 	jent_hwrng_exit();
