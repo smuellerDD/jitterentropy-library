@@ -34,6 +34,7 @@ static inline int jent_map_read_error(ssize_t ret)
 	case JENT_ERR_APT_PERMANENT:
 	case JENT_ERR_LAG_PERMANENT:
 	case JENT_ERR_RCT_MEM_PERMANENT:
+	case JENT_ERR_SELFTEST:
 		/* Permanent health test error */
 		if (fips_enabled)
 			panic("Jitter RNG permanent health test failure\n");

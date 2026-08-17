@@ -454,19 +454,19 @@ static void test_compliance_modes(void)
 /*
  * The conditioning self test as a periodic caller runs it: over and over, and
  * next to a live entropy collector. unit-sha3 covers the vectors themselves;
- * what is tested here is that the exposed entry point is repeatable and keeps
- * out of the library's state.
+ * what is tested here is that the exposed entry point is repeatable and that
+ * a passing run leaves the library's state alone.
  */
-static void test_crypto_selftest(void)
+static void test_selftest(void)
 {
 	struct rand_data *ec;
 	char buf[32];
 	unsigned int i;
 
-	jent_ut_group("jent_crypto_selftest");
+	jent_ut_group("jent_selftest");
 
 	for (i = 0; i < 3; i++)
-		JENT_UT_EQ(jent_crypto_selftest(), 0,
+		JENT_UT_EQ(jent_selftest(NULL), 0,
 			   "the known answer tests pass, and keep passing");
 
 	ec = jent_entropy_collector_alloc(0, 0);
@@ -476,12 +476,64 @@ static void test_crypto_selftest(void)
 		return;
 	}
 
-	JENT_UT_EQ(jent_crypto_selftest(), 0,
-		   "they pass while a collector is allocated");
+	JENT_UT_EQ(jent_selftest(ec), 0,
+		   "they pass bound to a collector");
+	JENT_UT_EQ(ec->selftest_failed, 0u,
+		   "a passing run leaves the instance in service");
 	JENT_UT_EQ(jent_selftest_run, 1,
 		   "the startup self test remains recorded as run");
 	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)), (ssize_t)sizeof(buf),
 		   "the collector still delivers afterwards");
+
+	jent_entropy_collector_free(ec);
+}
+
+/*
+ * A failed on-demand self test stops the output of the instance it was bound
+ * to. The real known answer tests cannot be driven to failure, so the failure
+ * is induced as unit-error does for the health tests: by setting the state a
+ * failing jent_selftest() run sets - its only effect on the collector.
+ */
+static void test_selftest_failure_stops_output(void)
+{
+	struct rand_data *ec;
+	unsigned char buf[32], zero[32];
+	size_t i;
+
+	jent_ut_group("a failed jent_selftest stops the output");
+
+	ec = jent_entropy_collector_alloc(0, 0);
+	if (!ec) {
+		JENT_UT_SKIP("a failed self test", "no collector on this machine");
+		return;
+	}
+
+	memset(buf, 0, sizeof(buf));
+	memset(zero, 0, sizeof(zero));
+
+	ec->selftest_failed = 1;
+
+	JENT_UT_EQ(jent_read_entropy(ec, (char *)buf, sizeof(buf)),
+		   JENT_ERR_SELFTEST,
+		   "jent_read_entropy reports the failed self test");
+	/*
+	 * The gate has to hold outside FIPS mode - the collector above is
+	 * allocated without JENT_FORCE_FIPS - and the buffer must not have
+	 * been written to at all.
+	 */
+	for (i = 0; i < sizeof(buf); i++) {
+		if (buf[i] != zero[i]) {
+			JENT_UT_FAIL("the output buffer was written at %zu", i);
+			break;
+		}
+	}
+	jent_ut_checks++;
+
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, (char *)buf, sizeof(buf)),
+		   JENT_ERR_SELFTEST,
+		   "jent_read_entropy_safe does not recover from it");
+	JENT_UT_EQ(ec->reinit_count, 0u,
+		   "and no reallocation was attempted");
 
 	jent_entropy_collector_free(ec);
 }
@@ -509,7 +561,8 @@ int main(void)
 	test_uuid_api();
 	test_secure_memory_supported();
 	test_init();
-	test_crypto_selftest();
+	test_selftest();
+	test_selftest_failure_stops_output();
 	test_compliance_modes();
 
 	return jent_ut_report("unit-base-api");

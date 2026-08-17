@@ -122,9 +122,9 @@ int main(void)
 	 * reported: their verdict is a property of the library, not of the
 	 * machine it runs on.
 	 */
-	ret = jent_crypto_selftest();
+	ret = jent_selftest(NULL);
 	if (ret)
-		FAIL("jent_crypto_selftest: %d", ret);
+		FAIL("jent_selftest: %d", ret);
 
 	/*
 	 * The thread helpers are exported so that an external handler can

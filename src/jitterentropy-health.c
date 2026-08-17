@@ -854,6 +854,12 @@ unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 /**
  * Report any health test failures
  *
+ * The health tests judge the noise source, and they only report in FIPS
+ * mode. A failed conditioning self test (jent_selftest()) is deliberately
+ * not part of this bitmask: it judges the conditioning implementation and
+ * has to stop the output in every mode, so jent_read_entropy() checks the
+ * collector's selftest_failed word directly instead of going through here.
+ *
  * @param[in] ec Reference to entropy collector
  *
  * @return a bitmask indicating which tests failed

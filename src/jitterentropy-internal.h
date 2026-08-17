@@ -545,6 +545,15 @@ struct rand_data
 	uint64_t apt_base;		/* APT base reference */
 	unsigned int health_failure;	/* Permanent health failure */
 
+	/*
+	 * A jent_selftest() run bound to this instance failed. Deliberately
+	 * not a bit in health_failure: that word only reports under FIPS,
+	 * while a broken conditioning component must stop the output in every
+	 * mode. A full word rather than a bitfield: the self test may run on
+	 * another thread, and setting a bitfield would rewrite its neighbors.
+	 */
+	unsigned int selftest_failed;
+
 	/* RCT with memory */
 	unsigned short rct_mem_ctr;	/* Loop iteration for generating random bytes */
 	unsigned short rct_mem_nosr;	/* Minimum iteration count of measure jitter loop */

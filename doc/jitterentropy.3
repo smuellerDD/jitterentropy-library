@@ -27,7 +27,7 @@ jitterentropy \- CPU Jitter Random Number Generator
 .sp
 .BI "int jent_entropy_init_ex(unsigned int " osr ", unsigned int " flags );
 .sp
-.BI "int jent_crypto_selftest(" void ");
+.BI "int jent_selftest(struct rand_data *" entropy_collector );
 .sp
 .BI "struct rand_data *jent_entropy_collector_alloc(unsigned int " osr ",
 .BI "                                               unsigned int " flags );
@@ -130,7 +130,7 @@ When specifying an oversampling rate
 different than the default, the startup test honor this value and adjust
 the self-test cut-off thresholds to the same values as used at runtime.
 .LP
-.BR jent_crypto_selftest ()
+.BR jent_selftest ()
 runs the known answer tests of the conditioning component, SHA3-256 and
 XDRBG-256. These are the tests
 .BR jent_entropy_init ()
@@ -145,6 +145,19 @@ on failure, the same code
 reports for it. The tests run on stack-local state alone, allocate nothing and
 never block; they may therefore be called from any thread at any time,
 including in parallel with entropy collection and before initialization.
+The
+.IR entropy_collector
+argument binds the verdict to an instance: on failure, that instance is
+permanently taken out of service and
+.BR jent_read_entropy ()
+and
+.BR jent_read_entropy_safe ()
+return
+.B JENT_ERR_SELFTEST
+instead of data from then on, in every mode of operation, not only under
+FIPS. It may be
+.I NULL
+to obtain the verdict without binding it to an instance.
 .LP
 .BR jent_entropy_collector_alloc ()
 allocates a CPU Jitter entropy collector instance and returns the handle
@@ -314,6 +327,11 @@ indicates that the Repetition Count Test with memory failed.
 .B JENT_ERR_RCT_MEM_PERMANENT
 .RI ( -10 )
 indicates that the Repetition Count Test with memory failed permanently.
+.B JENT_ERR_SELFTEST
+.RI ( -11 )
+indicates that a
+.BR jent_selftest ()
+run bound to this instance failed; the failure is permanent.
 .LP
 When either online health test fails the Jitter RNG will not
 have any data provided in
