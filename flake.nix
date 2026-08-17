@@ -8,13 +8,11 @@
     let
       lib = nixpkgs.lib;
 
-      # VMs run under QEMU on the host architecture.
+      # QEMU on the host architecture.
       systems = [ "x86_64-linux" "aarch64-linux" "i686-linux" ];
       forAllSystems = f: lib.genAttrs systems (system: f system);
 
-      # Userspace library and tools, built with the project's CMake build.
-      # Installs jitterentropy-{hashtime,osr,rng}, gcd, extractlsb,
-      # getrawentropy and jitterentropy-chardev-status into bin.
+      # The CMake build: the library plus its tools in bin.
       toolsFor = pkgs:
         pkgs.stdenv.mkDerivation {
           pname = "jitterentropy-tools";
@@ -22,20 +20,11 @@
           src = self;
           nativeBuildInputs = [ pkgs.cmake ];
           enableParallelBuilding = true;
-          # The entropy-collection core must be built at -O0 (CMakeLists.txt
-          # sets it explicitly, and src/jitterentropy-base.c has an __OPTIMIZE__
-          # guard to enforce it), which _FORTIFY_SOURCE cannot be combined with.
-          # Left enabled, the nixpkgs default hardening emits "_FORTIFY_SOURCE
-          # requires compiling with optimization" once per translation unit -
-          # 17 warnings that bury anything worth reading.
-          #
-          # This gives up no hardening. The flag appends -D_FORTIFY_SOURCE=2
-          # after the project's flags, where -O0 has already made it inert -
-          # glibc only defines the _chk variants under optimization, which is
-          # exactly what it is warning about. It also prepends -O2, but before
-          # the project's flags, so the -O0 that follows wins either way.
-          # Compiling src/jitterentropy-base.c with and without this line
-          # produces a byte-identical object file.
+          # The entropy core must build at -O0, which _FORTIFY_SOURCE cannot
+          # combine with: 17 "requires compiling with optimization" warnings,
+          # one per translation unit. No hardening is given up - glibc defines
+          # the _chk variants only under optimization, so the flag was already
+          # inert, and the object file is byte-identical without it.
           hardeningDisable = [ "fortify" "fortify3" ];
           meta = {
             description = "Jitter RNG userspace library and validation tools";
@@ -43,71 +32,43 @@
           };
         };
 
-      # The same tools against musl instead of glibc.
+      # The same tools against musl, which disagrees with glibc about much the
+      # library uses: the CPU_SET pinning, the mlock/getrlimit handling, and
+      # clock_gettime(), which it keeps in libc. pkgsMusl, not pkgsCross.musl64,
+      # so the tools run on the machine that built them.
       #
-      # Every Linux build elsewhere in this flake is a glibc one, yet the
-      # library reaches for a good deal of what the two libcs disagree about:
-      # the pthread_setaffinity_np()/CPU_SET pinning in
-      # arch/jitterentropy-arch-sched.c, the mlock/getrlimit handling in
-      # arch/jitterentropy-arch-memory.c, and clock_gettime(), which musl keeps
-      # in libc while glibc split it out into librt. musl is also stricter about
-      # which headers declare what, so a missing include that glibc supplies
-      # transitively fails here and nowhere else.
-      #
-      # pkgsMusl rather than pkgsCross.musl64: it is the same architecture, so
-      # the tools this produces run on the machine that built them rather than
-      # only linking.
-      #
-      # CI does not build this one - the workflow covers dynamic musl through
-      # Debian's musl-gcc and takes only muslStaticFor from here, so that the
-      # Nix job is the configuration nothing else reaches. It stays for anyone
-      # wanting dynamic musl out of the flake directly.
-      #
-      # Renamed from what toolsFor would otherwise call it, so that the store
-      # path and the build log say which libc this is - the two derivations are
-      # identical but for the package set behind them.
+      # CI covers dynamic musl through Debian's musl-gcc and builds only
+      # muslStaticFor from here; this stays for use out of the flake directly.
       muslFor = pkgs:
         (toolsFor pkgs.pkgsMusl).overrideAttrs
         (_: { pname = "jitterentropy-tools-musl"; });
 
-      # Fully static musl: no interpreter, no libc.so, nothing to resolve at
-      # run time. pkgsStatic is musl-based on Linux
-      # (x86_64-unknown-linux-musl), so this is the same libc as muslFor with
-      # the linkage changed, which is the point - static linking is where the
-      # library's use of pthreads and of clock_gettime() has to hold up without
-      # a dynamic loader to fall back on.
-      #
-      # pname is deliberately left as toolsFor sets it: the static stdenv
-      # already appends "-static-x86_64-unknown-linux-musl" to the derivation
-      # name, so the store path says both libc and linkage on its own.
+      # The same libc with the linkage changed: static is where the use of
+      # pthreads and clock_gettime() has to hold up with no dynamic loader. The
+      # static stdenv already names itself in the store path, hence no pname.
       muslStaticFor = pkgs: toolsFor pkgs.pkgsStatic;
 
-      # Cross-compilation smoke builds.
-      #
-      # The VM tests below only ever exercise the host architecture, which left
-      # every platform outside x86-64/aarch64/i686 Linux with no coverage at
-      # all - and those are exactly the targets whose arch/ backends are
-      # selected by preprocessor conditions that nothing here evaluates. These
-      # derivations compile and link the library and its tools for each target;
-      # they are not run, which is enough to catch the class of breakage that
-      # actually occurs (a missing declaration, an unavailable header, an
-      # unlinked import library, inline asm that does not assemble).
-      #
-      # Build them all with:
-      #   nix build .#cross-riscv64 .#cross-s390x .#cross-mingwW64 ...
+      # Compile-and-link smoke builds for the targets nothing else here
+      # evaluates - the ones whose arch/ backends are selected by preprocessor
+      # conditions. Not run, which still catches the breakage that occurs: a
+      # missing declaration, an absent header, inline asm that does not
+      # assemble.
       crossFor = { cross, timer ? true, shared ? false }:
         cross.stdenv.mkDerivation {
           pname = "jitterentropy-cross";
           version = "3.7.1";
           src = self;
           nativeBuildInputs = [ nixpkgs.legacyPackages.x86_64-linux.cmake ];
-          cmakeFlags = [ "-DINTERNAL_TIMER=${if timer then "on" else "off"}" ]
+          # BUILD_TESTING explicitly: the nixpkgs cmake hook passes it as OFF,
+          # and here the test programs are a good part of what is worth
+          # compiling - they are the code that reaches these targets' arch
+          # backends directly.
+          cmakeFlags = [ "-DINTERNAL_TIMER=${if timer then "on" else "off"}"
+                         "-DBUILD_TESTING=ON" ]
             ++ lib.optional shared "-DBUILD_SHARED_LIBS=ON";
           enableParallelBuilding = true;
-          # Same reason as in toolsFor above, and it matters more here: these
-          # builds exist to surface diagnostics, so 17 lines of
-          # "_FORTIFY_SOURCE requires compiling with optimization" per target
-          # would bury the one warning worth reading.
+          # As in toolsFor, and it matters more here: these exist to surface
+          # diagnostics, which 17 lines per target would bury.
           hardeningDisable = [ "fortify" "fortify3" ];
           meta = {
             description = "Jitter RNG cross-compilation smoke build";
@@ -118,11 +79,9 @@
       crossTargets = pkgs:
         let p = pkgs.pkgsCross;
         in {
-          # Architectures with a dedicated jent_get_nstime() backend that the
-          # native builds never compile: stcke, the PowerPC timebase, rdtime,
-          # rdtime.d. armv7 covers the generic clock_gettime() fallback and,
-          # with i686, the 32-bit paths (JENT_MAX_AUTO_MEMSIZE, the div64
-          # helpers).
+          # The dedicated jent_get_nstime() backends: stcke, the PowerPC
+          # timebase, rdtime, rdtime.d. armv7 covers the clock_gettime()
+          # fallback and, with i686, the 32-bit paths.
           cross-s390x = crossFor { cross = p.s390x; };
           cross-ppc64 = crossFor { cross = p.powernv; };
           cross-riscv64 = crossFor { cross = p.riscv64; };
@@ -130,44 +89,24 @@
           cross-armv7 = crossFor { cross = p."armv7l-hf-multiplatform"; };
           cross-i686 = crossFor { cross = p.gnu32; };
 
-          # Windows/MinGW. Both link widths, and the shared build in addition
-          # because it is the only configuration that exercises the
-          # dllexport/dllimport split in jitterentropy.h and the bcrypt import
-          # library.
-          #
-          # The internal timer is built here, unlike everything else about this
-          # toolchain would suggest: nixpkgs builds its mingw-w64 without
-          # winpthreads, so it ships no <pthread.h> at all, and the timer had
-          # to be switched off for want of a threading back-end.
-          # It now uses the Win32 threads, which come from the CRT and
-          # kernel32, so this is the one target that proves the Win32 back-end
-          # needs nothing a Windows toolchain may lack.
+          # Both link widths, plus shared - the only configuration exercising
+          # the dllexport/dllimport split and the bcrypt import library. The
+          # internal timer builds despite nixpkgs' mingw-w64 shipping no
+          # <pthread.h>: the Win32 back-end needs only the CRT and kernel32,
+          # which is what this target proves.
           cross-mingwW64 = crossFor { cross = p.mingwW64; };
           cross-mingwW64-shared = crossFor { cross = p.mingwW64; shared = true; };
           cross-mingw32 = crossFor { cross = p.mingw32; };
         };
 
-      # Android build of the userspace library via ndk-build, verifying
-      # arch/android/Android.mk against the real NDK toolchain. The NDK is
-      # unfree, so a dedicated nixpkgs instance accepts its license for this
-      # output only; every other output stays on the unmodified package set.
+      # ndk-build over arch/android/Android.mk against the real NDK toolchain,
+      # which is unfree - hence a dedicated nixpkgs instance for this output.
       #
-      # APP_PLATFORM is the NDK's own floor and not a level of this library's
-      # choosing: r29 supports API 21 upwards for every ABI built here (see
-      # ndk/abis.py, where anything below is rejected outright). It used to be
-      # android-30, which was the floor the internal timer's threading back-end
-      # imposed on bionic. Linux, Android included, now takes pthreads
-      # unconditionally (see the threading back-end note in jitterentropy.h),
-      # and bionic has had those since API 1, so that floor is gone with it.
-      #
-      # Nothing else the library calls holds a floor above 21 either: mmap,
-      # munmap, madvise, mlock, munlock, sched_setaffinity, sysconf and
-      # clock_gettime are all unguarded in bionic at that level. getrandom() is
-      # the one exception at __INTRODUCED_IN(28), and rather than let it set the
-      # floor arch/jitterentropy-arch-uuid.c takes its /dev/urandom fallback
-      # below 28 - the same thing it does for glibc older than 2.25. Building at
-      # the toolchain floor is what keeps that branch honest: at android-30 it
-      # was never compiled.
+      # APP_PLATFORM is the NDK's own floor, not this library's: r29 takes API
+      # 21 upwards, and nothing the library calls is guarded above that except
+      # getrandom() at __INTRODUCED_IN(28), which the UUID backend answers with
+      # its /dev/urandom fallback. Building at the floor is what keeps that
+      # branch compiled at all.
       androidFor = system:
         let
           pkgsAndroid = import nixpkgs {
@@ -215,50 +154,26 @@
           };
         };
 
-      # Downstream consumers compiled against this working tree.
+      # rng-tools and ESDM built against this tree. A build of this repository
+      # alone cannot see what breaks a consumer: a header that stops declaring
+      # something, a symbol that stops being exported, a link dependency missing
+      # from the .pc file.
       #
-      # Everything else here builds the library and its own tools, which says
-      # nothing about whether the installed result is still usable by the
-      # programs that link it: an installed header that no longer declares what
-      # it used to, a symbol that stops being exported, a link dependency that
-      # is not carried into the .pc file are all invisible to a build of this
-      # repository alone and break the consumer instead. rng-tools (whose rngd
-      # feeds the kernel from a jitter entropy source) and ESDM (whose es_jent
-      # entropy source is this library) are the two that matter, and both are
-      # packaged in nixpkgs, so the smoke test is the packaged consumer with its
-      # jitterentropy input swapped for this tree.
-      #
-      # nixpkgs' own jitterentropy derivation with only src and cmakeFlags
-      # replaced, rather than toolsFor above: what is being tested is the
-      # library as a distribution installs it - the dev/out split that puts the
-      # headers, the .pc file and the CMake package files in a separate output -
-      # and reusing the packaging keeps the swap a source-only one.
-      #
-      # Compile and link only. Both consumers ship test suites that exercise the
-      # jitter source at run time (rng-tools' tests/rngtestjitter.sh starts rngd
-      # on it, ESDM's meson test set has an "ES Jitter RNG" case), and both are
-      # switched off here: this is a build check, and the library's behaviour is
-      # covered by the tool runs and the VM tests elsewhere in this flake.
-      # Turning doCheck back on is what to change if that ever becomes the
-      # point.
+      # nixpkgs' own derivation with src and cmakeFlags replaced, not toolsFor,
+      # so what is tested is the library as a distribution installs it - the
+      # dev/out split included - and the swap stays source-only. Compile and
+      # link only; behaviour is what the tool runs and the VM tests cover.
       consumersFor = pkgs:
         let
-          # INTERNAL_TIMER decides which symbols the library exports, and
-          # rng-tools' configure probes for jent_notime_settick(): with the
-          # internal timer off it is absent and rngd_jitter.c compiles without
-          # the tick handling, with it on the same file drives the timer thread
-          # itself. Two different compilations of the consumer, hence both.
+          # INTERNAL_TIMER decides which symbols are exported, and rng-tools'
+          # configure probes for jent_notime_settick(): off, rngd_jitter.c
+          # compiles without the tick handling; on, it drives the timer thread.
+          # Two different compilations, hence both - off is what nixpkgs and so
+          # the distributions build, on is this repository's default.
           #
-          # off is what nixpkgs builds (and what the distributions therefore
-          # ship), on is this repository's own default (see the INTERNAL_TIMER
-          # option in CMakeLists.txt).
-          #
-          # ESDM compiles the same code either way, but gates a large part of it
-          # on the JENT_VERSION the installed header defines - jent_status(),
-          # jent_secure_memory_supported(), JENT_NTG1 and the
-          # JENT_MAX_MEMSIZE_*/JENT_HASHLOOP_* flags are all behind
-          # "JENT_VERSION >= 3070000" in its esdm_es_jent.c - which makes it the
-          # consumer that pins the widest part of the API.
+          # ESDM compiles the same either way but gates much of esdm_es_jent.c
+          # on JENT_VERSION, which makes it the consumer pinning the widest
+          # part of the API.
           libFor = timer:
             pkgs.jitterentropy.overrideAttrs (_: {
               version = "3.7.1";
@@ -284,31 +199,15 @@
             buildOnly (pkgs.esdm.override { jitterentropy = timer; });
         };
 
-      # The three external crypto backends, i.e. the EXTERNAL_CRYPTO option of
-      # CMakeLists.txt.
+      # The EXTERNAL_CRYPTO backends. Set, the library calls the named library
+      # instead of its own SHA-3 and secure memory, reaching the halves of the
+      # memory and FIPS backends the default build never compiles: libgcrypt's
+      # secmem pool, OpenSSL's secure heap, and AWS-LC's OPENSSL_malloc(), which
+      # is wiped but not locked and so reports itself as not secure.
       #
-      # With it set, the library stops using its own SHA-3 and its own secure
-      # memory and calls into the named library instead - which changes both
-      # halves of arch/jitterentropy-arch-memory.c and
-      # arch/jitterentropy-arch-fips.c that the default build never compiles:
-      # gcry_malloc_secure() out of libgcrypt's secmem pool, OpenSSL's secure
-      # heap (OPENSSL_secure_malloc()), and AWS-LC's OPENSSL_malloc(), which is
-      # wiped but not locked and so is the one backend that reports itself as
-      # not secure. Nothing else in this flake or the workflow builds any of
-      # them, and each is selected by a preprocessor condition, so a break there
-      # is invisible until a consumer that configures the library this way hits
-      # it.
-      #
-      # BUILD_SHARED_LIBS is on because the two searches in CMakeLists.txt are
-      # tied together: a static jitterentropy makes it look for a static
-      # libcrypto.a / libgcrypt.a, which is not what these packages install.
-      #
-      # The secure-memory arena these two allocate the collector out of is not
-      # sized by the library - it is process-wide state that the application
-      # establishes, which for these builds means the recording tools
-      # themselves (tests/raw-entropy/recording_userspace/jitterentropy-memlock.h).
-      # An application that establishes none still gets a collector, from
-      # ordinary memory, unless it asked for JENT_FORCE_SECURE_MEM.
+      # BUILD_SHARED_LIBS because CMakeLists.txt ties the two searches together:
+      # a static jitterentropy makes it look for a static libcrypto.a, which is
+      # not what these packages install.
       cryptoFor = pkgs:
         let
           backendFor = { name, external, dep }:
@@ -331,9 +230,7 @@
             external = "AWSLC";
             dep = pkgs.aws-lc;
           };
-          # libgcrypt's headers include <gpg-error.h>, which reaches the
-          # compile through libgcrypt's own propagated libgpg-error rather than
-          # being named here.
+          # <gpg-error.h> arrives through libgcrypt's propagated input.
           crypto-libgcrypt = backendFor {
             name = "libgcrypt";
             external = "LIBGCRYPT";
@@ -341,13 +238,10 @@
           };
         };
 
-      # Out-of-tree kernel module (jitter_rng.ko) built against a given kernel.
-      # The with* arguments mirror the CONFIG_EXTERNAL_JITTERENTROPY_* options
-      # in linux_kernel/Kbuild.config and are passed on the make command line,
-      # overriding that file's defaults. They can be changed on the resulting
-      # derivation via .override. withTestInterface enables the debugfs raw
-      # entropy test interface, which starves the RNG of entropy and thus must
-      # never be enabled on production systems.
+      # jitter_rng.ko against a given kernel. The with* arguments mirror the
+      # CONFIG_EXTERNAL_JITTERENTROPY_* options of Kbuild.config, overriding it
+      # on the make command line, and are settable via .override.
+      # withTestInterface starves the RNG of entropy: never in production.
       moduleFor = pkgs: kernel:
         lib.makeOverridable ({ withChardev, withHwrng, withTestInterface }:
           let
@@ -390,13 +284,9 @@
             withTestInterface = false;
           };
 
-      # Machine configuration shared between the VM tests and the live ISO
-      # images: the chosen kernel with the jitter_rng module built against it
-      # and loaded at boot, the userspace tools in the system profile, and the
-      # testing conveniences (root autologin, shell aliases, smoke-test
-      # script). Both consumers are test environments, hence the module is
-      # built with the debugfs raw entropy test interface that must never be
-      # enabled on production systems.
+      # Shared by the VM tests and the live images: the chosen kernel with
+      # jitter_rng loaded, the tools, and the testing conveniences. Both are
+      # test environments, hence the debugfs test interface.
       machineFor = kernelPackages:
         { config, lib, pkgs, ... }: {
           boot.kernelPackages = kernelPackages;
@@ -406,11 +296,9 @@
             })
           ];
           boot.kernelModules = [ "jitter_rng" ];
-          # Verbose logging of the kcapi and test interface per-instance
-          # JSON status to the kernel log; only useful on test systems like
-          # these images.
+          # Per-instance JSON status to the kernel log; test systems only.
           boot.extraModprobeConfig = ''
-            options jitter_rng verbose=1 ntg1=1 cache_all=1
+            options jitter_rng verbose=1 ntg1=1 cache_all=1 selftest_interval=15
           '';
           environment.systemPackages = [
             (toolsFor pkgs)
@@ -425,9 +313,8 @@
             vim
             xxd
           ]);
-          # Exercises the chardev O_NONBLOCK semantics: reads are capped at
-          # one 32-byte buffer, and a reader that would have to wait for a
-          # concurrent read on the same file description gets EAGAIN.
+          # The chardev O_NONBLOCK semantics: reads capped at one 32-byte
+          # buffer, and EAGAIN rather than waiting on a concurrent reader.
           environment.etc."jitterentropy-nonblock-test.py".text = ''
               import os
               import threading
@@ -438,16 +325,10 @@
               data = os.read(fd, 4096)
               assert len(data) == 32, f"nonblocking read returned {len(data)} bytes"
 
-              # A large blocking read takes the instance lock per 32-byte
-              # chunk, and generation dominates the time between chunks, so a
-              # nonblocking read on the same file description sees EAGAIN with
-              # high probability per attempt (the retry loop below tolerates
-              # the occasional win between chunks). The read must be issued
-              # while the fd is still blocking (O_NONBLOCK is checked on
-              # entry), hence the sleep before flipping the shared flag back.
-              # The daemon thread is killed on process exit; the kernel read
-              # loop honors the pending signal, so exit is not delayed by the
-              # large request.
+              # A large blocking read holds the instance lock per 32-byte
+              # chunk, so a nonblocking read usually sees EAGAIN; the loop
+              # below tolerates winning the gap between chunks. O_NONBLOCK is
+              # checked on entry, hence the sleep before flipping it back.
               os.set_blocking(fd, True)
               t = threading.Thread(target=os.read, args=(fd, 4 * 1024 * 1024),
                                    daemon=True)
@@ -465,8 +346,7 @@
                   time.sleep(0.01)
               print("OK")
           '';
-          # mkForce: the ISO's installation-device profile autologs in the
-          # "nixos" user; these images are for testing, log in root directly.
+          # The ISO profile autologs in "nixos"; these are test images.
           services.getty.autologinUser = lib.mkForce "root";
           console.keyMap = "de";
           environment.shellAliases = {
@@ -478,10 +358,8 @@
           };
         };
 
-      # A NixOS integration test that boots a VM with the shared machine
-      # configuration on the chosen kernel. Used both as a flake check (the
-      # test runs the assertions in a VM) and, via its interactive driver, as
-      # a `nix run` target (no dedicated system.build.vm image is produced).
+      # Boots the shared machine configuration on the chosen kernel: a flake
+      # check, and a `nix run` target through its interactive driver.
       mkVmTest = pkgs: name: kernelPackages:
         pkgs.testers.runNixOSTest {
           name = "jitterentropy-${name}";
@@ -490,14 +368,11 @@
             imports = [ (machineFor kernelPackages) ];
             boot.kernelParams = [ "clocksource=tsc" "tsc=reliable" ];
             virtualisation.qemu.options = [ "-cpu" "host" ];
-            # The O_NONBLOCK test needs a poller that runs while a concurrent
-            # reader holds the instance lock. On one vCPU that requires the
-            # kernel to preempt the lock holder inside the locked section;
-            # non-preemptible kernel builds (5.10, plain PREEMPT_VOLUNTARY)
-            # only reschedule at the reader's cond_resched() after unlock, so
-            # the poller would always find the lock free and never see
-            # EAGAIN. A second vCPU makes the contention real concurrency,
-            # independent of the kernel's preemption model.
+            # The O_NONBLOCK test needs a poller running while a reader holds
+            # the instance lock. On one vCPU a non-preemptible build (5.10,
+            # PREEMPT_VOLUNTARY) only reschedules after unlock, so the poller
+            # would never see EAGAIN. A second vCPU makes it real
+            # concurrency.
             virtualisation.cores = 2;
           };
 
@@ -526,6 +401,11 @@
             print(machine.succeed(
                 "jitterentropy-chardev-status | jq -e .uuid"
             ))
+
+            # And the single-field ioctls agree with that document, field by
+            # field: UUID, version, osr, flags, health failure state, output
+            # counters and reinitialization count.
+            print(machine.succeed("jitterentropy-chardev-fields"))
 
             # O_NONBLOCK reads: short-read cap and EAGAIN on contention.
             print(machine.succeed("python3 /etc/jitterentropy-nonblock-test.py"))
@@ -571,6 +451,14 @@
                 " | jq -e .version"
             ))
 
+            # The same single-field ioctls, on the same interface. A raw
+            # instance carries no UUID, so JENT_IOCUUID must report ENODATA
+            # there rather than an empty string; the tool asserts that.
+            print(machine.succeed(
+                "jitterentropy-chardev-fields"
+                " /sys/kernel/debug/jitter_rng/jent_raw_hires"
+            ))
+
             # getrawentropy drives the same interface end-to-end: it sets the
             # testing_osr module parameter and prints the raw time delta
             # samples unmodified. --samples N yields exactly N values.
@@ -594,16 +482,16 @@
 
             # The CMake-built userspace tools are on PATH.
             for tool in ("jitterentropy-rng", "jitterentropy-osr",
-                         "jitterentropy-hashtime", "gcd", "extractlsb",
-                         "getrawentropy", "jitterentropy-chardev-status"):
+                         "jitterentropy-hashtime", "jitterentropy-cpuinfo",
+                         "gcd", "extractlsb", "getrawentropy",
+                         "jitterentropy-chardev-status",
+                         "jitterentropy-chardev-fields"):
                 machine.succeed(f"command -v {tool}")
           '';
         };
 
-      # One kernel module package per nixpkgs kernel, plus the default and
-      # latest kernels, mirroring the VM test and image sets. Interface
-      # selection is tunable on every attribute via .override { withChardev,
-      # withHwrng, withTestInterface }.
+      # One per nixpkgs kernel, plus default and latest, mirroring the VM test
+      # and image sets. Interfaces are tunable per attribute via .override.
       modulesFor = pkgs:
         (lib.mapAttrs'
           (name: ps:
@@ -615,11 +503,9 @@
               moduleFor pkgs pkgs.linuxPackages_latest.kernel;
           };
 
-      # The numbered kernel package sets exposed by nixpkgs (linux_6_12, ...)
-      # plus the mainline testing kernel — the flavored variants (zen,
-      # xanmod, hardened, libre, rpi, ...) are of no interest here. tryEval
-      # guards the sets that fail to evaluate (unsupported on the current
-      # system, ...).
+      # The numbered kernel package sets plus linux_testing; the flavored
+      # variants are of no interest. tryEval guards the sets that do not
+      # evaluate on the current system.
       kernelSetsFor = pkgs:
         lib.filterAttrs (name: ps:
           let
@@ -628,6 +514,139 @@
           in (builtins.match "linux_[0-9]+_[0-9]+" name != null
             || name == "linux_testing") && r.success && r.value)
           pkgs.linuxKernel.packages;
+
+      # linux_kernel/README.md "Build in Tree": the library copied into the
+      # kernel source, crypto/Makefile pointed at it, the result linked into
+      # vmlinux. Unlike moduleFor, this compiles with CONFIG_MODULES unset and
+      # MODULE undefined - nothing else here does. tinyconfig makes a whole
+      # kernel per kernel affordable; HW_RANDOM and PROC_FS are on because
+      # Kbuild.config enables those interfaces.
+      inTreeFor = pkgs: kernel:
+        # Stated, not left to the host: under plain "x86" CONFIG_64BIT is
+        # user-selectable and allnoconfig switches it off.
+        let arch = pkgs.stdenv.hostPlatform.linuxArch;
+        in pkgs.stdenv.mkDerivation {
+          pname = "jitterentropy-in-tree";
+          version = kernel.version;
+          src = kernel.src;
+
+          nativeBuildInputs = with pkgs; [ bc bison flex perl elfutils openssl ];
+
+          # As nixpkgs' own kernel derivations: it sets its own flags.
+          hardeningDisable = [ "all" ];
+          enableParallelBuilding = true;
+
+          # --replace-fail throughout: a reworded upstream line must be an
+          # error, not a silent no-op leaving the kernel's own copy building.
+          postPatch = ''
+            # The older kernels name interpreters the sandbox has not got
+            # (5.10's ld-version.sh is /usr/bin/awk -f), which Kconfig then
+            # reports as a syntax error in init/Kconfig.
+            patchShebangs scripts
+
+            cp -a ${self} crypto/jitterentropy-library
+            chmod -R u+w crypto/jitterentropy-library
+
+            substituteInPlace crypto/Makefile --replace-fail \
+              'obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy_rng.o' \
+              'obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy-library/linux_kernel/'
+
+            substituteInPlace \
+              crypto/jitterentropy-library/linux_kernel/Kbuild.config \
+              --replace-fail 'CONFIG_EXTERNAL_JITTERENTROPY=m' \
+                             'CONFIG_EXTERNAL_JITTERENTROPY=y' \
+              --replace-fail '# CONFIG_BUILTIN_JITTERENTROPY=y' \
+                             'CONFIG_BUILTIN_JITTERENTROPY=y'
+          '';
+
+          configurePhase = ''
+            runHook preConfigure
+
+            make ARCH=${arch} tinyconfig
+            ./scripts/config --enable CRYPTO \
+                             --enable CRYPTO_JITTERENTROPY \
+                             --enable HW_RANDOM \
+                             --enable PROC_FS
+            make ARCH=${arch} olddefconfig
+
+            # olddefconfig drops whatever has unmet dependencies, so check
+            # the outcome rather than the request.
+            for opt in CONFIG_CRYPTO_JITTERENTROPY CONFIG_HW_RANDOM \
+                       CONFIG_PROC_FS; do
+              grep -qx "$opt=y" .config || {
+                echo "$opt=y is missing from the generated .config"
+                exit 1
+              }
+            done
+            if grep -qx 'CONFIG_MODULES=y' .config; then
+              echo "CONFIG_MODULES is set, this is not a builtin build"
+              exit 1
+            fi
+
+            runHook postConfigure
+          '';
+
+          buildPhase = ''
+            runHook preBuild
+            make ARCH=${arch} vmlinux -j$NIX_BUILD_CORES
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+
+            nm vmlinux | grep ' [TtRrDdBb] jent_' | sort > jent-symbols
+
+            # In the kernel binary at all.
+            grep -q ' jent_entropy_collector_alloc$' jent-symbols || {
+              echo "no jent_entropy_collector_alloc in vmlinux"
+              exit 1
+            }
+
+            # And this tree's copy: the status API has no counterpart in the
+            # kernel's crypto/jitterentropy.c.
+            grep -q ' jent_status$' jent-symbols || {
+              echo "no jent_status in vmlinux - the kernel's own Jitter RNG" \
+                   "copy was built instead of this tree"
+              exit 1
+            }
+
+            # A swap, not an addition - the two define the same jent_* names.
+            if [ -e crypto/jitterentropy.o ]; then
+              echo "crypto/jitterentropy.o was built as well"
+              exit 1
+            fi
+
+            install -D vmlinux $out/vmlinux
+            install -D System.map $out/System.map
+            install -D .config $out/config
+            install -D jent-symbols $out/jent-symbols
+
+            runHook postInstall
+          '';
+
+          # The symbol table is the artifact.
+          dontStrip = true;
+
+          meta = {
+            description =
+              "Linux kernel with the Jitter RNG built in from this tree";
+            license = lib.licenses.gpl2Plus;
+          };
+        };
+
+      # One in-tree kernel build per nixpkgs kernel, plus the default and
+      # latest kernels, mirroring the module set.
+      inTreeBuildsFor = pkgs:
+        (lib.mapAttrs'
+          (name: ps:
+            lib.nameValuePair "jitterentropy-in-tree-${name}"
+              (inTreeFor pkgs ps.kernel))
+          (kernelSetsFor pkgs)) // {
+            jitterentropy-in-tree = inTreeFor pkgs pkgs.linuxPackages.kernel;
+            jitterentropy-in-tree-latest =
+              inTreeFor pkgs pkgs.linuxPackages_latest.kernel;
+          };
 
       # One VM test per nixpkgs kernel, plus the default and latest kernels.
       vmTestsFor = pkgs:
@@ -638,10 +657,8 @@
             vm-latest = mkVmTest pkgs "vm-latest" pkgs.linuxPackages_latest;
           };
 
-      # A live ISO image booting the shared machine configuration on the
-      # chosen kernel, for exercising the Jitter RNG on real hardware. Build
-      # with e.g. `nix build .#iso-linux_6_6`; the image lands in
-      # result/iso/jitterentropy-<name>-<kernel version>.iso.
+      # A live ISO for exercising the Jitter RNG on real hardware, e.g.
+      # `nix build .#iso-linux_6_6`.
       mkIso = system: name: kernelPackages:
         (lib.nixosSystem {
           modules = [
@@ -651,18 +668,16 @@
               nixpkgs.hostPlatform = system;
               image.baseName = lib.mkForce
                 "jitterentropy-${name}-${config.boot.kernelPackages.kernel.version}";
-              # The installation CD enables ZFS via all-hardware; not every
-              # kernel here has a compatible ZFS module (latest, testing,
-              # xanmod, ...), and the live image does not need ZFS.
+              # all-hardware enables ZFS, which not every kernel here has a
+              # compatible module for.
               boot.supportedFilesystems.zfs = lib.mkForce false;
-              # Throwaway live image, no state to migrate.
+              # Throwaway image, no state to migrate.
               system.stateVersion = lib.trivial.release;
             })
           ];
         }).config.system.build.isoImage;
 
-      # One live ISO per nixpkgs kernel, plus the default and latest kernels,
-      # mirroring the VM test set.
+      # One per nixpkgs kernel, plus default and latest.
       isosFor = system: pkgs:
         (lib.mapAttrs'
           (name: ps: lib.nameValuePair "iso-${name}" (mkIso system name ps))
@@ -671,12 +686,8 @@
             iso-latest = mkIso system "latest" pkgs.linuxPackages_latest;
           };
 
-      # A bootable SD card image for the 64-bit Raspberry Pi boards (Zero 2,
-      # 3, 4, 5) booting the shared machine configuration on the chosen
-      # kernel, for exercising the Jitter RNG on real hardware without a
-      # bootable CD path. Build with e.g. `nix build .#sd-image-linux_6_18`;
-      # the image lands in
-      # result/sd-image/jitterentropy-<name>-<kernel version>.img.zst.
+      # The same for the 64-bit Raspberry Pi boards, which have no bootable CD
+      # path, e.g. `nix build .#sd-image-linux_6_18`.
       mkSdImage = system: name: kernelPackages:
         (lib.nixosSystem {
           modules = [
@@ -686,21 +697,15 @@
               nixpkgs.hostPlatform = system;
               image.baseName = lib.mkForce
                 "jitterentropy-${name}-${config.boot.kernelPackages.kernel.version}";
-              # The base profile pulled in by sd-image-aarch64.nix enables
-              # ZFS whenever the platform supports it; not every kernel here
-              # has a compatible ZFS module (latest, rpi, ...), and the test
-              # image does not need ZFS.
+              # As for the ISO: not every kernel here has a ZFS module.
               boot.supportedFilesystems.zfs = lib.mkForce false;
-              # Throwaway test image, no state to migrate.
+              # Throwaway image, no state to migrate.
               system.stateVersion = lib.trivial.release;
             })
           ];
         }).config.system.build.sdImage;
 
-      # One SD image per kernel set, plus the default and latest kernels,
-      # mirroring the ISO set. The nixos-hardware vendor kernels (rpi3, rpi4,
-      # rpi5) are among them; the default mainline kernel is the combination
-      # the upstream image targets.
+      # One per kernel set, plus default and latest, mirroring the ISO set.
       sdImagesFor = system: pkgs:
         (lib.mapAttrs'
           (name: ps:
@@ -719,31 +724,28 @@
           musl-static = muslStaticFor pkgs;
         } // cryptoFor pkgs
           // modulesFor pkgs
+          // inTreeBuildsFor pkgs
           // consumersFor pkgs
           // isosFor system pkgs
           # The SD images boot Raspberry Pi boards, which are aarch64.
           // lib.optionalAttrs (system == "aarch64-linux")
             (sdImagesFor system pkgs)
-          # The NDK host toolchain in nixpkgs is x86_64-linux only. The cross
-          # toolchains are likewise only assembled for an x86_64-linux host.
+          # The NDK and the cross toolchains are x86_64-linux only.
           // lib.optionalAttrs (system == "x86_64-linux") (crossTargets pkgs // {
             android = androidFor system;
-            # 32-bit x86 build of the kernel module, compiled natively via the
-            # pkgsi686Linux package set (x86_64 hosts execute i686 binaries
-            # directly). Exercises the 32-bit code paths, e.g. the div64
-            # helpers replacing the libgcc 64-bit division routines that the
-            # kernel does not provide.
+            # The module for 32-bit x86, built natively through pkgsi686Linux.
+            # Reaches the div64 helpers that stand in for the libgcc division
+            # routines the kernel does not provide.
             jitterentropy-module-i686 =
               moduleFor pkgs.pkgsi686Linux pkgs.pkgsi686Linux.linuxPackages_latest.kernel;
           }));
 
-      # `nix flake check` boots every VM and runs its assertions. Individual
-      # VMs can be run with e.g. `nix build .#checks.x86_64-linux.vm-linux_6_6`.
+      # `nix flake check` boots every VM and runs its assertions.
       checks =
         forAllSystems (system: vmTestsFor nixpkgs.legacyPackages.${system});
 
-      # `nix run .#vm-linux_6_6` launches the same VM interactively through the
-      # NixOS test driver (run `start_all()` then `machine.shell_interact()`).
+      # `nix run .#vm-linux_6_6` opens the same VM interactively: `start_all()`
+      # then `machine.shell_interact()`.
       apps = forAllSystems (system:
         let
           runners = lib.mapAttrs (_name: test: {
