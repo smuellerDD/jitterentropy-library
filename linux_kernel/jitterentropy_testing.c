@@ -39,6 +39,7 @@
 #include "jitterentropy-internal.h"
 #include "jitterentropy-noise.h"
 #include "jitterentropy.h"
+#include "jitterentropy_ioctl.h"
 #include "jitterentropy_testing.h"
 #include "jitterentropy_uapi.h"
 
@@ -481,6 +482,30 @@ static long jent_testing_ioctl_loopcnt(struct jent_testing_ctx *ctx,
 	return 0;
 }
 
+/*
+ * As the character device does. JENT_IOCUUID gives -ENODATA here: ctx->ec is a
+ * raw instance and skips the startup that assigns the UUID.
+ */
+static long jent_testing_ioctl_field(struct jent_testing_ctx *ctx,
+				     unsigned int cmd, void __user *arg)
+{
+	struct jent_ioctl_field field;
+	int ret;
+
+	if (mutex_lock_interruptible(&jent_testing_read_lock))
+		return -ERESTARTSYS;
+	ret = jent_ioctl_field_get(ctx->ec, cmd, &field);
+	mutex_unlock(&jent_testing_read_lock);
+
+	if (ret)
+		return ret;
+
+	if (copy_to_user(arg, &field.value, field.size))
+		return -EFAULT;
+
+	return 0;
+}
+
 static long jent_testing_ioctl(struct file *file, unsigned int cmd,
 			       unsigned long arg)
 {
@@ -494,7 +519,13 @@ static long jent_testing_ioctl(struct file *file, unsigned int cmd,
 		return jent_testing_ioctl_status(ctx, (void __user *)arg);
 	case JENT_IOCLOOPCNT:
 		return jent_testing_ioctl_loopcnt(ctx, (void __user *)arg);
+	case JENT_IOCSELFTEST:
+		/* Module-wide, so neither ctx nor its lock is involved. */
+		return jent_ioctl_selftest();
 	default:
+		if (jent_ioctl_is_field(cmd))
+			return jent_testing_ioctl_field(ctx, cmd,
+							(void __user *)arg);
 		return -ENOTTY;
 	}
 }

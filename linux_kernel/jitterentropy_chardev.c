@@ -33,7 +33,9 @@
 #include "jitterentropy.h"
 #include "jitterentropy_chardev.h"
 #include "jitterentropy_error.h"
+#include "jitterentropy_ioctl.h"
 #include "jitterentropy_proc.h"
+#include "jitterentropy_selftest.h"
 #include "jitterentropy_uapi.h"
 
 /*
@@ -188,6 +190,14 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 	ssize_t ret = 0;
 
 	if (!ctx)
+		return -EFAULT;
+
+	/*
+	 * The module error state: a failed periodic cryptographic self test
+	 * ends entropy delivery through every interface. Checked here as well
+	 * as in the hwrng and crypto API read paths.
+	 */
+	if (jent_selftest_failed())
 		return -EFAULT;
 
 	if (!nbytes)
@@ -359,6 +369,30 @@ out:
 	return ret;
 }
 
+/*
+ * The collector lock is held while the value is taken, as for the status
+ * handler above; the copy to userspace can fault, so it follows the unlock.
+ */
+static long jent_chardev_ioctl_field(struct jent_chardev_ctx *ctx,
+				     unsigned int cmd, void __user *arg)
+{
+	struct jent_ioctl_field field;
+	int ret;
+
+	if (mutex_lock_interruptible(&ctx->lock))
+		return -ERESTARTSYS;
+	ret = jent_ioctl_field_get(ctx->entropy_collector, cmd, &field);
+	mutex_unlock(&ctx->lock);
+
+	if (ret)
+		return ret;
+
+	if (copy_to_user(arg, &field.value, field.size))
+		return -EFAULT;
+
+	return 0;
+}
+
 static long jent_chardev_ioctl(struct file *file, unsigned int cmd,
 			       unsigned long arg)
 {
@@ -370,7 +404,13 @@ static long jent_chardev_ioctl(struct file *file, unsigned int cmd,
 	switch (cmd) {
 	case JENT_IOCSTATUS:
 		return jent_chardev_ioctl_status(ctx, (void __user *)arg);
+	case JENT_IOCSELFTEST:
+		/* Module-wide, so neither ctx nor its lock is involved. */
+		return jent_ioctl_selftest();
 	default:
+		if (jent_ioctl_is_field(cmd))
+			return jent_chardev_ioctl_field(ctx, cmd,
+							(void __user *)arg);
 		return -ENOTTY;
 	}
 }
