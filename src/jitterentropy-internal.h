@@ -56,7 +56,8 @@
 #include "arch/jitterentropy-arch-ncpu.h"
 #include "arch/jitterentropy-arch-fips.h"
 #include "arch/jitterentropy-arch-sched.h"
-#include "arch/jitterentropy-arch-uuid.h"
+#include "arch/jitterentropy-arch-random.h"
+#include "jitterentropy-uuid.h"
 
 #ifdef LINUX_KERNEL
 /*
@@ -572,8 +573,14 @@ struct rand_data
 	/* The lag global cutoff selected based on the selection of osr. */
 	unsigned int lag_global_cutoff;
 
+	/* The lag global cutoff for a permanent health test failure. */
+	unsigned int lag_global_cutoff_permanent;
+
 	/* The lag local cutoff selected based on the selection of osr. */
 	unsigned int lag_local_cutoff;
+
+	/* The lag local cutoff for a permanent health test failure. */
+	unsigned int lag_local_cutoff_permanent;
 
 	/*
 	 * The number of times the lag predictor was correct. Compared to the

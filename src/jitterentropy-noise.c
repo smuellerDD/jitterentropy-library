@@ -310,7 +310,7 @@ static void jent_memaccess_deterministic(struct rand_data *ec,
 	mem_loop_cnt = loop_cnt ? loop_cnt : ec->memaccessloops;
 	wrap = ec->memmask + 1;
 
-        if (current_delta)
+	if (current_delta)
 		jent_get_nstime_internal(ec, &time_now_start);
 
 	for (i = 0; i < mem_loop_cnt; i++) {

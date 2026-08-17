@@ -54,7 +54,7 @@ static inline void le64_to_ptr(uint8_t *p, const uint64_t value)
 	le32_to_ptr(p,     (uint32_t)(value));
 }
 
-static inline uint64_t rol64(uint64_t x, unsigned int n)
+static inline uint64_t jent_rol64(uint64_t x, unsigned int n)
 {
 	return ( (x << (n&(64-1))) | (x >> ((64-n)&(64-1))) );
 }
@@ -75,11 +75,11 @@ static inline void jent_keccakp_theta(uint64_t s[25])
 	C[4] = s[A(4, 0)] ^ s[A(4, 1)] ^ s[A(4, 2)] ^ s[A(4, 3)] ^ s[A(4, 4)];
 
 	/* Step 2 */
-	D[0] = C[4] ^ rol64(C[1], 1);
-	D[1] = C[0] ^ rol64(C[2], 1);
-	D[2] = C[1] ^ rol64(C[3], 1);
-	D[3] = C[2] ^ rol64(C[4], 1);
-	D[4] = C[3] ^ rol64(C[0], 1);
+	D[0] = C[4] ^ jent_rol64(C[1], 1);
+	D[1] = C[0] ^ jent_rol64(C[2], 1);
+	D[2] = C[1] ^ jent_rol64(C[3], 1);
+	D[3] = C[2] ^ jent_rol64(C[4], 1);
+	D[4] = C[3] ^ jent_rol64(C[0], 1);
 
 	/* Step 3 */
 	s[A(0, 0)] ^= D[0];
@@ -120,30 +120,30 @@ static inline void jent_keccakp_rho(uint64_t s[25])
 
 #define RHO_ROL(t)	((((t) + 1) * ((t) + 2) / 2) % 64)
 	/* Step 3 */
-	s[A(1, 0)] = rol64(s[A(1, 0)], RHO_ROL(0));
-	s[A(0, 2)] = rol64(s[A(0, 2)], RHO_ROL(1));
-	s[A(2, 1)] = rol64(s[A(2, 1)], RHO_ROL(2));
-	s[A(1, 2)] = rol64(s[A(1, 2)], RHO_ROL(3));
-	s[A(2, 3)] = rol64(s[A(2, 3)], RHO_ROL(4));
-	s[A(3, 3)] = rol64(s[A(3, 3)], RHO_ROL(5));
-	s[A(3, 0)] = rol64(s[A(3, 0)], RHO_ROL(6));
-	s[A(0, 1)] = rol64(s[A(0, 1)], RHO_ROL(7));
-	s[A(1, 3)] = rol64(s[A(1, 3)], RHO_ROL(8));
-	s[A(3, 1)] = rol64(s[A(3, 1)], RHO_ROL(9));
-	s[A(1, 4)] = rol64(s[A(1, 4)], RHO_ROL(10));
-	s[A(4, 4)] = rol64(s[A(4, 4)], RHO_ROL(11));
-	s[A(4, 0)] = rol64(s[A(4, 0)], RHO_ROL(12));
-	s[A(0, 3)] = rol64(s[A(0, 3)], RHO_ROL(13));
-	s[A(3, 4)] = rol64(s[A(3, 4)], RHO_ROL(14));
-	s[A(4, 3)] = rol64(s[A(4, 3)], RHO_ROL(15));
-	s[A(3, 2)] = rol64(s[A(3, 2)], RHO_ROL(16));
-	s[A(2, 2)] = rol64(s[A(2, 2)], RHO_ROL(17));
-	s[A(2, 0)] = rol64(s[A(2, 0)], RHO_ROL(18));
-	s[A(0, 4)] = rol64(s[A(0, 4)], RHO_ROL(19));
-	s[A(4, 2)] = rol64(s[A(4, 2)], RHO_ROL(20));
-	s[A(2, 4)] = rol64(s[A(2, 4)], RHO_ROL(21));
-	s[A(4, 1)] = rol64(s[A(4, 1)], RHO_ROL(22));
-	s[A(1, 1)] = rol64(s[A(1, 1)], RHO_ROL(23));
+	s[A(1, 0)] = jent_rol64(s[A(1, 0)], RHO_ROL(0));
+	s[A(0, 2)] = jent_rol64(s[A(0, 2)], RHO_ROL(1));
+	s[A(2, 1)] = jent_rol64(s[A(2, 1)], RHO_ROL(2));
+	s[A(1, 2)] = jent_rol64(s[A(1, 2)], RHO_ROL(3));
+	s[A(2, 3)] = jent_rol64(s[A(2, 3)], RHO_ROL(4));
+	s[A(3, 3)] = jent_rol64(s[A(3, 3)], RHO_ROL(5));
+	s[A(3, 0)] = jent_rol64(s[A(3, 0)], RHO_ROL(6));
+	s[A(0, 1)] = jent_rol64(s[A(0, 1)], RHO_ROL(7));
+	s[A(1, 3)] = jent_rol64(s[A(1, 3)], RHO_ROL(8));
+	s[A(3, 1)] = jent_rol64(s[A(3, 1)], RHO_ROL(9));
+	s[A(1, 4)] = jent_rol64(s[A(1, 4)], RHO_ROL(10));
+	s[A(4, 4)] = jent_rol64(s[A(4, 4)], RHO_ROL(11));
+	s[A(4, 0)] = jent_rol64(s[A(4, 0)], RHO_ROL(12));
+	s[A(0, 3)] = jent_rol64(s[A(0, 3)], RHO_ROL(13));
+	s[A(3, 4)] = jent_rol64(s[A(3, 4)], RHO_ROL(14));
+	s[A(4, 3)] = jent_rol64(s[A(4, 3)], RHO_ROL(15));
+	s[A(3, 2)] = jent_rol64(s[A(3, 2)], RHO_ROL(16));
+	s[A(2, 2)] = jent_rol64(s[A(2, 2)], RHO_ROL(17));
+	s[A(2, 0)] = jent_rol64(s[A(2, 0)], RHO_ROL(18));
+	s[A(0, 4)] = jent_rol64(s[A(0, 4)], RHO_ROL(19));
+	s[A(4, 2)] = jent_rol64(s[A(4, 2)], RHO_ROL(20));
+	s[A(2, 4)] = jent_rol64(s[A(2, 4)], RHO_ROL(21));
+	s[A(4, 1)] = jent_rol64(s[A(4, 1)], RHO_ROL(22));
+	s[A(1, 1)] = jent_rol64(s[A(1, 1)], RHO_ROL(23));
 }
 
 static inline void jent_keccakp_pi(uint64_t s[25])
