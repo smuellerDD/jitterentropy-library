@@ -2,7 +2,7 @@
 
 #	Install the linux kernel and the service running the boottime test
 
-# Note: restorecon is needed for Fedora 
+# Note: restorecon is needed for Fedora
 if [ ! -x /usr/local/sbin/getrawentropy ];
 then
 	echo "getrawentropy must be installed in /usr/local/sbin"

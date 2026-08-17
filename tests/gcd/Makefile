@@ -3,7 +3,7 @@
 #
 
 CC		?= gcc
-CFLAGS		+= -Wextra -Wall -pedantic -fPIC -O2 -std=gnu18
+CFLAGS		+= -Wextra -Wall -pedantic -fPIC -O2 -std=c11
 #Hardening
 CFLAGS		+= -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wconversion -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
 
@@ -32,7 +32,14 @@ MAN8		:= $(MANDIR)/man8
 INCLUDEDIR	:= /usr/include
 LN		:= ln
 LNS		:= $(LN) -sf
+# Apple's strip(1) reads -s as "strip the symbols named in this file" and
+# then takes the binary as that file, aborting with "no files specified".
+# Plain strip removes the same symbols from an executable there.
+ifeq ($(UNAME_S),Darwin)
+STRIP		?= strip
+else
 STRIP		?= strip -s
+endif
 
 ###############################################################################
 #
@@ -52,47 +59,12 @@ LDFLAGS		+= $(foreach library,$(LIBRARIES),-l$(library))
 # Get version name and cross check
 #
 ###############################################################################
-VERFILE    := gcd.c
+VERFILE    := ../../jitterentropy.h
 
-APPMAJOR   := $(shell grep '^\#define.*MAJVERSION' $(VERFILE) | awk '{print $$3}')
-APPMINOR   := $(shell grep '^\#define.*MINVERSION' $(VERFILE) | awk '{print $$3}')
-APPPATCH   := $(shell grep '^\#define.*PATCHLEVEL' $(VERFILE) | awk '{print $$3}')
+APPMAJOR   := $(shell awk '$$2 == "JENT_MAJVERSION" {print $$3}' $(VERFILE))
+APPMINOR   := $(shell awk '$$2 == "JENT_MINVERSION" {print $$3}' $(VERFILE))
+APPPATCH   := $(shell awk '$$2 == "JENT_PATCHLEVEL" {print $$3}' $(VERFILE))
 APPVERSION := $(APPMAJOR).$(APPMINOR).$(APPPATCH)
-
-###############################################################################
-#
-# Guess at the appropriate lib directory and word size
-#
-###############################################################################
-ifeq ($(UNAME_S),Linux)
-
-ifeq ($(origin LIBDIR),undefined)
-LIBDIR		:= $(shell ldd /usr/bin/make | grep '\(/libc\.\)' | sed -e 's!.*\(/.*\)/libc[.].*!\1!')
-endif
-ifeq ($(origin USRLIBDIR),undefined)
-USRLIBDIR	:= $(patsubst /lib/%,/usr/lib/%,$(LIBDIR))
-endif
-BUILDFOR	:= $(shell file /usr/bin/make | sed -e 's!.*ELF \(32\|64\)-bit.*!\1!')-bit
-
-ifeq ($(origin CFLAGS),undefined)
-ifeq ($(BUILDFOR),32-bit)
-CFLAGS		+= -m32
-LIBDIR		:= /lib
-USRLIBDIR	:= /usr/lib
-else
-ifeq ($(BUILDFOR),64-bit)
-CFLAGS		+= -m64
-LIBDIR		:= /lib64
-USRLIBDIR	:= /usr/lib64
-endif
-endif
-endif
-
-else
-LIBDIR		:= /lib
-USRLIBDIR	:= /usr/lib
-endif
-
 
 ###############################################################################
 #
@@ -186,9 +158,6 @@ show_vars:
 	@echo APPVERSION=$(APPVERSION)
 	@echo DESTDIR=$(DESTDIR)
 	@echo BINDIR=$(BINDIR)
-	@echo LIBDIR=$(LIBDIR)
-	@echo USRLIBDIR=$(USRLIBDIR)
-	@echo BUILDFOR=$(BUILDFOR)
 	@echo NAME=$(NAME)
 	@echo LDFLAGS=$(LDFLAGS)
 	@echo CFLAGS=$(CFLAGS)

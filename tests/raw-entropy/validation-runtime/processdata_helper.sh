@@ -27,15 +27,15 @@ EATOOL_NONIID=${EATOOL_NONIID:-"../../SP800-90B_EntropyAssessment/cpp/ea_non_iid
 # specify if you want to compile the extractlsb program in this script
 BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
 
-# specify the list of significant bits and length that you want to analize. 
-# Indicate first the mask in hexa format and then the number of 
-# bits separated by a colon. 
-# The tool generates one set of var and single data files, and the EA results 
-# for each element. 
-# The mask can have a maximum of 8 bits on, the EA tool only manages samples 
+# specify the list of significant bits and length that you want to analize.
+# Indicate first the mask in hexa format and then the number of
+# bits separated by a colon.
+# The tool generates one set of var and single data files, and the EA results
+# for each element.
+# The mask can have a maximum of 8 bits on, the EA tool only manages samples
 # up to one byte.
 
-# List of masks usually analyzed (4 and 8 LSB) 
+# List of masks usually analyzed (4 and 8 LSB)
 MASK_LIST="FF:8"
 #MASK_LIST="0F:4 FF:8"
 
@@ -92,7 +92,7 @@ else
 	make
 fi
 
-if [ ! -x $EXTRACT ] 
+if [ ! -x $EXTRACT ]
 then
 	echo "ERROR: Cannot execute $EXTRACT program"
 	exit 1
@@ -122,7 +122,7 @@ done
 echo "" | tee -a $LOGFILE
 echo "Extraction finished. Now analyzing entropy for noise source ..." | tee -a $LOGFILE
 echo "" | tee -a $LOGFILE
- 
+
 for file in $NONIID_DATA
 do
 	file="$ENTROPYDATA_DIR/$file"
@@ -137,7 +137,7 @@ do
 		infile=$filepath.${mask}bitout.data
 
 		for bits in $bits_list
-		do	
+		do
 			outfile=${filepath}.minentropy_${mask}_${bits}bits.txt
 			inprocess_file=$outfile
 			if [ ! -f $outfile ]

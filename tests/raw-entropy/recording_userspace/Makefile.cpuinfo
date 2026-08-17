@@ -1,4 +1,7 @@
-# Compile Noise Source as user space application
+# Compile the CPU information tool
+#
+# The tool only queries the operating system about the CPUs; it does not use
+# any Jitter RNG code and therefore needs neither the library nor its headers.
 
 CC ?= gcc
 CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
@@ -7,9 +10,6 @@ CFLAGS +=-fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-alig
 ifneq (Darwin,$(shell uname))
 LDFLAGS +=-Wl,-z,relro,-z,now
 endif
-
-# Enable internal timer support
-CFLAGS += -DJENT_CONF_ENABLE_INTERNAL_TIMER
 
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
 ifeq "$(GCCVERSIONFORMAT)" "3"
@@ -24,26 +24,10 @@ else
   CFLAGS += -fstack-protector-all
 endif
 
-JENT_DIR := jitterentropy
-
-program_NAME := jitterentropy-hashtime
-#program_C_SRCS := $(wildcard *.c)
-program_C_SRCS := jitterentropy-hashtime.c
+program_NAME := jitterentropy-cpuinfo
+program_C_SRCS := jitterentropy-cpuinfo.c
 program_C_OBJS := ${program_C_SRCS:.c=.o}
 program_OBJS := $(program_C_OBJS)
-
-# $(JENT_DIR)/tests is for jitterentropy-memlock.h, shared with the unit tests.
-program_INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src $(JENT_DIR)/arch $(JENT_DIR)/tests
-program_LIBRARY_DIRS :=
-ifeq (Darwin,$(shell uname))
-program_LIBRARIES := pthread
-else
-program_LIBRARIES := rt pthread
-endif
-
-CPPFLAGS += $(foreach includedir,$(program_INCLUDE_DIRS),-I$(includedir))
-LDFLAGS += $(foreach librarydir,$(program_LIBRARY_DIRS),-L$(librarydir))
-LDFLAGS += $(foreach library,$(program_LIBRARIES),-l$(library))
 
 .PHONY: all clean distclean
 

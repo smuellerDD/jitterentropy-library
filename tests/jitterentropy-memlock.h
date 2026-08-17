@@ -18,40 +18,35 @@
  */
 
 /*
- * Memory lock limit handling and secure memory arena setup for the recording
- * tools.
+ * Memory lock limit handling and secure memory arena setup for the test
+ * programs - the recording tools under tests/raw-entropy and the unit tests
+ * under tests/unit, both of which own the process they run in.
  *
  * In the compliance modes - JENT_NTG1 and JENT_FORCE_FIPS, which imply
  * JENT_FORCE_SECURE_MEM - the memory of the entropy collector must be locked
- * into RAM: a lock the operating system refuses fails the allocation instead
- * of leaving the state in memory that may be swapped out. How much memory a
- * process may lock is bounded by the operating system, and the bound is well
- * below the memory block the collector maps:
+ * into RAM: a lock the operating system refuses fails the allocation rather
+ * than leaving the state where it may be swapped out. The bound on how much a
+ * process may lock is well below the block a collector maps:
  *
  *   - POSIX: RLIMIT_MEMLOCK, commonly 8 MB (and only 64 kB on older systems),
  *     which is why the raw entropy recording with large memory blocks has
  *     traditionally been run as root (see README.md).
  *
- *   - Windows: the process minimum working set. VirtualLock() charges its
- *     pages against it - "the maximum number of pages a process can lock is
- *     equal to the number of pages in its minimum working set minus a small
- *     overhead" - and fails with ERROR_WORKING_SET_QUOTA once that budget is
- *     exhausted.
+ *   - Windows: the process minimum working set, which VirtualLock() charges
+ *     its pages against, failing with ERROR_WORKING_SET_QUOTA once that
+ *     budget is exhausted.
  *
- * Both are process-wide state, which is why the library does not touch them:
- * raising them affects the whole host application - on Windows it evicts the
- * working set the application has reserved for itself - and neither can be
- * restored on free, as another thread may have locked memory against the
- * raised limit in the meantime. That decision belongs to the application -
- * here, to these test tools, which own their process.
+ * Both are process-wide state the library does not touch: raising them affects
+ * the whole host application, and neither can be restored on free, as another
+ * thread may have locked memory against the raised limit meanwhile.
  *
- * The same holds for the secure memory arena the library allocates from when
- * it is built with EXTERNAL_CRYPTO=LIBGCRYPT or EXTERNAL_CRYPTO=OPENSSL:
- * libgcrypt's secmem pool and OpenSSL's secure heap are each created once per
- * process, in a size that cannot be changed afterwards and that every other
- * user of those libraries in the process then shares. The library only checks
- * that the arena is there (see arch/jitterentropy-arch-memory.c); creating and
- * sizing it is done here, in the tool that owns the process.
+ * The same holds for the secure memory arena of an EXTERNAL_CRYPTO=LIBGCRYPT
+ * or =OPENSSL build: libgcrypt's secmem pool and OpenSSL's secure heap are
+ * created once per process, in a size that cannot be changed afterwards and
+ * that every other user of those libraries then shares. The library only
+ * checks that the arena is there (see arch/jitterentropy-arch-memory.c);
+ * creating it, like raising the limits, belongs to whoever owns the process -
+ * here, these test tools.
  */
 
 #ifndef _JITTERENTROPY_MEMLOCK_H

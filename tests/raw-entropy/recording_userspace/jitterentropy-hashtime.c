@@ -37,12 +37,23 @@
 #include <unistd.h>
 #endif
 
+#ifdef __linux__
+#include <sched.h>	/* sched_setaffinity() for --cpu */
+#endif
+
+#ifdef __APPLE__
+#include <pthread.h>
+#include <sys/qos.h>		/* QoS classes for --e-cores and --p-cores */
+#include <sys/resource.h>	/* PRIO_DARWIN_PROCESS for --p-cores */
+#endif
+
 #include "jitterentropy-sha3.c"
 #include "jitterentropy-gcd.c"
 #include "jitterentropy-health.c"
 #include "jitterentropy-noise.c"
 #include "jitterentropy-timer.c"
 #include "jitterentropy-base.c"
+#include "jitterentropy-uuid.c"
 #include "jitterentropy-status.c"
 
 #include "jitterentropy-arch-cache.c"
@@ -52,7 +63,7 @@
 #include "jitterentropy-arch-sched.c"
 #include "jitterentropy-arch-thread.c"
 #include "jitterentropy-arch-timer.c"
-#include "jitterentropy-arch-uuid.c"
+#include "jitterentropy-arch-random.c"
 
 #include "jitterentropy-memlock.h"
 
@@ -83,6 +94,108 @@ enum jent_es {
 	jent_hashloop,		/* SHA3 loop exclusively */
 	jent_memaccess_loop,	/* Memory access loop exclusively */
 };
+
+/*
+ * Pin the measuring thread to the given CPU. On a hybrid CPU the timing of the
+ * noise sources depends on the core, so a recording is only meaningful for one
+ * core type at a time - jitterentropy-cpuinfo says which core is which.
+ *
+ * The memory block is unaffected - the library sizes it from the largest cache
+ * in the system, not from the core it runs on - so --max-mem is what matches
+ * it to an efficiency core.
+ *
+ * The library's portable pinning primitive is compiled with the internal timer
+ * only; without it the native affinity call covers Linux alone, and elsewhere
+ * the request is rejected rather than measuring an arbitrary core.
+ */
+static int jent_pin_cpu(unsigned long cpu)
+{
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	return jent_thread_pin_to_cpu(cpu);
+#elif defined(__linux__)
+	cpu_set_t set;
+
+	if (cpu >= (unsigned long)CPU_SETSIZE)
+		return -EINVAL;
+	CPU_ZERO(&set);
+	CPU_SET((size_t)cpu, &set);
+	if (sched_setaffinity(0, sizeof(set), &set))
+		return -errno;
+	return 0;
+#else
+	(void)cpu;
+	return -ENOSYS;
+#endif
+}
+
+/*
+ * Whether the function above can place the measurement, and so whether --cpu is
+ * offered: the library's primitive covers the systems named here and no other,
+ * and without it only the Linux fallback is left. The option is parsed where it
+ * is not offered, so passing it yields the reason rather than "unknown option".
+ */
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+# if defined(_MSC_VER) || defined(__MINGW32__) || defined(__linux__) || \
+     defined(__FreeBSD__) || defined(__NetBSD__)
+#  define JENT_HAVE_CPU_PINNING
+# endif
+#elif defined(__linux__)
+# define JENT_HAVE_CPU_PINNING
+#endif
+
+#ifdef JENT_HAVE_CPU_PINNING
+# define JENT_USAGE_CPU		"|--cpu <NUM>"
+#else
+# define JENT_USAGE_CPU		""
+#endif
+
+/* Set when --cpu confined the measurement to a single CPU. */
+static int jent_cpu_pinned = 0;
+
+/*
+ * Ask for the core type the measurement is to run on. macOS has no CPU pinning
+ * (see jent_pin_cpu()) but schedules the core types by quality-of-service
+ * class: QOS_CLASS_BACKGROUND runs on the E-cores alone and so confines a
+ * recording to them, while QOS_CLASS_USER_INTERACTIVE is only a preference,
+ * and the class a shell command carries anyway.
+ *
+ * The class does not lift a background task policy ("taskpolicy -b"), under
+ * which the same workload stays at 815 ms against 240 ms in the foreground, so
+ * --p-cores clears that first - 244 ms. Other ways of holding a process there
+ * remain, hence a request rather than a guarantee.
+ *
+ * Later threads inherit the class, so the counting thread follows, and as with
+ * jent_pin_cpu() --max-mem is what matches the memory block to the E-caches.
+ * --e-cores records those cores at the lower clock of the background class; no
+ * interface exposes them at their own maximum.
+ */
+static int jent_select_cores(int performance)
+{
+#ifdef __APPLE__
+	int ret;
+
+	/* Priority zero is what takes the process out of the background. */
+	if (performance && setpriority(PRIO_DARWIN_PROCESS, 0, 0))
+		return -errno;
+
+	ret = pthread_set_qos_class_self_np(performance ?
+					    QOS_CLASS_USER_INTERACTIVE :
+					    QOS_CLASS_BACKGROUND, 0);
+
+	/* The call reports the error directly rather than through errno. */
+	return ret ? -ret : 0;
+#else
+	(void)performance;
+	return -ENOSYS;
+#endif
+}
+
+/* Offered where they can be honored, parsed everywhere, as --cpu above. */
+#ifdef __APPLE__
+# define JENT_USAGE_CORES	"|--e-cores|--p-cores"
+#else
+# define JENT_USAGE_CORES	""
+#endif
 
 /***************************************************************************
  * Statistical test logic not compiled for regular operation
@@ -133,6 +246,14 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	 */
 	ec = jent_entropy_collector_alloc_internal(osr, flags);
 	if (!ec) {
+		printf("Allocation of the entropy collector failed\n");
+		/*
+		 * The counting thread needs a CPU of its own, and
+		 * jent_notime_init() refuses to start with a single-CPU
+		 * affinity mask - exactly what --cpu establishes.
+		 */
+		if (jent_cpu_pinned)
+			printf("Note: --cpu leaves one CPU in the affinity mask, which rules out the internal timer\n");
 		ret = 1;
 		goto out;
 	}
@@ -288,19 +409,33 @@ out:
  * --hashloop Perform the measurement of the hash loop only
  * --memaccess Perform the measurement of the memory access loop only
  * --hloopcnt Number of hashloop operations at runtime
+ * --cpu Pin the measurement to the given CPU - use this on hybrid CPUs to
+ *	 record one core type at a time (see jitterentropy-cpuinfo). Note that
+ *	 the internal timer cannot be used together with this option as its
+ *	 counting thread requires a CPU of its own.
+ * --e-cores Confine the measurement to the efficiency cores. macOS only, where
+ *	 there is no CPU pinning and the quality-of-service class of the thread
+ *	 is what selects a core type instead.
+ * --p-cores Ask for the performance cores - a preference, not a confinement.
+ *	 macOS only, and of use where the tool is started with a lower class
+ *	 than a shell command carries, which would otherwise take the recording
+ *	 onto the efficiency cores unnoticed.
+ *
+ * --cpu, --e-cores and --p-cores are mutually exclusive.
  */
 int main(int argc, char * argv[])
 {
 	const char *file;
-	unsigned long i, rounds, repeats;
+	unsigned long i, rounds, repeats, cpu = 0;
 	unsigned int flags = 0, osr = 0, loopcnt = 0;
 	unsigned int status = 0;
+	int e_cores = 0, p_cores = 0;
 	enum jent_es jent_es = jent_common;
 	int ret;
 	char pathname[4096];
 
 	if (argc < 4) {
-		printf("%s <rounds per repeat> <number of repeats> <filename> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>|--status]\n", argv[0]);
+		printf("%s <rounds per repeat> <number of repeats> <filename> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>" JENT_USAGE_CPU JENT_USAGE_CORES "|--status]\n", argv[0]);
 		return 1;
 	}
 
@@ -500,6 +635,24 @@ int main(int argc, char * argv[])
 				printf("Unknown hashloop value\n");
 				return 1;
 			}
+		} else if (!strncmp(argv[1], "--cpu", 5)) {
+			unsigned long val;
+
+			argc--;
+			argv++;
+			if (argc <= 1) {
+				printf("CPU value missing\n");
+				return 1;
+			}
+
+			if (parse_ulong(argv[1], &val))
+				return 1;
+			cpu = val;
+			jent_cpu_pinned = 1;
+		} else if (!strncmp(argv[1], "--e-cores", 9)) {
+			e_cores = 1;
+		} else if (!strncmp(argv[1], "--p-cores", 9)) {
+			p_cores = 1;
 		} else if (!strncmp(argv[1], "--status", 8)) {
 			status = 1;
 		} else {
@@ -509,6 +662,44 @@ int main(int argc, char * argv[])
 
 		argc--;
 		argv++;
+	}
+
+	/* Each names the core to measure on, in ways that cannot be combined. */
+	if (jent_cpu_pinned + e_cores + p_cores > 1) {
+		printf("--cpu, --e-cores and --p-cores are mutually exclusive\n");
+		return 1;
+	}
+
+	/*
+	 * Before the first initialization, so that the self tests, the memory
+	 * allocation and the recording all run on the selected core.
+	 */
+	if (jent_cpu_pinned) {
+		ret = jent_pin_cpu(cpu);
+		if (ret) {
+			printf("Cannot pin the measurement to CPU %lu: %s\n",
+			       cpu, strerror(-ret));
+			return 1;
+		}
+		printf("Measurement pinned to CPU %lu\n", cpu);
+	}
+
+	if (e_cores || p_cores) {
+		ret = jent_select_cores(p_cores);
+		if (ret) {
+			printf("Cannot ask for the %s cores: %s\n",
+			       p_cores ? "performance" : "efficiency",
+			       strerror(-ret));
+			return 1;
+		}
+		/*
+		 * Only the efficiency cores are a confinement; the performance
+		 * ones are a preference the scheduler is free to leave.
+		 */
+		if (e_cores)
+			printf("Measurement confined to the efficiency cores\n");
+		else
+			printf("Measurement asked for the performance cores\n");
 	}
 
 	/*

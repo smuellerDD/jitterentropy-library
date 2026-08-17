@@ -509,6 +509,6 @@ int main(int argc, char * argv[])
 	}
 
 	printf("%u\n", minBound);
-			
+
 	return 0;
 }

@@ -3,17 +3,10 @@ cmake_minimum_required(VERSION 3.14)
 project(jitterentropy C)
 set(CMAKE_C_STANDARD 11)
 
-# jitterentropy-osr.c calls floor() and ceil(). Whether those need an explicit
-# -lm depends on the C library: glibc before 2.34 and musl keep them in libm,
-# newer glibc, macOS and mingw-w64 resolve them from the default libraries.
-#
-# This is deliberately not find_library(MATH_LIBRARY m). That searches library
-# *paths* and never sees CMAKE_C_FLAGS, so under a flag-selected target - most
-# obviously -m32 - it fails to turn up a usable libm, reports NOTFOUND, and the
-# guard below then silently drops -lm from the link. The result was a link that
-# died on "undefined reference to floor". check_symbol_exists() compiles and
-# links a probe with the real compiler and the real flags, so it answers for the
-# target actually being built.
+# Whether floor() and ceil() need -lm depends on the C library. Deliberately
+# not find_library(MATH_LIBRARY m), which searches library paths and never sees
+# CMAKE_C_FLAGS: under -m32 it reports NOTFOUND and the guard below then drops
+# -lm. check_symbol_exists() probes with the real compiler and flags.
 include(CheckSymbolExists)
 check_symbol_exists(floor "math.h" JENT_FLOOR_IN_DEFAULT_LIBS)
 if(NOT JENT_FLOOR_IN_DEFAULT_LIBS)
@@ -28,55 +21,33 @@ if(NOT JENT_FLOOR_IN_DEFAULT_LIBS)
     endif()
 endif()
 
-# Two kinds of program are built here.
-#
-# Most are ordinary consumers of the library and link it like any other user
-# would. The exception is marked AMALGAMATED: that program #includes every
-# library .c file directly (see the include block at the top of the source) so
-# that it can instrument internals the installed library does not export. It is
-# therefore already a complete copy of the library and must NOT also link it -
-# on Windows the defining and the importing copy collide outright ("multiple
-# definition of jent_read_entropy"), while on ELF the duplicate was merely
-# masked by -fvisibility=hidden letting the local copy win. It also has to
-# satisfy the dependencies of the sources it absorbed, and to build against the
-# public header as the library does rather than as a consumer.
+# Most of these link the library. The AMALGAMATED one #includes every library
+# .c file instead, to instrument internals the library does not export, and so
+# must NOT also link it: the copies collide on Windows and are masked only by
+# -fvisibility=hidden on ELF. It also carries the absorbed sources'
+# dependencies and builds against the public header as the library does.
 function(testprogram name)
     cmake_parse_arguments(TP "AMALGAMATED" "" "" ${ARGN})
     add_executable(${name} ${name}.c)
 
     if(TP_AMALGAMATED)
         target_compile_definitions(${name} PRIVATE JENT_STATIC_LIB)
-        # arch/ is normally supplied by the library target's interface, which
-        # this program deliberately does not use.
+        # Normally supplied by the library target's interface.
         target_include_directories(${name} PRIVATE
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../arch>)
         if(WIN32)
-            # Carries its own copy of arch/jitterentropy-arch-uuid.c and so its
-            # own BCryptGenRandom() call to resolve.
+            # Its own copy of the UUID backend, so its own BCryptGenRandom().
             target_link_libraries(${name} "bcrypt")
         endif()
-        # Likewise its own copy of the internal timer, so its own
-        # pthread_create(). The library target carries this dependency in its
-        # link interface, but that interface is reached by linking the library,
-        # which this program deliberately does not do. See the definition of
+        # Likewise its own timer, so its own pthread_create(). See
         # JITTER_THREAD_LIBRARIES in the top-level CMakeLists.txt.
         target_link_libraries(${name} ${JITTER_THREAD_LIBRARIES})
-        # And for the same reason its own external crypto dependency: with
-        # EXTERNAL_CRYPTO set, the sources absorbed here compile against
-        # <openssl/evp.h> or <gcrypt.h> and call into that library, while the
-        # header and library locations the top-level CMakeLists.txt found are
-        # attached to the library target this program does not link. Without
-        # these two lines an EXTERNAL_CRYPTO build fails on the include and,
-        # once that is satisfied, on OPENSSL_secure_malloc() at link time.
-        # Empty and harmless in the default build, where EXTERNAL_CRYPTO is off.
+        # And its own external crypto dependency. Empty in the default build.
         if(EXTERNAL_CRYPTO)
             target_include_directories(${name} PRIVATE ${LIBCRYPTO_INCLUDE_DIR})
             target_link_libraries(${name} ${LIBCRYPTO_LIBRARY})
         endif()
-        # The stack protector needs no equivalent line: the top-level
-        # CMakeLists.txt puts its flag on every target's link command with
-        # add_link_options(), precisely because relying on the library's link
-        # interface for it does not survive a shared build.
+        # The stack protector needs none: add_link_options() covers it.
     else()
         target_link_libraries(${name} ${PROJECT_NAME})
     endif()
@@ -84,19 +55,35 @@ function(testprogram name)
     if(MATH_LIBRARY)
         target_link_libraries(${name} ${MATH_LIBRARY})
     endif()
-    # No target_link_directories() here: the library is linked through the
-    # ${PROJECT_NAME} target above, which carries its own location. The
-    # hard-coded ../../../build path this used to add does not exist for any
-    # out-of-tree build directory, and Apple's ld64 warns about every missing
-    # search path ("ld: warning: search path ... not found").
+    # No target_link_directories(): the target carries its own location, and
+    # the hard-coded path this used to add exists for no out-of-tree build.
+    # ../.. is tests/, for jitterentropy-memlock.h - shared with the unit tests.
     target_include_directories(${name} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../..>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../src>)
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../src>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>)
     target_compile_options(${name} PRIVATE ${JITTER_C_FLAGS})
     include(GNUInstallDirs)
-    install(TARGETS ${name})
+    if(ENABLE_TOOLS)
+        install(TARGETS ${name})
+    endif()
 endfunction()
 
-testprogram(jitterentropy-hashtime AMALGAMATED)
-testprogram(jitterentropy-osr)
+# jitterentropy-rng is also what the rng-* tests run, so it is built whenever
+# either option is on; the other two are tools alone.
 testprogram(jitterentropy-rng)
+if(ENABLE_TOOLS)
+    testprogram(jitterentropy-hashtime AMALGAMATED)
+    testprogram(jitterentropy-osr)
+
+    # The CPU information tool only queries the operating system about the
+    # CPUs - it does not link against the library.
+    add_executable(jitterentropy-cpuinfo jitterentropy-cpuinfo.c)
+    target_compile_options(jitterentropy-cpuinfo PRIVATE ${JITTER_C_FLAGS})
+    if(WIN32)
+        # The model of each CPU is read from the registry with RegGetValueA(),
+        # which MSVC pulls in through its default libraries and MinGW does not.
+        target_link_libraries(jitterentropy-cpuinfo "advapi32")
+    endif()
+    install(TARGETS jitterentropy-cpuinfo)
+endif()
