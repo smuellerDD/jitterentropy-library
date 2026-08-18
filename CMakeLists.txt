@@ -517,15 +517,23 @@ endif()
 if(BUILD_TESTING)
     add_test(NAME gcd-self-test COMMAND gcd)
 
-    foreach(_mode "" "--all-caches" "--force-internal-timer" "--force-fips" "--ntg1")
-        if(_mode STREQUAL "")
-            set(_name default)
-            set(_args "")
-        else()
-            string(REGEX REPLACE "^--" "" _name "${_mode}")
-            set(_args "${_mode}")
-        endif()
-        add_test(NAME rng-${_name} COMMAND jitterentropy-rng 256 ${_args})
+    # The bare run, separate from the loop below: an empty element does not
+    # survive a CMake list.
+    add_test(NAME rng-default COMMAND jitterentropy-rng 256)
+    set_tests_properties(rng-default PROPERTIES LABELS unreliable)
+
+    # --force-internal-timer only where there is one to force: without
+    # JENT_CONF_ENABLE_INTERNAL_TIMER the initialization refuses the flag, so
+    # registering it in that build would make the suite fail on a supported
+    # configuration rather than on a defect.
+    set(_rng_modes "--all-caches" "--force-fips" "--ntg1")
+    if(INTERNAL_TIMER)
+        list(APPEND _rng_modes "--force-internal-timer")
+    endif()
+
+    foreach(_mode IN LISTS _rng_modes)
+        string(REGEX REPLACE "^--" "" _name "${_mode}")
+        add_test(NAME rng-${_name} COMMAND jitterentropy-rng 256 ${_mode})
         set_tests_properties(rng-${_name} PROPERTIES LABELS unreliable)
     endforeach()
 endif()
