@@ -51,21 +51,12 @@ MODULE_PARM_DESC(selftest_interval,
  */
 static atomic64_t jent_selftest_runs = ATOMIC64_INIT(0);
 static atomic64_t jent_selftest_failures = ATOMIC64_INIT(0);
-static unsigned long jent_selftest_last_run;
 
 void jent_selftest_get_stats(struct jent_selftest_stats *stats)
 {
 	stats->interval = selftest_interval;
 	stats->runs = (u64)atomic64_read(&jent_selftest_runs);
 	stats->failures = (u64)atomic64_read(&jent_selftest_failures);
-
-	/*
-	 * The subtraction is jiffies arithmetic and therefore correct across
-	 * the counter wrap; the division turns it into seconds without the
-	 * 49-day range limit that jiffies_to_msecs() has on 32 bit.
-	 */
-	stats->seconds_since_last_run = stats->runs ?
-		(u64)((jiffies - READ_ONCE(jent_selftest_last_run)) / HZ) : 0;
 }
 
 /*
@@ -97,11 +88,6 @@ static int jent_selftest_execute(struct rand_data *ec)
 	else
 		instance[0] = '\0';
 
-	/*
-	 * The timestamp first: a reader that sees a non-zero run count then
-	 * always sees the timestamp belonging to it rather than the initial 0.
-	 */
-	WRITE_ONCE(jent_selftest_last_run, jiffies);
 	atomic64_inc(&jent_selftest_runs);
 
 	if (!ret) {

@@ -405,7 +405,6 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 			"selfTest": {
 				"intervalSeconds": 3600,
 				"runs": 12,
-				"secondsSinceLastRun": 87,
 				"failures": 0
 			}
 		}
@@ -414,10 +413,9 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
   is the total number of opens since the module was loaded.
 
   `intervalSeconds` is the effective `selftest_interval` module parameter
-  (`0` when the periodic runs are disabled), `runs` the number of self test
+  (`0` when the periodic runs are disabled) and `runs` the number of self test
   runs completed since the module was loaded - across all instances, the
-  on-demand ones included - and `secondsSinceLastRun` the age of the last one,
-  `null` before the first run. Neither counts the known answer tests
+  on-demand ones included. It does not count the known answer tests
   `jent_entropy_init_ex()` ran at module load, which belong to the library's
   initialization. `failures` is the number of failed runs; each failed run has
   permanently stopped the instance it was bound to, as described below.
@@ -492,7 +490,7 @@ reader recovers by closing and re-opening (a fresh instance), the hwrng and
 crypto API instances by reloading the module or reinstantiating the tfm. The
 count of failed runs is visible as the `selfTest.failures` field of
 `/proc/jitterentropy/statistics`, along with the number of runs completed
-across all instances and the age of the last one.
+across all instances.
 
 The same tests can be run on demand through the `JENT_IOCSELFTEST` ioctl (see
 [Self test ioctl](#self-test-ioctl) above), for a caller that wants them at a
