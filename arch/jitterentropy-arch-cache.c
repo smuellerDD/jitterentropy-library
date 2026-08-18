@@ -199,28 +199,34 @@ static void jent_get_cachesize_uncached(long *l1, long *l2, long *l3);
  * jent_entropy_collector_alloc() calls do not each trigger a full CPU walk and
  * the latency spike it brings.
  *
- * The two results are deterministic, so the library's usual "initialise once
- * before concurrent use" contract (see jent_entropy_init()) makes this safe. A
- * thread still racing the very first call at worst recomputes the same values;
- * a 32-bit slot is read/written atomically, so a racing reader observes either
- * the old zero (harmless - the caller then falls back to its default size) or
- * the final value, never a torn one.
+ * The two results are deterministic, so a thread still racing the very first
+ * call at worst repeats the discovery and stores the same two values. That it
+ * may do so at the same time as another thread is why the memo is reached
+ * through the atomic helpers (see arch/jitterentropy-arch-atomic.h) rather than
+ * left to the natural width of the access: the flag is stored after the values
+ * with release and loaded before them with acquire, so a reader that sees the
+ * memo valid sees both values as well, and a reader that arrives too early
+ * takes the discovery itself rather than a half-written answer.
  */
 uint32_t jent_cache_size_roundup(int all_caches)
 {
 	static uint32_t cached[2];
 	static int cached_valid;
 
-	if (!cached_valid) {
+	if (!jent_atomic_load_int(&cached_valid)) {
 		long l1 = 0, l2 = 0, l3 = 0;
 
 		jent_get_cachesize_uncached(&l1, &l2, &l3);
-		cached[0] = jent_cache_roundup_from_sizes(l1, l2, l3, 0);
-		cached[1] = jent_cache_roundup_from_sizes(l1, l2, l3, 1);
-		cached_valid = 1;
+		jent_atomic_store_u32(&cached[0],
+				      jent_cache_roundup_from_sizes(l1, l2, l3,
+								    0));
+		jent_atomic_store_u32(&cached[1],
+				      jent_cache_roundup_from_sizes(l1, l2, l3,
+								    1));
+		jent_atomic_store_int(&cached_valid, 1);
 	}
 
-	return cached[!!all_caches];
+	return jent_atomic_load_u32(&cached[!!all_caches]);
 }
 
 /*
