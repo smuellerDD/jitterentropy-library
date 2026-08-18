@@ -79,7 +79,14 @@
 
 #include <errno.h>
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
+#if defined(JENT_BAREMETAL)
+/*
+ * Nothing to ask. The generic answer below is one CPU, which is also the
+ * honest one: an EFI application runs on the boot processor with the others
+ * parked, and the internal timer that a second CPU would be wanted for is not
+ * available here anyway.
+ */
+#elif defined(_MSC_VER) || defined(__MINGW32__)
 # include <windows.h>
 # define JENT_ARCH_NCPU_WINDOWS
 #elif defined(__unix__) || defined(__APPLE__) || defined(_AIX) || \

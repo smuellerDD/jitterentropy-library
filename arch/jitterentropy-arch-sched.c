@@ -54,7 +54,13 @@
 
 #else /* LINUX_KERNEL */
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
+#if defined(JENT_BAREMETAL)
+/*
+ * No scheduler to yield to - there is nothing else runnable. The CPU-level
+ * pause hint below is selected as usual and is the whole of jent_yield() here,
+ * which is what the baremetal case in this file's header describes.
+ */
+#elif defined(_MSC_VER) || defined(__MINGW32__)
 # include <windows.h>
 # define JENT_ARCH_SCHED_OS_WINDOWS
 #elif defined(__unix__) || defined(__APPLE__) || defined(_AIX) || \

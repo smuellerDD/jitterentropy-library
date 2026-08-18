@@ -74,7 +74,15 @@
 #include <stdint.h>
 #include <string.h>
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
+/*
+ * No CSPRNG to ask on a baremetal target: none of the branches is selected and
+ * jent_os_random_supported() reports so. That is not a shortfall in the noise
+ * source - the OS random pool is used for the instance identifier and for the
+ * startup work-scale plan, both of which fall back to what the collector
+ * itself has measured.
+ */
+#if defined(JENT_BAREMETAL)
+#elif defined(_MSC_VER) || defined(__MINGW32__)
 # include <windows.h>
 # include <bcrypt.h>
 # if defined(_MSC_VER)
