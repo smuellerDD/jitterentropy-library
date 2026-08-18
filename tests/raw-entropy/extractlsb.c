@@ -38,6 +38,7 @@
 #include <io.h>
 #define open   _open
 #define close  _close
+#define write  _write
 #define unlink _unlink
 #else
 #include <unistd.h>
