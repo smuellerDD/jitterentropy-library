@@ -51,6 +51,7 @@ jent_unit_test(unit-base-gen)
 jent_unit_test(unit-error)
 jent_unit_test(unit-fault)
 jent_unit_test(unit-notime)
+jent_unit_test(unit-concurrency)
 jent_unit_test(unit-zeroize)
 
 # MOCK_TIMER is a library build option, off by default; this defines it for its
