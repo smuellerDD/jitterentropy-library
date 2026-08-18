@@ -98,7 +98,9 @@
 #elif defined(JENT_BAREMETAL)
 /*
  * Neither backend: there is no kernel here to ask for a locked page, and no
- * VirtualLock() either. The plain allocator below stands.
+ * VirtualLock() either. The plain allocator below stands - and it is secure
+ * memory all the same, for the reason given where JENT_MEM_SECURE is selected
+ * further down: there is no swap device, no second process and no core dump.
  */
 #elif defined(_MSC_VER) || defined(__MINGW32__)
 # define JENT_ARCH_MEM_WINDOWS
@@ -166,6 +168,22 @@
 # define JENT_MEM_SECURE_ON_REQUEST
 #elif defined(AWSLC)
   /* AWS-LC memory is wiped but not locked; not advertised as secure. */
+#elif defined(JENT_BAREMETAL)
+  /*
+   * Secure for the same reason the Linux kernel's is, and more simply: there
+   * is no swap device to page it out to, no second process to read it and no
+   * core dump to land in. jent_zfree() wipes it on release as everywhere else.
+   *
+   * This is a statement about the environment the build is for, which is what
+   * asking for a freestanding build asserts. A firmware that does have paging
+   * underneath it - a hypervisor, an SMM handler with a backing store - is not
+   * one this can speak for, and neither is the kernel backend above.
+   *
+   * No JENT_MEM_SECURE_ON_REQUEST: there is nothing here that can deny it, so
+   * JENT_FORCE_SECURE_MEM is satisfied rather than ignored, and the compliance
+   * modes that imply that flag get memory that answers it.
+   */
+# define JENT_MEM_SECURE
 #elif defined(JENT_ARCH_MEM_WINDOWS) || defined(JENT_ARCH_MEM_POSIX_MLOCK)
 # define JENT_MEM_SECURE
   /*
@@ -180,9 +198,9 @@
  * denied at runtime: the memory lock the environment refuses, and the arena
  * the application did not provide. Only there does JENT_FORCE_SECURE_MEM
  * have a meaning - it turns that denial from a silent fallback to
- * unprotected memory into a failed allocation. The Linux kernel backend
- * cannot be denied and AWS-LC never claimed to be secure, so neither
- * consults the flag.
+ * unprotected memory into a failed allocation. The Linux kernel and the
+ * baremetal backends cannot be denied and AWS-LC never claimed to be secure,
+ * so none of them consults the flag.
  */
 
 int jent_secure_memory_supported(void)
