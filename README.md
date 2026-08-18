@@ -52,6 +52,7 @@ prevention.
 | `AARCH64_NSTIME_REGISTER` | unset | Name of the register `jent_get_nstime()` should read on AArch64 |
 | `ENABLE_SANITIZERS` | `OFF` | Address and undefined behavior sanitizers (development only) |
 | `ENABLE_COVERAGE` | `OFF` | Instrument for code coverage and add the `coverage` target (development only) |
+| `ENABLE_FUZZING` | `OFF` | Instrument for libFuzzer and build the coverage-guided harness under `tests/fuzz` (Clang only, development) |
 | `MOCK_TIMER` | `OFF` | Let the caller replace the time source with a callback (testing only - such a build produces no entropy of its own) |
 | `ENABLE_TOOLS` | `ON` | Build and install the recording and validation tools, which live under `tests/` |
 | `BUILD_TESTING` | `ON` | Build the test programs and register the CTest suite |
@@ -136,6 +137,20 @@ cmake --build build-coverage --target coverage
 The target runs the whole suite, the `unreliable` tests included, since they
 are what reaches the noise source and the health tests at runtime; their result
 is not propagated, so a machine that cannot run them still gets a report.
+
+## Fuzzing
+
+The public API has a fuzzing harness under `tests/fuzz`. Its standalone runner
+is part of the CTest suite on every platform; the coverage-guided one needs
+Clang with the libFuzzer runtime:
+
+```sh
+cmake -S . -B build-fuzz -DENABLE_FUZZING=ON -DENABLE_SANITIZERS=ON
+cmake --build build-fuzz
+./build-fuzz/tests/fuzz/fuzz-api -max_total_time=300 corpus/
+```
+
+See `tests/README.md` for what the harness drives and asserts.
 
 # Operational Considerations
 

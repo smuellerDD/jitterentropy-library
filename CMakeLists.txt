@@ -26,6 +26,7 @@ option(EXTERNAL_CRYPTO "Compile Jitter and use an external libcrypto, valid opti
 option(AARCH64_NSTIME_REGISTER "Name of the register that should be used in jent_get_nstime function")
 option(ENABLE_SANITIZERS "Compile with address and undefined behavior sanitizers (only for development)" OFF)
 option(ENABLE_COVERAGE "Instrument the build for code coverage and add the 'coverage' target (only for development)" OFF)
+option(ENABLE_FUZZING "Instrument the build for libFuzzer and build the fuzzing harness under tests/fuzz (Clang only, for development)" OFF)
 option(MOCK_TIMER "Allow the time source to be replaced by a caller-supplied callback (only for testing - a build with this on produces no entropy of its own)" OFF)
 option(ENABLE_TOOLS "Build and install the recording and validation tools (jitterentropy-rng, getrawentropy, extractlsb, ...), which live under tests/" ON)
 option(BUILD_TESTING "Build the test programs and register the CTest suite" ON)
@@ -63,6 +64,49 @@ endif()
 if(ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined)
     add_link_options(-fsanitize=address,undefined)
+endif()
+
+# The whole build is instrumented, not only the harness: libFuzzer guides
+# itself by the coverage of the code under test, and a library compiled without
+# the counters leaves it fuzzing blind. Only the harness links -fsanitize=fuzzer
+# (it supplies main), which is why this is the -no-link spelling.
+#
+# Pair it with -DENABLE_SANITIZERS=ON for the memory errors a fuzzer is run to
+# find; the harness checks the API contract on its own either way.
+if(ENABLE_FUZZING)
+    if(NOT CLANG)
+        message(FATAL_ERROR
+            "ENABLE_FUZZING requires Clang, have ${CMAKE_C_COMPILER_ID}")
+    endif()
+    if(NOT BUILD_TESTING)
+        message(FATAL_ERROR
+            "ENABLE_FUZZING needs BUILD_TESTING: the harness is a test program")
+    endif()
+
+    # Compiled and linked, not only compiled: the instrumentation is part of
+    # the compiler while the runtime that supplies main() is a separate
+    # library, and a toolchain can have the first without the second - Apple's
+    # Command Line Tools clang is the common one, and it fails at the link of
+    # the harness, several minutes into the build.
+    include(CheckCSourceCompiles)
+    set(CMAKE_REQUIRED_FLAGS -fsanitize=fuzzer)
+    check_c_source_compiles("
+        #include <stddef.h>
+        #include <stdint.h>
+        int LLVMFuzzerTestOneInput(const uint8_t *d, size_t s);
+        int LLVMFuzzerTestOneInput(const uint8_t *d, size_t s)
+        { (void)d; (void)s; return 0; }
+    " JENT_HAVE_LIBFUZZER)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT JENT_HAVE_LIBFUZZER)
+        message(FATAL_ERROR
+            "ENABLE_FUZZING: this Clang compiles but cannot link "
+            "-fsanitize=fuzzer - it ships no libFuzzer runtime. Apple's "
+            "Command Line Tools clang is one such; build with an LLVM "
+            "toolchain instead (-DCMAKE_C_COMPILER=/path/to/llvm/bin/clang).")
+    endif()
+
+    add_compile_options(-fsanitize=fuzzer-no-link)
 endif()
 
 # add_*_options() as with ENABLE_SANITIZERS, to reach the test programs too.
@@ -496,6 +540,7 @@ endif()
 # Test programs only: nothing here is installed.
 if(BUILD_TESTING)
     add_subdirectory(tests/unit)
+    add_subdirectory(tests/fuzz)
 endif()
 
 # Tools only: nothing here is driven by the suite.
