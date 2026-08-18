@@ -93,7 +93,6 @@ struct jent_selftest_stats {
 	unsigned int interval;		/* Seconds between runs, 0 = disabled */
 	u64 runs;			/* Completed runs since module load */
 	u64 failures;			/* Failed runs since module load */
-	u64 seconds_since_last_run;	/* Only meaningful when runs > 0 */
 };
 
 void jent_selftest_get_stats(struct jent_selftest_stats *stats);
