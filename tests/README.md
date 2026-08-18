@@ -13,6 +13,8 @@ directories:
 * `unit`: Unit tests for the modules in `src/` and the platform backends in
   `arch/`
 
+* `fuzz`: Fuzzing harness for the public API
+
 * `chardev`: Status reporting of the Linux kernel module character device
 
 ## Unit tests
@@ -40,6 +42,44 @@ without the library having been built first.
 
 Together with `tests/health` and the GCD self test they cover about 96% of the
 library's lines, 90% of its branches and every one of its functions.
+
+## Fuzzing the public API
+
+`tests/fuzz/fuzz-api.c` drives the API of `jitterentropy.h` as a hostile caller
+does: null pointers, lengths of zero and of `SIZE_MAX`, oversampling rates far
+outside the range the library clamps, flag words with every undefined bit set,
+collectors freed twice, calls in an order no documented sequence produces. It
+links the library rather than absorbing it, so what it reaches is the surface an
+application reaches. It asserts the contract the header states - no write
+outside the buffer a call was given, a read that delivers the full length or a
+documented negative code, misuse reported rather than acted on - and a failed
+assertion is what the fuzzer records as a crash.
+
+The harness is built twice:
+
+* `fuzz-api-standalone` is built always, needs no particular compiler, and runs
+  a fixed sweep of inputs as part of the CTest suite. Given file arguments it
+  replays them instead, which is how a crash found by the fuzzer is reproduced.
+
+* `fuzz-api` is the coverage-guided one and needs Clang with the libFuzzer
+  runtime:
+
+  ```
+  cmake -S . -B build-fuzz -DENABLE_FUZZING=ON -DENABLE_SANITIZERS=ON
+  cmake --build build-fuzz
+  ./build-fuzz/tests/fuzz/fuzz-api -max_total_time=300 corpus/
+  ```
+
+  `ENABLE_FUZZING` instruments the whole build, not only the harness, since
+  libFuzzer guides itself by the coverage of the code under test. It is not
+  registered as a test case: a fuzzing run has no end of its own.
+
+Two limits keep a run finite, both capping how much work one call is asked to
+do rather than which arguments reach it: the memory size field of the flags is
+clamped, as a 512 MB entropy pool is mapped and walked per allocation, and
+`JENT_FORCE_INTERNAL_TIMER` is kept away from the startup, whose forcing is
+one-way process-wide state that would put every later input in the fuzzer's
+process on the counting thread.
 
 ## Replaying time stamps
 
