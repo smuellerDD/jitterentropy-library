@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.22)
 
 # From jitterentropy.h, as the Makefile does, so the package files cannot
 # drift from the library version.
@@ -271,7 +271,7 @@ endfunction()
 
 # Nothing at build time would notice the two drifting: a declaration missing
 # from the script just goes missing from the library. A function for the scope;
-# block() is CMake 3.25 and this project asks for 3.20.
+# block() is CMake 3.25 and this project asks for 3.22.
 function(jent_check_version_script header script linktest)
     set(header_api "")
     set(take_next FALSE)
@@ -536,6 +536,28 @@ if(BUILD_TESTING)
         add_test(NAME rng-${_name} COMMAND jitterentropy-rng 256 ${_mode})
         set_tests_properties(rng-${_name} PROPERTIES LABELS unreliable)
     endforeach()
+
+    # jitterentropy-rng links the library, and a Windows shared build leaves
+    # the DLL in the top-level output directory while the tool is built into
+    # its own. Nothing puts the two together at run time - there is no rpath
+    # on Windows and the loader does not search the linking target's
+    # directory - so every rng-* test dies with STATUS_DLL_NOT_FOUND
+    # (0xc0000135) before reaching main(). Put the DLL on their PATH.
+    #
+    # path_list_prepend prepends to the inherited PATH using the separator of
+    # the platform, so neither the host PATH nor the semicolons in it are
+    # named here - which is what the CMake 3.22 floor buys: spelled with the
+    # plain ENVIRONMENT property this has to interpolate $ENV{PATH} and
+    # escape every separator in it against the list the property itself is.
+    if(WIN32 AND BUILD_SHARED_LIBS)
+        set(_rng_tests rng-default)
+        foreach(_mode IN LISTS _rng_modes)
+            string(REGEX REPLACE "^--" "" _name "${_mode}")
+            list(APPEND _rng_tests rng-${_name})
+        endforeach()
+        set_tests_properties(${_rng_tests} PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>")
+    endif()
 endif()
 
 # gcovr over lcov: it reads either compiler's counters, needs no capture step

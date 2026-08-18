@@ -13,7 +13,7 @@
 # -ljitterentropy: the installed include directory, JENT_STATIC_LIB on a static
 # Windows build so the public header stops saying dllimport, and the transitive
 # link libraries (bcrypt, pthread) that a static link has to name itself.
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.22)
 project(jitterentropy-linktest C)
 
 set(CMAKE_C_STANDARD 11)
