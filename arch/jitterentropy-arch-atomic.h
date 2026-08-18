@@ -45,9 +45,10 @@
  * An entropy collector belongs to one user and needs no synchronization of its
  * own. What is shared is the state around the instances: whether the startup
  * self tests have run, whether the internal timer has been forced, whether the
- * configuration switches are still open, and the memoized cache geometry. Each of
- * those is a latch or a memo - written once, with the value it would have been
- * given by any other writer, and read by every later caller.
+ * configuration switches are still open, the memoized cache geometry, and the
+ * registered FIPS failure callback. All but the last are a latch or a memo -
+ * written once, with the value it would have been given by any other writer,
+ * and read by every later caller.
  *
  * That makes a race on them harmless in effect but a data race by the memory
  * model all the same: the compiler is entitled to reload, to widen a store, or
@@ -77,10 +78,30 @@
  * lets exactly one thread write it - which keeps these helpers to the widths
  * every target has a lock-free access for. A 64-bit atomic would be a call
  * into libatomic on the 32-bit platforms that cannot do one inline.
+ *
+ * jent_atomic_load_fnptr() / jent_atomic_store_fnptr() are the one pair for a
+ * pointer, and they are the one piece of shared state that is not a latch: the
+ * registered FIPS failure callback, which one thread may replace while another
+ * is already generating from a collector that would call it.
+ *
+ * They are typed on jent_fnptr, a function pointer of no particular signature,
+ * and the caller converts. That is deliberate and it is what ISO C allows: a
+ * function pointer converted to another function pointer type and back again
+ * compares equal to the original, and the call is made through the type the
+ * function actually has. A void * would not do - converting between a function
+ * pointer and an object pointer is outside the standard, which -pedantic says
+ * so about, and the two only happen to be one width.
  */
 
 #ifndef _JITTERENTROPY_ARCH_ATOMIC_H
 #define _JITTERENTROPY_ARCH_ATOMIC_H
+
+/*
+ * A function pointer with no signature of its own, for the sole purpose of
+ * being the type these two are declared on. Storage of this type holds a
+ * callback that the caller converts back before calling it.
+ */
+typedef void (*jent_fnptr)(void);
 
 /*
  * All defined in arch/jitterentropy-arch-atomic.c, which is the only place the
@@ -96,5 +117,8 @@ uint32_t jent_atomic_load_u32(uint32_t *ptr);
 void jent_atomic_store_u32(uint32_t *ptr, uint32_t val);
 
 int jent_atomic_exchange_int(int *ptr, int val);
+
+jent_fnptr jent_atomic_load_fnptr(jent_fnptr *ptr);
+void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val);
 
 #endif /* _JITTERENTROPY_ARCH_ATOMIC_H */
