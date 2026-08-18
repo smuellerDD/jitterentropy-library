@@ -110,6 +110,16 @@ int jent_atomic_exchange_int(int *ptr, int val)
 	return xchg(ptr, val);
 }
 
+jent_fnptr jent_atomic_load_fnptr(jent_fnptr *ptr)
+{
+	return smp_load_acquire(ptr);
+}
+
+void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+{
+	smp_store_release(ptr, val);
+}
+
 #elif defined(__ATOMIC_ACQUIRE) && (defined(__GNUC__) || defined(__clang__))
 
 int jent_atomic_load_int(int *ptr)
@@ -135,6 +145,17 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 int jent_atomic_exchange_int(int *ptr, int val)
 {
 	return __atomic_exchange_n(ptr, val, __ATOMIC_ACQ_REL);
+}
+
+/* The builtins take any scalar, a pointer to a function included. */
+jent_fnptr jent_atomic_load_fnptr(jent_fnptr *ptr)
+{
+	return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
+}
+
+void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+{
+	__atomic_store_n(ptr, val, __ATOMIC_RELEASE);
 }
 
 #elif defined(_MSC_VER)
@@ -181,6 +202,30 @@ int jent_atomic_exchange_int(int *ptr, int val)
 	return (int)_InterlockedExchange((volatile long *)ptr, (long)val);
 }
 
+/*
+ * The pointer-width pair. _InterlockedCompareExchangePointer() against NULL
+ * for NULL is the load, for the reason _InterlockedOr(ptr, 0) is above: it
+ * returns the value and, unless it already was NULL, writes nothing.
+ *
+ * The address is cast directly - it is an object pointer whichever type it
+ * points to - while the value goes through uintptr_t in both directions. A
+ * function pointer and a data pointer are one width on every Windows ABI, but
+ * casting between them is what C4054 and C4055 are about, and this build is
+ * compiled with /W4. Through an integer wide enough to hold either, MSVC says
+ * nothing, and there is no conversion left for it to have an opinion on.
+ */
+jent_fnptr jent_atomic_load_fnptr(jent_fnptr *ptr)
+{
+	return (jent_fnptr)(uintptr_t)_InterlockedCompareExchangePointer(
+		(void * volatile *)ptr, NULL, NULL);
+}
+
+void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+{
+	(void)_InterlockedExchangePointer((void * volatile *)ptr,
+					  (void *)(uintptr_t)val);
+}
+
 #else /* no atomics available */
 
 int jent_atomic_load_int(int *ptr)
@@ -211,6 +256,16 @@ int jent_atomic_exchange_int(int *ptr, int val)
 	*(volatile int *)ptr = val;
 
 	return old;
+}
+
+jent_fnptr jent_atomic_load_fnptr(jent_fnptr *ptr)
+{
+	return *(jent_fnptr volatile *)ptr;
+}
+
+void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+{
+	*(jent_fnptr volatile *)ptr = val;
 }
 
 #endif

@@ -22,7 +22,19 @@
 #include "jitterentropy-health.h"
 #include "jitterentropy-noise.h"
 
-static jent_fips_failure_cb fips_cb = NULL;
+/*
+ * The registered callback, and unlike the switch below it is not a latch: two
+ * threads may register at the same time, and one may register while another is
+ * already generating from a collector that reaches jent_health_failure() and
+ * reads it. Whose registration wins is the caller's business - registering
+ * from two threads at once names no winner - but the access has to be atomic
+ * or it is a data race, and a torn function pointer is one the reader calls.
+ *
+ * Held as a jent_fnptr, which is what the atomic accessors are typed on, and
+ * converted back to its own type before it is called. See
+ * arch/jitterentropy-arch-atomic.h for why that is the shape.
+ */
+static jent_fnptr fips_cb = NULL;
 
 /*
  * Closed once by the initialization and read by every later caller of
@@ -41,7 +53,7 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
 {
 	if (jent_atomic_load_int(&jent_health_cb_switch_blocked))
 		return -EAGAIN;
-	fips_cb = cb;
+	jent_atomic_store_fnptr(&fips_cb, (jent_fnptr)cb);
 	return 0;
 }
 
@@ -882,12 +894,20 @@ unsigned int jent_health_insert_timestamp(struct rand_data *ec,
  */
 unsigned int jent_health_failure(struct rand_data *ec)
 {
+	jent_fips_failure_cb cb;
+
 	/* Test is only enabled in FIPS mode */
 	if (!ec->is_fips_enabled)
 		return 0;
 
-	if (fips_cb && ec->health_failure) {
-		fips_cb(ec, ec->health_failure);
+	/*
+	 * Read once, so that the call cannot be made on a pointer that was
+	 * replaced between the test and it.
+	 */
+	cb = (jent_fips_failure_cb)jent_atomic_load_fnptr(&fips_cb);
+
+	if (cb && ec->health_failure) {
+		cb(ec, ec->health_failure);
 	}
 
 	return ec->health_failure;
