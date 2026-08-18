@@ -286,6 +286,12 @@ extern "C" {
  * emit calls to regardless: memcpy(), memset(), malloc(), free(), strlen() and
  * snprintf(). tests/efi supplies exactly those, on top of the EFI boot
  * services, and is what keeps this path building and running.
+ *
+ * One flag goes with them on aarch64: -mno-outline-atomics. GCC 10 and later
+ * default to the opposite, which turns the read-modify-write in
+ * arch/jitterentropy-arch-atomic.c into a call to a libgcc helper that a
+ * freestanding link does not have. The kernel passes the same flag for the
+ * same reason.
  */
 #if !defined(JENT_BAREMETAL) &&						       \
     !defined(LINUX_KERNEL) && !defined(__KERNEL__) &&			       \
