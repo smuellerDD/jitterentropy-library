@@ -161,7 +161,7 @@ jobs:
           # 7.9 is the last RHEL 7 minor release; the other entries float.
           - name: RHEL 7
             image: registry.access.redhat.com/ubi7/ubi:7.9
-            # No distro CMake meets the 3.20 floor here.
+            # No distro CMake meets the 3.22 floor here.
             cmake: kitware
           - name: RHEL 8
             image: registry.access.redhat.com/ubi8/ubi:latest
