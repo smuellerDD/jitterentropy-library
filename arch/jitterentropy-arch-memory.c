@@ -79,10 +79,19 @@
  * publishes in <unistd.h>, not from a list of operating systems.
  *
  * _POSIX_MEMLOCK_RANGE is required to be strictly positive rather than merely
- * not -1: a value of 0 means "ask sysconf() at runtime", and since a failed
- * mlock() makes jent_zalloc() fail the allocation outright, such a platform is
- * better served by the malloc() path than by an allocator that might refuse
- * every request.
+ * not -1: a value of 0 means "ask sysconf() at runtime", and a platform that
+ * will only say at runtime whether it can lock at all is better served by the
+ * malloc() path than by an allocator that might refuse every request.
+ *
+ * macOS is the one platform named here rather than detected. It publishes
+ * _POSIX_MEMLOCK_RANGE as -1 while providing mmap(), mprotect() and a working
+ * mlock() - the option macro describes the POSIX option it does not claim
+ * conformance to, not the calls. Going by the macro alone put the whole
+ * collector state on the plain malloc() path there: no memory lock, no guard
+ * pages, no mapping to munmap() on free, and JENT_FORCE_SECURE_MEM silently
+ * granted by a backend that provides none of it. The comments below on the
+ * dump exclusion this platform lacks were written for the path it was not
+ * taking.
  */
 #ifdef LINUX_KERNEL
 # define JENT_ARCH_MEM_LINUX_KERNEL
@@ -93,7 +102,8 @@
 # if defined(_POSIX_MAPPED_FILES) && (_POSIX_MAPPED_FILES - 0) > 0 &&	      \
      defined(_POSIX_MEMORY_PROTECTION) &&				      \
      (_POSIX_MEMORY_PROTECTION - 0) > 0 &&				      \
-     defined(_POSIX_MEMLOCK_RANGE) && (_POSIX_MEMLOCK_RANGE - 0) > 0
+     ((defined(_POSIX_MEMLOCK_RANGE) && (_POSIX_MEMLOCK_RANGE - 0) > 0) ||     \
+      defined(__APPLE__))
 #  define JENT_ARCH_MEM_POSIX_MLOCK
 # endif
 #endif
