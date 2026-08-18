@@ -59,6 +59,13 @@ static const char *jent_test_sysfs_root = "/sys/devices/system/cpu";
 # define JENT_SYSFS_CPU_DIR jent_test_sysfs_root
 #endif
 
+/*
+ * The atomic accessors of the process-wide state. Absorbed ahead of
+ * everything else because it depends on nothing else and nearly everything
+ * else depends on it - see arch/jitterentropy-arch-atomic.h.
+ */
+#include "jitterentropy-arch-atomic.c"
+
 #include "jitterentropy-arch-cache.c"
 #include "jitterentropy-arch-fips.c"
 #include "jitterentropy-arch-memory.c"

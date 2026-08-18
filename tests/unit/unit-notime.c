@@ -148,6 +148,13 @@ static JENT_UT_MAYBE_UNUSED int fi_mlock(const void *addr, size_t len)
 # define mprotect fi_mprotect
 # define mlock fi_mlock
 #endif
+/*
+ * The atomic accessors of the process-wide state. Absorbed ahead of
+ * everything else because it depends on nothing else and nearly everything
+ * else depends on it - see arch/jitterentropy-arch-atomic.h.
+ */
+#include "jitterentropy-arch-atomic.c"
+
 #include "jitterentropy-arch-memory.c"
 #ifdef FI_WINDOWS
 # undef VirtualLock

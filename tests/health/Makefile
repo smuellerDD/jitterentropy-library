@@ -53,7 +53,7 @@ endif
 # Define compilation options
 #
 ###############################################################################
-INCLUDE_DIRS	:= ../../ ../../src
+INCLUDE_DIRS	:= ../../ ../../src ../../arch
 LIBRARY_DIRS	:=
 LIBRARIES	:=
 

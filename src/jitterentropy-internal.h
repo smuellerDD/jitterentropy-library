@@ -47,8 +47,10 @@
 /*
  * Architecture- and OS-specific helpers (timestamp, secure memory, cache
  * size discovery, online CPU count, FIPS mode detection, scheduler yield,
- * atomic access to the process-wide latches) live in dedicated shared headers
- * that internally select the right implementation via #ifdefs.
+ * atomic access to the process-wide latches) live in dedicated shared headers.
+ * The ones that can be expressed inline select the right implementation
+ * through #ifdefs here; the rest declare what the matching source file under
+ * arch/ defines, which is where a platform's own headers stay confined.
  */
 #include "arch/jitterentropy-arch-atomic.h"
 #include "arch/jitterentropy-arch-timer.h"

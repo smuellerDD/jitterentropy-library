@@ -9,7 +9,10 @@ target_compile_definitions(jitterentropy-health PRIVATE JENT_STATIC_LIB)
 target_compile_options(jitterentropy-health PRIVATE ${JITTER_C_FLAGS})
 target_include_directories(jitterentropy-health PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../..
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    # arch/, for the atomic accessors the health tests reach through
+    # jent_health_failure(); absorbed here like the health source itself.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../arch)
 
 if(ENABLE_TOOLS)
     install(TARGETS jitterentropy-health)
