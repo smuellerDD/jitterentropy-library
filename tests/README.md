@@ -17,6 +17,9 @@ directories:
 
 * `chardev`: Status reporting of the Linux kernel module character device
 
+* `efi`: The library as an EFI application, which is the build with no
+  operating system under it at all
+
 ## Unit tests
 
 `tests/unit` covers the library module by module, one program per area:
@@ -301,6 +304,50 @@ permanent cutoff of the RCT with memory in the common configuration, which
 the intermittent APT cutoff from osr 15 on, which has grown into the maximum of
 512 that FIPS 140-2 IG 7.19 resolution #16 caps it at - the same value the
 permanent cutoff already has.
+
+## With no operating system
+
+`tests/efi` builds the library into an EFI application and boots it. It is the
+one program here that runs before an operating system exists: firmware, one
+processor, no scheduler, no threads, no libc, no `/proc`, no CSPRNG. It
+initializes the library and puts three configurations - the default,
+`JENT_FORCE_FIPS` and `JENT_NTG1` - through the same sequence: allocate a
+collector, generate 32 bytes, print them and print the `jent_status()`
+document. Only the default one has to succeed; the compliance modes carry
+tighter health test cutoffs and are allowed to be refused. Last, it checks that
+`JENT_FORCE_INTERNAL_TIMER` is rejected: the counting thread needs a thread,
+and a collector built on one that cannot run would spin on its first
+measurement instead of reporting an error.
+
+```
+nix build .#efi                                    # the EFI system partition
+nix build .#efi-aarch64                            # the same, cross-built
+nix build .#checks.x86_64-linux.efi-vm             # build it and boot it
+nix build .#checks.x86_64-linux.efi-vm-aarch64     # and the aarch64 one
+```
+
+Both architectures firmware is found on, from the one source: what differs is
+the calling convention, the red zone, the page size, whether the atomics may go
+out of line and how the image is converted to PE, and `tests/efi/Makefile` says
+so at each point. aarch64 is cross-built and emulated, so neither needs a
+machine of its own - but only x86_64 runs in CI, the aarch64 toolchain costing
+an hour to build where it is not already cached.
+
+`-ffreestanding` is what selects that build: both GCC and Clang report it by
+setting `__STDC_HOSTED__` to zero, and `jitterentropy.h` defines
+`JENT_BAREMETAL` from it, after which every `arch/` backend takes its OS-less
+branch. What the library then needs from its integrator is six functions -
+`memcpy`, `memset`, `malloc`, `free`, `strlen` and `snprintf` - and
+`tests/efi/README.md` says which of them come from gnu-efi, which the
+application supplies over the EFI boot services, and what a reader of the
+output is entitled to conclude from it.
+
+The cross-compilation smoke builds in `flake.nix` already prove such a target
+translates and links. What this adds is that it runs: that the counter the
+freestanding path reads actually moves, that the startup health tests pass on
+what it measures, and that a collector can be built where the only allocator is
+the firmware's. The failure it guards against is a Jitter RNG that comes up on
+such a target, reports success, and hands out something it never measured.
 
 ## The thread sanitizer
 

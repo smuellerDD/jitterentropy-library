@@ -6,7 +6,11 @@ stamp. It is a small-scale, yet fast entropy source that is viable in almost
 all environments and on a lot of CPU architectures.
 
 The implementation of the Jitter RNG is independent of any operating system.
-As such, it could even run on baremetal without any operating system.
+As such, it can run on baremetal without any operating system: build it with
+`-ffreestanding` and supply `memcpy`, `memset`, `malloc`, `free`, `strlen` and
+`snprintf`, which is the whole of the porting interface. `tests/efi` is that
+build, as an EFI application on x86_64 and aarch64, and `nix flake check` boots
+it and reads what it reports.
 
 The design of the RNG is given in the documentation found in at
 [http://www.chronox.de/jent](http://www.chronox.de/jent). This documentation also covers the full

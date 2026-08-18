@@ -142,6 +142,16 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 	__atomic_store_n(ptr, val, __ATOMIC_RELEASE);
 }
 
+/*
+ * The one read-modify-write, and on aarch64 the one place a freestanding build
+ * can come apart: GCC 10 and later default to -moutline-atomics there, which
+ * compiles this into a call to a libgcc helper - __aarch64_swp4_acq_rel - that
+ * chooses between the LSE and the LL/SC form at run time through an ifunc. A
+ * -nostdlib link has no libgcc, the symbol stays undefined, and the first call
+ * jumps into nothing. Such a build wants -mno-outline-atomics, as the kernel
+ * uses for the same reason; see the note beside JENT_BAREMETAL in
+ * jitterentropy.h.
+ */
 int jent_atomic_exchange_int(int *ptr, int val)
 {
 	return __atomic_exchange_n(ptr, val, __ATOMIC_ACQ_REL);

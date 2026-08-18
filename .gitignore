@@ -26,6 +26,13 @@ tests/raw-entropy/recording_userspace/jitterentropy-rng
 tests/raw-entropy/recording_restart_kernelspace/jitterentropy-kernel-foldtime
 tests/raw-entropy/recording_runtime_kernelspace/jitterentropy-kernel-lfsrtime
 
+# The EFI application: the intermediate shared object, both architectures'
+# images, and the EFI system partition assembled from them.
+tests/efi/jitterentropy.so
+tests/efi/BOOTX64.EFI
+tests/efi/BOOTAA64.EFI
+tests/efi/esp/
+
 # The fuzzing harnesses' standalone programs, and any corpus or crash a run
 # left beside them.
 tests/fuzz/fuzz-api-standalone
