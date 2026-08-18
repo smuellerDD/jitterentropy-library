@@ -888,6 +888,97 @@ jobs:
           run_tolerated "$bin/jitterentropy-hashtime" \
             1000 2 "$RUNNER_TEMP/hashtime" --force-fips
 
+  fuzz:
+    name: Linux / clang / fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Without the sanitizers: they cost fuzz-api about a factor of ten in
+      # executions per second, which is most of what it has. The corpus this
+      # run produces is replayed under them below, which finds the same memory
+      # errors without paying for them on every mutation.
+      - name: Configure the search build
+        run: |
+          cmake -S . -B build-fuzz \
+            -DCMAKE_C_COMPILER=clang \
+            -DENABLE_FUZZING=ON
+
+      - name: Build
+        run: cmake --build build-fuzz -j "$(nproc)"
+
+      # Short, and a smoke test rather than a campaign: what it has to catch is
+      # a harness that no longer builds or a contract the library stopped
+      # holding, not the defect that needs an hour of mutation. -runs is not
+      # given, so each stops on its own clock.
+      #
+      # fuzz-health gets the longer run of the two because it is the one that
+      # can search: nothing in it measures the machine's timer.
+      # artifacts/ has to exist before libFuzzer is pointed at it: it writes a
+      # crash there rather than creating the directory, and refuses to start
+      # otherwise.
+      - name: Fuzz the health tests
+        run: |
+          mkdir -p corpus-health artifacts
+          ./build-fuzz/tests/fuzz/fuzz-health \
+            -max_total_time=180 -max_len=8192 \
+            -artifact_prefix=artifacts/ corpus-health
+
+      - name: Fuzz the public API
+        run: |
+          mkdir -p corpus-api artifacts
+          ./build-fuzz/tests/fuzz/fuzz-api \
+            -max_total_time=120 \
+            -artifact_prefix=artifacts/ corpus-api
+
+      # The corpus both runs built, through the same harnesses under the
+      # address and undefined behavior sanitizers. The standalone programs take
+      # the inputs as arguments and assert the same contracts.
+      - name: Configure the replay build
+        run: |
+          cmake -S . -B build-asan \
+            -DCMAKE_C_COMPILER=clang \
+            -DENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build-asan -j "$(nproc)"
+
+      - name: Replay the corpus under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -e
+          find corpus-health -type f -print0 |
+            xargs -0 -r -n 64 ./build-asan/tests/fuzz/fuzz-health-standalone \
+              > /dev/null
+          find corpus-api -type f -print0 |
+            xargs -0 -r -n 64 ./build-asan/tests/fuzz/fuzz-api-standalone \
+              > /dev/null
+
+      # Only reached when nothing above crashed, so this is the corpus of a
+      # clean run: worth keeping, as the next run starts from it rather than
+      # from nothing.
+      - name: Upload the corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus
+          path: |
+            corpus-health/
+            corpus-api/
+          if-no-files-found: warn
+
+      # Anything libFuzzer wrote out - a crash, a timeout, an out-of-memory -
+      # is the input needed to reproduce it, and the step above has already
+      # failed the job by then.
+      - name: Upload the artifacts of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
+
   coverage:
     name: Linux / gcc / coverage
     runs-on: ubuntu-latest

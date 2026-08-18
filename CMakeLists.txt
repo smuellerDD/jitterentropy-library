@@ -106,7 +106,21 @@ if(ENABLE_FUZZING)
             "toolchain instead (-DCMAKE_C_COMPILER=/path/to/llvm/bin/clang).")
     endif()
 
+    # Compile *and* link, as ENABLE_SANITIZERS and ENABLE_COVERAGE above do.
+    # The instrumentation emits calls to __sanitizer_cov_* and a reference to
+    # __sancov_lowest_stack, and something has to define them: libFuzzer does,
+    # but only the two harnesses link it. Every other program here - the
+    # recording tools, tests/gcd, tests/health, the unit tests - is instrumented
+    # just the same and would fail to link with a few hundred undefined
+    # references. On the link line -fsanitize=fuzzer-no-link supplies exactly
+    # those definitions and no main(), which is what the -no-link spelling is
+    # for.
+    #
+    # This went unnoticed while the option was only ever used together with
+    # ENABLE_SANITIZERS, whose runtime defines the same symbols and so covered
+    # for it.
     add_compile_options(-fsanitize=fuzzer-no-link)
+    add_link_options(-fsanitize=fuzzer-no-link)
 endif()
 
 # add_*_options() as with ENABLE_SANITIZERS, to reach the test programs too.
