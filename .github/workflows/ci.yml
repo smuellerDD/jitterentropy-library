@@ -888,6 +888,51 @@ jobs:
           run_tolerated "$bin/jitterentropy-hashtime" \
             1000 2 "$RUNNER_TEMP/hashtime" --force-fips
 
+  thread-sanitizer:
+    name: Linux / ${{ matrix.cc }} / thread sanitizer
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v4
+
+      # A build of its own, not an addition to the sanitizers job: the thread
+      # and the address sanitizer cannot be combined, and a run under one says
+      # nothing about the other.
+      - name: Configure
+        run: |
+          cmake -S . -B build-tsan \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DENABLE_THREAD_SANITIZER=ON
+
+      - name: Build
+        run: cmake --build build-tsan -j "$(nproc)"
+
+      # The whole suite rather than unit-concurrency alone: most of it is
+      # single threaded and costs nothing to run here, and the two programs
+      # that do start the library's own counting thread are the ones the
+      # suppression file is about.
+      #
+      # halt_on_error, so a report fails the test that produced it. Without it
+      # the sanitizer counts the race and the suite still exits zero.
+      - name: Run the suite under the thread sanitizer
+        env:
+          TSAN_OPTIONS: halt_on_error=1:suppressions=${{ github.workspace }}/tests/tsan.supp
+        run: ctest --test-dir build-tsan --output-on-failure -LE unreliable
+
+      # unit-concurrency is the program written for this build, and its threads
+      # race whichever way the scheduler puts them - one clean run says less
+      # than several. Cheap enough to repeat: it is under a second of work.
+      - name: Repeat the concurrency test
+        env:
+          TSAN_OPTIONS: halt_on_error=1:suppressions=${{ github.workspace }}/tests/tsan.supp
+        run: |
+          for i in $(seq 1 10); do
+            ./build-tsan/tests/unit/unit-concurrency > /dev/null
+          done
+
   fuzz:
     name: Linux / clang / fuzzing
     runs-on: ubuntu-latest

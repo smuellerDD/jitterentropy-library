@@ -31,7 +31,7 @@ directories:
 | `unit-fault` | The failure paths, by fault injection: the allocator, `mmap`/`mprotect`/`mlock`, `sysconf`, the CPU affinity query, `getrandom()`, the FIPS indicator and the time source itself are each made to fail so the code behind them runs |
 | `unit-mock` | The mocked time source and `jent_health_insert_timestamp()`: registering a time source, replaying stamps through the health tests, and the collector reallocation that only happens when the startup measurements are bad |
 | `unit-notime` | The replaceable timer-less back end: registering an implementation, the guards on an incomplete one, and the thread backend when no thread can be created |
-| `unit-concurrency` | Several instances at once: the whole life cycle - `jent_entropy_init_ex()`, collector allocation, generation, `jent_status()`/`jent_uuid()` and the free - run in parallel threads, checking that the process-wide startup verdict is the same for every thread and that no two instances share their output or their identity |
+| `unit-concurrency` | Several instances at once: the whole life cycle - `jent_entropy_init_ex()`, collector allocation, both `jent_read_entropy*` entry points, `jent_selftest()`, `jent_status()`/`jent_uuid()` and the free - run in parallel threads released together from a starting gate, checking that the process-wide startup verdict is the same for every thread and that no two instances share their output or their identity; and the process-wide FIPS failure callback registration against the compliance-mode collectors that close it, which must close one way only. Written to be run under the thread sanitizer as well, see below |
 | `unit-zeroize` | The wipe on release: that `jent_zfree()` clears what it is given before the memory leaves the library, and that neither the entropy pool nor the SHAKE state nor `struct rand_data` still carries anything when `jent_entropy_collector_free()` releases it. The release call is interposed, as the memory cannot be read after it |
 | `unit-error` | The health failure reporting above the health tests: which `JENT_ERR_*` code each failure bit is reported as, that a permanent failure outranks an intermittent one, that `jent_read_entropy_safe()` recovers from intermittent failures and gives up above `JENT_MAX_OSR`, that the health test state survives the reallocation, and the FIPS failure callback |
 
@@ -301,6 +301,44 @@ permanent cutoff of the RCT with memory in the common configuration, which
 the intermittent APT cutoff from osr 15 on, which has grown into the maximum of
 512 that FIPS 140-2 IG 7.19 resolution #16 caps it at - the same value the
 permanent cutoff already has.
+
+## The thread sanitizer
+
+`unit-concurrency` checks the outcome of running several instances at once.
+What it cannot see on its own is *how* the state those instances share is
+reached - a load that races a store gives the right answer nearly every time,
+and the wrong one on the machine nobody is testing on. Configuring with
+`-DENABLE_THREAD_SANITIZER=ON` adds that:
+
+```
+cmake -S . -B build-tsan -DENABLE_THREAD_SANITIZER=ON && cmake --build build-tsan
+TSAN_OPTIONS=halt_on_error=1:suppressions=$PWD/tests/tsan.supp \
+  ctest --test-dir build-tsan --output-on-failure -LE unreliable
+```
+
+The configure step prints that command, so it need not be remembered. It is a
+build of its own rather than an addition to `ENABLE_SANITIZERS`: the thread and
+the address sanitizer cannot be combined, and a run under one says nothing
+about the other.
+
+`tests/tsan.supp` suppresses one thing, and it is a race the library is built
+around rather than one it has yet to answer: when there is no usable clock the
+Jitter RNG makes one out of a thread that increments a counter, and the
+collector reads that counter without synchronizing against it on purpose - the
+value is meant to depend on how the two threads interleave, so ordering the
+access would order exactly what is being measured. Everything else the library
+shares between threads goes through `arch/jitterentropy-arch-atomic.h` and is
+not suppressed.
+
+The whole suite is run rather than `unit-concurrency` alone, since most of it
+is single threaded and costs nothing here. But `unit-concurrency` is the
+program written for this build, and it is worth repeating: its threads race
+whichever way the scheduler puts them, so one clean run says less than ten.
+
+It was a run like this that found the races those atomics answer - the store to
+the FIPS failure callback among them, which two threads could make at once
+while a third was already reading it - so a report from it is a regression
+rather than a property of the test.
 
 ## Running the tests
 
