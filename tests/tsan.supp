@@ -1,0 +1,26 @@
+# ThreadSanitizer suppressions for the CTest suite of a -DENABLE_THREAD_SANITIZER=ON
+# build. CMake points TSAN_OPTIONS at this file for every registered test, so a
+# plain `ctest --test-dir <build>` uses it without being told to.
+#
+# There is exactly one thing suppressed here, and it is a data race the library
+# is built around rather than one it has yet to answer.
+#
+# When no usable time source exists, the Jitter RNG makes one: a thread that
+# does nothing but increment a counter, which the collector reads as its clock.
+# The increment and the read are deliberately unsynchronized - the counter is
+# the noise source, and its value is meant to depend on how the two threads
+# happen to interleave on this machine at this moment. Ordering the access
+# would order exactly what is being measured, so this is not a race to be
+# fixed; an atomic counter here would be a slower counter measuring less.
+#
+# The same holds for the flag that stops that thread: it is written once by the
+# collector and polled by the counting thread, and the only cost of the poll
+# seeing it late is one more turn of a loop that is already unbounded.
+#
+# Everything else the library shares between threads is a latch or a memo and
+# goes through arch/jitterentropy-arch-atomic.h. Those are not suppressed, and
+# tests/unit/unit-concurrency.c exists to race them: a report from it is a
+# regression, which is the whole point of keeping this list to the two entries
+# below.
+race:jent_notime_sample_timer
+race:jent_notime_unsettick

@@ -25,6 +25,7 @@ option(INTERNAL_TIMER "Compile Jitter with the internal thread based timer" ON)
 option(EXTERNAL_CRYPTO "Compile Jitter and use an external libcrypto, valid options are [AWSLC, OPENSSL, LIBGCRYPT]")
 option(AARCH64_NSTIME_REGISTER "Name of the register that should be used in jent_get_nstime function")
 option(ENABLE_SANITIZERS "Compile with address and undefined behavior sanitizers (only for development)" OFF)
+option(ENABLE_THREAD_SANITIZER "Compile with the thread sanitizer, which is what unit-concurrency is written for (only for development)" OFF)
 option(ENABLE_COVERAGE "Instrument the build for code coverage and add the 'coverage' target (only for development)" OFF)
 option(ENABLE_FUZZING "Instrument the build for libFuzzer and build the fuzzing harness under tests/fuzz (Clang only, for development)" OFF)
 option(MOCK_TIMER "Allow the time source to be replaced by a caller-supplied callback (only for testing - a build with this on produces no entropy of its own)" OFF)
@@ -64,6 +65,49 @@ endif()
 if(ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined)
     add_link_options(-fsanitize=address,undefined)
+endif()
+
+# The thread sanitizer, which is what tests/unit/unit-concurrency.c is written
+# for: without it that program checks the outcome of running several instances
+# at once, and with it also how the state they share is reached. The races the
+# atomics in arch/jitterentropy-arch-atomic.h answer were found this way, so
+# this build is what keeps them answered.
+#
+# A build of its own rather than an addition to ENABLE_SANITIZERS: the address
+# and the thread sanitizer cannot be combined, and a run under one says nothing
+# about the other.
+#
+# -fno-omit-frame-pointer so the reports name the call that raced rather than
+# the frame it was inlined into, and -g so they name a line.
+if(ENABLE_THREAD_SANITIZER)
+    if(ENABLE_SANITIZERS)
+        message(FATAL_ERROR
+            "ENABLE_THREAD_SANITIZER and ENABLE_SANITIZERS are separate "
+            "builds: the thread sanitizer cannot be combined with the address "
+            "sanitizer. Configure two build directories instead.")
+    endif()
+    if(NOT (GCC OR CLANG))
+        message(FATAL_ERROR
+            "ENABLE_THREAD_SANITIZER requires GCC or Clang, have "
+            "${CMAKE_C_COMPILER_ID}")
+    endif()
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=thread)
+
+    # The suite needs one suppression to be readable - the counting thread of
+    # the internal timer is an unsynchronized counter on purpose, and it is
+    # reported by every test that has no usable clock to avoid it. Passed
+    # through the environment rather than set on the tests here: CMake 3.22
+    # scopes test names to the directory that registered them, and these are
+    # registered in five subdirectories.
+    #
+    # halt_on_error so the first report fails the test that produced it rather
+    # than being counted and passed over.
+    message(STATUS
+        "ENABLE_THREAD_SANITIZER: run the suite with\n"
+        "    TSAN_OPTIONS=halt_on_error=1:suppressions="
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tsan.supp \\\n"
+        "      ctest --test-dir <build> --output-on-failure -LE unreliable")
 endif()
 
 # The whole build is instrumented, not only the harness: libFuzzer guides

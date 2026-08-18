@@ -23,9 +23,7 @@
 /*
  * An entropy collector belongs to one user - the library states no locking for
  * an instance and this test claims none - but the library around the instances
- * is shared, and that is what is exercised here: several threads running the
- * whole life cycle at once, jent_entropy_init_ex() through
- * jent_entropy_collector_alloc(), the reads, and the free.
+ * is shared, and that is what is exercised here.
  *
  * What is not per instance is what a race would break:
  *
@@ -34,27 +32,46 @@
  *   - the conditioning known answer tests, the common timer GCD and the
  *     internal timer's forced state are process-wide and are established by
  *     whichever thread arrives first,
+ *   - the FIPS failure callback is a process-wide registration that is closed
+ *     once a collector has bound it, and the closing is one-way,
  *   - the instance identifier and the entropy pool are per collector, so two
  *     collectors built at the same time must not come out sharing either.
  *
- * The threads therefore record their results into a slot of their own and
- * assert nothing themselves: the counters in unit.h are plain variables, and a
- * suite that raced on its own bookkeeping would report anything. Everything is
+ * Two tests, because those are two different races:
+ *
+ *   - the whole life cycle at once - jent_entropy_init_ex() through the
+ *     allocation, the reads and the free - which is where the one-time startup
+ *     state is contended, and
+ *   - the process-wide registrations against the collectors that close them,
+ *     where threads that only register race threads that only allocate.
+ *
+ * Both release their threads from a gate rather than letting them start where
+ * pthread_create() put them. Creating a thread takes long enough that the
+ * first one can be through the one-time initialization before the last one
+ * exists, which would leave the race the test is named for untested on a fast
+ * machine and tested on a slow one - the worst of both. Past the gate they all
+ * reach the library within a scheduling quantum of each other.
+ *
+ * The threads record their results into a slot of their own and assert
+ * nothing themselves: the counters in unit.h are plain variables, and a suite
+ * that raced on its own bookkeeping would report anything. Everything is
  * judged after the join.
  *
  * A machine with one CPU still runs this - the threads interleave rather than
- * overlap, which is a weaker test but not a broken one.
+ * overlap, which is a weaker test but not a broken one. The gate does not
+ * deadlock there either: it is opened by the main thread, which waits only for
+ * threads that have already announced themselves.
  *
  * The suite runs this program without a sanitizer, where it asserts the
  * outcome: the same verdict everywhere, every collector built, every
  * generation delivered, no two instances alike. Built with -fsanitize=thread
  * instead, it also checks how the shared state is reached, and it is expected
  * to report nothing - the one-time state these threads race for is published
- * through arch/jitterentropy-arch-atomic.h:
+ * through arch/jitterentropy-arch-atomic.h. The CMake build has that build:
  *
- *   clang -fsanitize=thread -O0 -I. -Isrc -Iarch -Itests -pthread \
- *         -DJENT_CONF_ENABLE_INTERNAL_TIMER -DJENT_STATIC_LIB \
- *         tests/unit/unit-concurrency.c -o unit-concurrency-tsan
+ *   cmake -S . -B build-tsan -DENABLE_THREAD_SANITIZER=ON
+ *   cmake --build build-tsan
+ *   ctest --test-dir build-tsan -R unit-concurrency --output-on-failure
  *
  * That run is what found the races those atomics answer, so a report from it
  * is a regression and not a property of the test.
@@ -106,9 +123,18 @@
 # include <pthread.h>
 #endif
 
-#define UT_THREADS	4	/* enough to overlap, few enough to stay quick */
+/*
+ * As many threads as the machine has CPUs, within these bounds: below the
+ * lower one there is not enough overlap to be worth arranging, and above the
+ * upper one the run grows without the contention growing with it - every
+ * thread past the CPU count waits rather than races.
+ */
+#define UT_MIN_THREADS	4
+#define UT_MAX_THREADS	8
 #define UT_ROUNDS	3	/* life cycles per thread */
 #define UT_BLOCK	32	/* bytes read per generation */
+/* Registration attempts per thread in the second test. */
+#define UT_REGISTRATIONS 16
 
 /*
  * One thread's work and what came of it. Written by that thread alone and read
@@ -118,18 +144,83 @@
 struct ut_worker {
 	unsigned int idx;
 	unsigned int flags;		/* what its collectors are built with */
+	void (*work)(struct ut_worker *w);
 
 	int init_ret;			/* the startup verdict it was given */
 	int init_differed;		/* a later round was told something else */
+	int selftest_ret;		/* the conditioning self test verdict */
 	int allocs;			/* collectors it built */
 	int reads;			/* generations that delivered */
 	int read_err;			/* the first read that did not */
 	int status_err;			/* a status or UUID call that failed */
+	int misc_err;			/* a call that answered outside contract */
+
+	/* The second test: what the process-wide registration answered. */
+	int registrations;		/* attempts it made */
+	int reg_blocked;		/* attempts refused with -EAGAIN */
+	int reg_reopened;		/* a refusal followed by an acceptance */
+
 	char uuid[JENT_UUID_STRLEN];	/* the identity of its last collector */
 	unsigned char block[UT_BLOCK];	/* the first block it generated */
 };
 
-static void ut_work(struct ut_worker *w)
+/*
+ * The starting gate. Every thread announces itself and then spins until the
+ * main thread opens it, which it does once every thread that was created has
+ * announced itself. Load and store through the library's own atomics: this is
+ * the one piece of state the test itself shares between threads, and a test
+ * for data races may not introduce one.
+ */
+static int ut_gate;
+static int ut_ready[UT_MAX_THREADS];
+
+static void ut_gate_reset(void)
+{
+	unsigned int i;
+
+	jent_atomic_store_int(&ut_gate, 0);
+	for (i = 0; i < UT_MAX_THREADS; i++)
+		jent_atomic_store_int(&ut_ready[i], 0);
+}
+
+static void ut_gate_wait(const struct ut_worker *w)
+{
+	jent_atomic_store_int(&ut_ready[w->idx], 1);
+
+	while (!jent_atomic_load_int(&ut_gate))
+		jent_yield();
+}
+
+static void ut_gate_open(unsigned int started)
+{
+	unsigned int i;
+
+	for (i = 0; i < started; i++) {
+		while (!jent_atomic_load_int(&ut_ready[i]))
+			jent_yield();
+	}
+
+	jent_atomic_store_int(&ut_gate, 1);
+}
+
+/*
+ * The calls that take nothing per instance and answer from process-wide state.
+ * Made from every thread on every round, so that they are in flight while the
+ * collectors around them are being built and torn down.
+ */
+static void ut_check_stateless(struct ut_worker *w)
+{
+	int ret;
+
+	if (jent_version() != JENT_VERSION)
+		w->misc_err = 1;
+
+	ret = jent_secure_memory_supported();
+	if (ret != 0 && ret != 1)
+		w->misc_err = 1;
+}
+
+static void ut_work_lifecycle(struct ut_worker *w)
 {
 	unsigned int round;
 
@@ -158,26 +249,67 @@ static void ut_work(struct ut_worker *w)
 		else if (ret != w->init_ret)
 			w->init_differed = 1;
 
+		ut_check_stateless(w);
+
 		ec = jent_entropy_collector_alloc(0, w->flags);
 		if (!ec)
 			continue;
 		w->allocs++;
 
+		/*
+		 * The conditioning known answer tests, bound to this thread's
+		 * instance while the other threads are running theirs. The
+		 * verdict is a property of the build, so it is compared across
+		 * the threads after the join.
+		 */
+		if (!round)
+			w->selftest_ret = jent_selftest(ec);
+		else if (jent_selftest(ec) != w->selftest_ret)
+			w->misc_err = 1;
+
 		for (i = 0; i < 2; i++) {
 			unsigned char buf[UT_BLOCK];
-			ssize_t rc = jent_read_entropy(ec, (char *)buf,
+			ssize_t rc;
+
+			/*
+			 * Both entry points, because they reach the shared
+			 * state differently: jent_read_entropy() only reads
+			 * the startup verdict, while jent_read_entropy_safe()
+			 * re-enters jent_entropy_init_ex() and reallocates
+			 * the collector when a health test fires, which is
+			 * the one-time state being contended all over again
+			 * from a thread that is already generating.
+			 */
+			if (i & 1)
+				rc = jent_read_entropy_safe(&ec, (char *)buf,
+							    sizeof(buf));
+			else
+				rc = jent_read_entropy(ec, (char *)buf,
 						       sizeof(buf));
 
 			if (rc == (ssize_t)sizeof(buf)) {
 				w->reads++;
-				/* The first block of the thread, for the
-				 * distinctness check after the join. */
+				/*
+				 * The first block of the thread, for the
+				 * distinctness check after the join.
+				 */
 				if (w->reads == 1)
 					memcpy(w->block, buf, sizeof(buf));
 			} else if (!w->read_err) {
 				w->read_err = (int)rc;
 			}
+
+			/*
+			 * jent_read_entropy_safe() may have replaced the
+			 * collector, and gives nothing back to free when it
+			 * fails to build the replacement.
+			 */
+			if (!ec)
+				break;
 		}
+
+		if (!ec)
+			continue;
 
 		/*
 		 * The two read-only entry points, on this thread's own
@@ -192,11 +324,95 @@ static void ut_work(struct ut_worker *w)
 	}
 }
 
+/*
+ * The FIPS failure callback the second test registers. It may be called from
+ * any of the threads that are generating, so it touches nothing that is not
+ * written the way the gate is.
+ */
+static int ut_fips_cb_seen;
+
+static void ut_fips_failure(struct rand_data *ec, unsigned int failure)
+{
+	(void)ec;
+	(void)failure;
+
+	jent_atomic_store_int(&ut_fips_cb_seen, 1);
+}
+
+/*
+ * Half the threads do nothing but register, the other half nothing but
+ * allocate in a compliance mode - which is what closes the registration, once
+ * and for the life of the process.
+ *
+ * The registration is refused with -EAGAIN from then on, so which answer a
+ * given attempt gets is a race the caller is meant to be able to lose safely.
+ * What must not happen is the reverse: an attempt accepted after one was
+ * refused would mean the closing is not one-way, and a caller could then
+ * replace the callback of a collector already running in FIPS mode.
+ */
+static void ut_work_registrations(struct ut_worker *w)
+{
+	unsigned int i;
+
+	if (w->idx & 1) {
+		/*
+		 * Fewer rounds than the registering threads make attempts: an
+		 * allocation in a compliance mode is the expensive call in
+		 * this program, and one is already enough to close the
+		 * registration. The rest are there to keep the contention up
+		 * while the other threads keep asking.
+		 */
+		for (i = 0; i < UT_ROUNDS; i++) {
+			struct rand_data *ec =
+				jent_entropy_collector_alloc(0, w->flags);
+			unsigned char buf[UT_BLOCK];
+
+			if (!ec)
+				continue;
+			w->allocs++;
+
+			if (jent_read_entropy(ec, (char *)buf, sizeof(buf)) ==
+			    (ssize_t)sizeof(buf))
+				w->reads++;
+
+			jent_entropy_collector_free(ec);
+		}
+
+		return;
+	}
+
+	for (i = 0; i < UT_REGISTRATIONS; i++) {
+		/*
+		 * Alternating between a callback and none, which is how a
+		 * caller unregisters - both go through the same one-way
+		 * gate and neither may reopen it.
+		 */
+		int ret = jent_set_fips_failure_callback((i & 1) ?
+							 ut_fips_failure : NULL);
+
+		w->registrations++;
+
+		if (ret == -EAGAIN) {
+			w->reg_blocked++;
+		} else if (ret) {
+			w->misc_err = 1;
+		} else if (w->reg_blocked) {
+			w->reg_reopened++;
+		}
+
+		ut_check_stateless(w);
+	}
+}
+
 #ifdef UT_WIN_THREADS
 
 static DWORD WINAPI ut_thread_main(LPVOID arg)
 {
-	ut_work((struct ut_worker *)arg);
+	struct ut_worker *w = (struct ut_worker *)arg;
+
+	ut_gate_wait(w);
+	w->work(w);
+
 	return 0;
 }
 
@@ -204,30 +420,51 @@ static DWORD WINAPI ut_thread_main(LPVOID arg)
 
 static void *ut_thread_main(void *arg)
 {
-	ut_work((struct ut_worker *)arg);
+	struct ut_worker *w = (struct ut_worker *)arg;
+
+	ut_gate_wait(w);
+	w->work(w);
+
 	return NULL;
 }
 
 #endif /* UT_WIN_THREADS */
 
+/* As many as the machine can run at once, within the bounds stated above. */
+static unsigned int ut_threads(void)
+{
+	long ncpu = jent_ncpu();
+
+	if (ncpu < UT_MIN_THREADS)
+		return UT_MIN_THREADS;
+	if (ncpu > UT_MAX_THREADS)
+		return UT_MAX_THREADS;
+
+	return (unsigned int)ncpu;
+}
+
 /*
- * Start them all before joining any: a run that started and joined one thread
- * at a time would be a sequential test with extra steps.
+ * Start them all, release them together, and only then join: a run that
+ * started and joined one thread at a time would be a sequential test with
+ * extra steps, and one that let them start where they were created would race
+ * only on a machine slow enough to create them slowly.
  *
  * Returns the number of threads that ran, which is what the checks are made
  * over - a machine that refuses a thread is not a defect in the library, and
  * the ones that did start still say something.
  */
-static unsigned int ut_run(struct ut_worker *workers)
+static unsigned int ut_run(struct ut_worker *workers, unsigned int nthreads)
 {
 #ifdef UT_WIN_THREADS
-	HANDLE handles[UT_THREADS];
+	HANDLE handles[UT_MAX_THREADS];
 #else
-	pthread_t handles[UT_THREADS];
+	pthread_t handles[UT_MAX_THREADS];
 #endif
 	unsigned int started = 0, i;
 
-	for (i = 0; i < UT_THREADS; i++) {
+	ut_gate_reset();
+
+	for (i = 0; i < nthreads; i++) {
 #ifdef UT_WIN_THREADS
 		handles[started] = CreateThread(NULL, 0, ut_thread_main,
 						&workers[i], 0, NULL);
@@ -241,6 +478,8 @@ static unsigned int ut_run(struct ut_worker *workers)
 		started++;
 	}
 
+	ut_gate_open(started);
+
 	for (i = 0; i < started; i++) {
 #ifdef UT_WIN_THREADS
 		WaitForSingleObject(handles[i], INFINITE);
@@ -253,33 +492,60 @@ static unsigned int ut_run(struct ut_worker *workers)
 	return started;
 }
 
-static void test_concurrent_lifecycle(void)
+/*
+ * One configuration per thread, so that the collectors being built at the same
+ * time differ in the state the library derives per instance - memory size and
+ * hash loop count - rather than all taking the same path through the
+ * allocator. Threads past the end of the table take it from the top again.
+ */
+static unsigned int ut_flags(unsigned int idx)
 {
-	/*
-	 * One configuration per thread, so that the collectors being built at
-	 * the same time differ in the state the library derives per instance -
-	 * memory size and hash loop count - rather than all taking the same
-	 * path through the allocator.
-	 */
-	static const unsigned int flags[UT_THREADS] = {
+	static const unsigned int flags[] = {
 		0,
 		JENT_DISABLE_MEMORY_ACCESS,
-		JENT_HASHLOOP_32,
+		/*
+		 * A hash loop above the default, and only just above it: the
+		 * setting is a multiplier on the conditioning of every single
+		 * time delta, so JENT_HASHLOOP_32 would spend most of this
+		 * program's run in one thread's measurements - two minutes of
+		 * it under a sanitizer - and what is wanted here is only that
+		 * the collectors differ in the state the library derives per
+		 * instance.
+		 */
+		JENT_HASHLOOP_4,
 		JENT_MAX_MEMSIZE_64kB,
 	};
-	struct ut_worker workers[UT_THREADS];
+
+	return flags[idx % JENT_ARRAY_SIZE(flags)];
+}
+
+static void ut_init_workers(struct ut_worker *workers, unsigned int nthreads,
+			    void (*work)(struct ut_worker *),
+			    unsigned int (*flags)(unsigned int))
+{
+	unsigned int i;
+
+	memset(workers, 0, sizeof(*workers) * nthreads);
+	for (i = 0; i < nthreads; i++) {
+		workers[i].idx = i;
+		workers[i].work = work;
+		workers[i].flags = flags(i);
+	}
+}
+
+static void test_concurrent_lifecycle(void)
+{
+	struct ut_worker workers[UT_MAX_THREADS];
+	unsigned int nthreads = ut_threads();
 	unsigned int started, i, j, allocs = 0, reads = 0;
 	unsigned int read_errs = 0, status_errs = 0, init_differed = 0;
+	unsigned int misc_errs = 0;
 
 	jent_ut_group("several instances through their life cycle at once");
 
-	memset(workers, 0, sizeof(workers));
-	for (i = 0; i < UT_THREADS; i++) {
-		workers[i].idx = i;
-		workers[i].flags = flags[i];
-	}
+	ut_init_workers(workers, nthreads, ut_work_lifecycle, ut_flags);
 
-	started = ut_run(workers);
+	started = ut_run(workers, nthreads);
 	if (!started) {
 		JENT_UT_SKIP("the concurrent life cycle",
 			     "no thread could be created");
@@ -304,6 +570,7 @@ static void test_concurrent_lifecycle(void)
 		read_errs += workers[i].read_err ? 1 : 0;
 		status_errs += workers[i].status_err ? 1u : 0u;
 		init_differed += workers[i].init_differed ? 1u : 0u;
+		misc_errs += workers[i].misc_err ? 1u : 0u;
 
 		if (workers[i].read_err)
 			printf("  note: thread %u: a read returned %d\n", i,
@@ -315,6 +582,8 @@ static void test_concurrent_lifecycle(void)
 	JENT_UT_EQ(read_errs, 0u, "no thread was refused a generation");
 	JENT_UT_EQ(status_errs, 0u,
 		   "the status and UUID calls succeed alongside the others");
+	JENT_UT_EQ(misc_errs, 0u,
+		   "the process-wide queries answer the same on every thread");
 
 	if (workers[0].init_ret) {
 		/*
@@ -332,6 +601,15 @@ static void test_concurrent_lifecycle(void)
 	JENT_UT_EQ(allocs, started * UT_ROUNDS,
 		   "every thread built a collector in every round");
 	JENT_UT_EQ(reads, allocs * 2, "and every generation delivered");
+
+	/*
+	 * The conditioning is one implementation shared by every instance, so
+	 * its known answer tests cannot come out differently on two of them.
+	 */
+	for (i = 1; i < started; i++) {
+		JENT_UT_EQ(workers[i].selftest_ret, workers[0].selftest_ret,
+			   "the self test agrees across the instances");
+	}
 
 	/*
 	 * Nothing is shared between two instances that must not be: the
@@ -352,10 +630,89 @@ static void test_concurrent_lifecycle(void)
 	}
 }
 
+/*
+ * The compliance mode is what closes the registration, so the allocating
+ * threads have to ask for it. The registering threads carry it too and never
+ * use it, which costs nothing and keeps the table in step with the indices.
+ */
+static unsigned int ut_fips_flags(unsigned int idx)
+{
+	(void)idx;
+
+	return JENT_FORCE_FIPS;
+}
+
+static void test_concurrent_registrations(void)
+{
+	struct ut_worker workers[UT_MAX_THREADS];
+	unsigned int nthreads = ut_threads();
+	unsigned int started, i, allocs = 0, registrations = 0;
+	unsigned int blocked = 0, reopened = 0, misc_errs = 0;
+
+	jent_ut_group("the process-wide registrations against the collectors");
+
+	ut_init_workers(workers, nthreads, ut_work_registrations,
+			ut_fips_flags);
+
+	started = ut_run(workers, nthreads);
+	if (!started) {
+		JENT_UT_SKIP("the concurrent registration",
+			     "no thread could be created");
+		return;
+	}
+
+	for (i = 0; i < started; i++) {
+		allocs += (unsigned int)workers[i].allocs;
+		registrations += (unsigned int)workers[i].registrations;
+		blocked += (unsigned int)workers[i].reg_blocked;
+		reopened += (unsigned int)workers[i].reg_reopened;
+		misc_errs += workers[i].misc_err ? 1u : 0u;
+	}
+
+	printf("  note: %u threads, %u registrations (%u refused), "
+	       "%u collectors\n", started, registrations, blocked, allocs);
+
+	JENT_UT_EQ(misc_errs, 0u,
+		   "the registration answers only 0 or -EAGAIN");
+
+	/*
+	 * The one that matters: once the registration has been closed it stays
+	 * closed. A thread that was refused and then accepted would have
+	 * replaced the callback under a collector already generating in FIPS
+	 * mode.
+	 */
+	JENT_UT_EQ(reopened, 0u,
+		   "no registration is accepted after one was refused");
+
+	if (!allocs) {
+		/*
+		 * A machine that grants no locked memory builds no
+		 * compliance-mode collector, so nothing ever closed the
+		 * registration and there was nothing to race for.
+		 */
+		JENT_UT_SKIP("the closing of the registration",
+			     "no compliance-mode collector could be built "
+			     "on this machine");
+		return;
+	}
+
+	JENT_UT_TRUE(registrations > 0,
+		     "the registering threads ran alongside them");
+}
+
 int main(void)
 {
 	jent_ut_setup();
 
+	/*
+	 * The registrations first, and the order is the test rather than a
+	 * matter of taste: every jent_entropy_init_ex() closes the callback
+	 * registration for the life of the process, and the life cycle test
+	 * calls it on every thread. Run afterwards, every attempt would be
+	 * refused before the first thread reached it - which asserts the
+	 * one-way property and races nobody for it.
+	 */
+	test_concurrent_registrations();
 	test_concurrent_lifecycle();
 
 	return jent_ut_report("unit-concurrency");
