@@ -94,11 +94,11 @@ static int hextolong(char *p_strmask, uint64_t *p_mask)
 		mask <<= 4;
 
 		if ((*p_strmask >= '0') && (*p_strmask <= '9'))
-			mask |= *p_strmask - '0';
+			mask |= (uint64_t)(*p_strmask - '0');
 		else if ((*p_strmask >= 'A') && (*p_strmask <= 'F'))
-			mask |= *p_strmask - 'A' + 10;
+			mask |= (uint64_t)(*p_strmask - 'A' + 10);
 		else if ((*p_strmask >= 'a') && (*p_strmask <= 'f'))
-			mask |= *p_strmask - 'a' + 10;
+			mask |= (uint64_t)(*p_strmask - 'a' + 10);
 		else
 			return -1;
 
@@ -143,10 +143,10 @@ static char *printbits(uint64_t sample, int value)
 		if (i % 8 == 0)
 			*p_buf-- = ' ';
 
-		if ((sample & 1) ^ value)
+		if ((sample & 1) != (uint64_t)value)
 			*p_buf = '-';
 		else
-			*p_buf = '0' + value;
+			*p_buf = (char)('0' + value);
 		p_buf--;
 		sample >>= 1;
 	}
