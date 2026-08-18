@@ -104,6 +104,7 @@ static void test_sched(void)
 				     "pinning to an out-of-range CPU succeeded");
 #else
 		(void)ncpu;
+		(void)ret;
 #endif
 	}
 #else

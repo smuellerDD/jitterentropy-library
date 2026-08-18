@@ -7,13 +7,21 @@ tests/raw-entropy/results-measurements/*.data
 /.vs
 build*/
 coverage/
+
+# Programs and objects the Makefile fallbacks build in place. The CMake build
+# puts its own outputs under build*/, which is covered above.
+*.o
 tests/gcd/gcd
 tests/health/health
-tests/unit/unit-sha3
-tests/unit/unit-gcd
-tests/unit/unit-arch
-tests/unit/unit-base
-tests/unit/unit-error
-tests/unit/unit-fault
-tests/unit/unit-notime
-tests/unit/unit-mock
+tests/unit/unit-*
+!tests/unit/unit-*.c
+!tests/unit/unit-*.h
+tests/chardev/jitterentropy-chardev-fields
+tests/linking/jitterentropy-linktest
+tests/raw-entropy/extractlsb
+tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+tests/raw-entropy/recording_userspace/jitterentropy-hashtime
+tests/raw-entropy/recording_userspace/jitterentropy-osr
+tests/raw-entropy/recording_userspace/jitterentropy-rng
+tests/raw-entropy/recording_restart_kernelspace/jitterentropy-kernel-foldtime
+tests/raw-entropy/recording_runtime_kernelspace/jitterentropy-kernel-lfsrtime
