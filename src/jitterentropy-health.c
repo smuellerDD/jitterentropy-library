@@ -23,16 +23,23 @@
 #include "jitterentropy-noise.h"
 
 static jent_fips_failure_cb fips_cb = NULL;
+
+/*
+ * Closed once by the initialization and read by every later caller of
+ * jent_set_fips_failure_callback(), from whichever thread. Atomic for the
+ * reason given in arch/jitterentropy-arch-atomic.h: the value a race could
+ * produce is the only one there is, but the access is a data race all the same.
+ */
 static int jent_health_cb_switch_blocked = 0;
 
 void jent_health_cb_block_switch(void)
 {
-	jent_health_cb_switch_blocked = 1;
+	jent_atomic_store_int(&jent_health_cb_switch_blocked, 1);
 }
 
 int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
 {
-	if (jent_health_cb_switch_blocked)
+	if (jent_atomic_load_int(&jent_health_cb_switch_blocked))
 		return -EAGAIN;
 	fips_cb = cb;
 	return 0;

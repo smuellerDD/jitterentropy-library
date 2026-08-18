@@ -25,9 +25,30 @@
 /* The common divisor for all timestamp deltas */
 static uint64_t jent_common_timer_gcd = 0;
 
+/*
+ * The divisor above is established once per process and read by every
+ * collector allocated afterwards, from whichever thread allocates it. It is
+ * 64 bits wide, which not every 32-bit platform can load or store atomically
+ * without a call into libatomic, so it is published through two 32-bit flags
+ * instead (see arch/jitterentropy-arch-atomic.h):
+ *
+ *   - claimed is taken with an exchange, so of several threads analyzing at
+ *     once exactly one writes the value - they measure their own deltas and
+ *     need not arrive at the same divisor, so "they would write the same
+ *     thing" does not hold here, and
+ *   - set is stored with release after that write and loaded with acquire
+ *     before every read, so a reader that is told the divisor is established
+ *     also sees the value that was established.
+ *
+ * A thread that loses the claim carries on with the divisor of the thread that
+ * won it, which is the behaviour a second caller has always had.
+ */
+static int jent_common_timer_gcd_claimed = 0;
+static int jent_common_timer_gcd_set = 0;
+
 static inline int jent_gcd_tested(void)
 {
-	return (jent_common_timer_gcd != 0);
+	return jent_atomic_load_int(&jent_common_timer_gcd_set);
 }
 
 /* A straight forward implementation of the Euclidean algorithm for GCD. */
@@ -122,9 +143,22 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr)
 		goto out;
 	}
 
-	/*  Adjust all deltas by the observed (small) common factor. */
-	if (!jent_gcd_tested())
+	/*
+	 * Adjust all deltas by the observed (small) common factor.
+	 *
+	 * A zero divisor is not established, as it was not while the flag was
+	 * the value itself: every caller of jent_gcd_get() divides by what it
+	 * is given, and the "not established yet" answer is what makes it use
+	 * a divisor of one instead. It takes an all-zero delta history to
+	 * arrive here with one, which the variation check above rejects before
+	 * this point - the guard states the invariant rather than covering a
+	 * reachable case.
+	 */
+	if (running_gcd && !jent_gcd_tested() &&
+	    !jent_atomic_exchange_int(&jent_common_timer_gcd_claimed, 1)) {
 		jent_common_timer_gcd = running_gcd;
+		jent_atomic_store_int(&jent_common_timer_gcd_set, 1);
+	}
 
 out:
 	return ret;

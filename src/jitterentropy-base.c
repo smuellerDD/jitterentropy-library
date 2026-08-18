@@ -614,6 +614,14 @@ unsigned int jent_hashloop_cnt(unsigned int flags)
 	return cnt;
 }
 
+/*
+ * Whether the startup self tests have run in this process. Written by whichever
+ * thread gets there first and read by every allocation afterwards, so it is
+ * reached through the atomic helpers: the store releases the state the tests
+ * established - the timer's common GCD, the configuration switch blocks - and
+ * the load acquires it, so a thread that skips the tests because this is set
+ * also sees what they left behind.
+ */
 static int jent_selftest_run = 0;
 
 static struct rand_data
@@ -650,7 +658,8 @@ static struct rand_data
 		return NULL;
 
 	/* Force the self test to be run */
-	if (!jent_selftest_run && jent_entropy_init_ex(osr, flags))
+	if (!jent_atomic_load_int(&jent_selftest_run) &&
+	    jent_entropy_init_ex(osr, flags))
 		return NULL;
 
 	/*
@@ -1156,7 +1165,7 @@ static inline int jent_entropy_init_common_pre(unsigned int flags)
 
 	ret = jent_gcd_selftest(flags);
 
-	jent_selftest_run = 1;
+	jent_atomic_store_int(&jent_selftest_run, 1);
 
 	return ret;
 }
@@ -1165,17 +1174,27 @@ static inline int jent_entropy_init_common_post(int ret)
 {
 	/* Unmark the execution of the self tests if they failed. */
 	if (ret)
-		jent_selftest_run = 0;
+		jent_atomic_store_int(&jent_selftest_run, 0);
 
 	return ret;
 }
 
 /*
- * Note: This function and jent_entropy_init_ex() are NOT thread-safe.
- * They modify global state (GCD, self-test flag, notime configuration).
- * The caller must ensure that initialization is performed exactly once
- * before any concurrent use of the library (e.g. via pthread_once or
- * equivalent).
+ * Note: the process-wide state this function and jent_entropy_init_ex()
+ * establish - the self test verdict, the common timer GCD, whether the
+ * internal timer had to be forced - is written and read through
+ * arch/jitterentropy-arch-atomic.h, so several threads may run them at once:
+ * each establishes the same state, and a thread that is told the state is
+ * established also sees what was established. Running them once before any
+ * concurrent use, e.g. via pthread_once(), remains the cheaper way to get
+ * there, as every call measures the timer afresh.
+ *
+ * What must still happen before any concurrent use is configuration.
+ * jent_entropy_set_notime_cpu(), jent_entropy_switch_notime_impl() and
+ * jent_set_fips_failure_callback() write state that the calls above and the
+ * generation only read; the -EAGAIN they return once an initialization has run
+ * reports that the window has closed, it does not synchronize with a thread
+ * that is already in it.
  */
 JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
