@@ -93,6 +93,13 @@ static void test_ncpu_parse(void)
 		{ "-1\n",		-EINVAL, "a negative CPU number" },
 		{ "3-1\n",		-EINVAL, "a range that runs backwards" },
 		{ "0-\n",		-EINVAL, "a range with no end" },
+		/*
+		 * Parses, but names more CPUs than a signed long can count -
+		 * rejected before the width is added rather than overflowed
+		 * into it.
+		 */
+		{ "0-9223372036854775807\n",
+					-EINVAL, "a range wider than a CPU set" },
 	};
 	size_t i;
 	char path[] = "/tmp/jent-ncpu-XXXXXX";

@@ -191,6 +191,16 @@ static long jent_ncpu_parse_online(const char *p)
 		} else {
 			end = start;
 		}
+		/*
+		 * Bounded before the addition: an "online" list naming a range
+		 * up to LONG_MAX parses without setting errno, and adding its
+		 * width to the running count would overflow a signed long,
+		 * which is undefined. No kernel presents such a list, and no
+		 * CPU above the ceiling the affinity paths grow to could be
+		 * pinned to anyway.
+		 */
+		if (end >= (long)JENT_NCPU_SET_MAX)
+			return -EINVAL;
 		count += end - start + 1;
 		if (*p == ',')
 			p++;
