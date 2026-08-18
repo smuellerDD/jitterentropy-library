@@ -25,3 +25,15 @@ tests/raw-entropy/recording_userspace/jitterentropy-osr
 tests/raw-entropy/recording_userspace/jitterentropy-rng
 tests/raw-entropy/recording_restart_kernelspace/jitterentropy-kernel-foldtime
 tests/raw-entropy/recording_runtime_kernelspace/jitterentropy-kernel-lfsrtime
+
+# The fuzzing harnesses' standalone programs, and any corpus or crash a run
+# left beside them.
+tests/fuzz/fuzz-api-standalone
+tests/fuzz/fuzz-health-standalone
+tests/fuzz/fuzz-api
+tests/fuzz/fuzz-health
+corpus*/
+crash-*
+leak-*
+timeout-*
+slow-unit-*

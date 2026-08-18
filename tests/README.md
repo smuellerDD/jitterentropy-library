@@ -13,7 +13,7 @@ directories:
 * `unit`: Unit tests for the modules in `src/` and the platform backends in
   `arch/`
 
-* `fuzz`: Fuzzing harness for the public API
+* `fuzz`: Fuzzing harnesses for the public API and for the health tests
 
 * `chardev`: Status reporting of the Linux kernel module character device
 
@@ -43,43 +43,90 @@ without the library having been built first.
 Together with `tests/health` and the GCD self test they cover about 96% of the
 library's lines, 90% of its branches and every one of its functions.
 
-## Fuzzing the public API
+## Fuzzing
 
-`tests/fuzz/fuzz-api.c` drives the API of `jitterentropy.h` as a hostile caller
-does: null pointers, lengths of zero and of `SIZE_MAX`, oversampling rates far
-outside the range the library clamps, flag words with every undefined bit set,
-collectors freed twice, calls in an order no documented sequence produces. It
-links the library rather than absorbing it, so what it reaches is the surface an
+There are two harnesses under `tests/fuzz`, and they are built in opposite ways
+on purpose.
+
+`fuzz-api.c` drives the API of `jitterentropy.h` as a hostile caller does: null
+pointers, lengths of zero and of `SIZE_MAX`, oversampling rates far outside the
+range the library clamps, flag words with every undefined bit set, collectors
+freed twice, calls in an order no documented sequence produces. It links the
+library rather than absorbing it, so what it reaches is the surface an
 application reaches. It asserts the contract the header states - no write
 outside the buffer a call was given, a read that delivers the full length or a
 documented negative code, misuse reported rather than acted on - and a failed
 assertion is what the fuzzer records as a crash.
 
-The harness is built twice:
+`fuzz-health.c` drives the SP800-90B health tests over time stamps the fuzzer
+chooses, through `jent_health_insert_timestamp()`. That entry point is
+internal, so this one absorbs `src/jitterentropy-health.c` as `tests/health`
+and the unit tests do. It exists because `fuzz-api` cannot search: every
+operation there allocates a collector or generates from one, so it measures the
+machine's real timer, and a coverage-guided run manages single-digit executions
+per second. Nothing in `fuzz-health` measures anything, and it runs about a
+thousand times faster - inside state machines that have counters, windows,
+cutoff tables indexed by the oversampling rate, and a recovery loop that
+re-enters the generation.
 
-* `fuzz-api-standalone` is built always, needs no particular compiler, and runs
-  a fixed sweep of inputs as part of the CTest suite. Given file arguments it
-  replays them instead, which is how a crash found by the fuzzer is reproduced.
+No verdict on adversarial time stamps is wrong by itself, so what it asserts is
+what the health tests promise whatever they are fed: only defined bits are
+reported and a reported failure is never taken back, every window counter stays
+inside its window, nothing is reported outside FIPS mode, nothing is written
+outside the collector, and the stamp entry point stays in step with the delta
+entry point `jent_stuck()` that the noise source itself uses - which is the
+assumption every replayed raw entropy recording rests on.
 
-* `fuzz-api` is the coverage-guided one and needs Clang with the libFuzzer
-  runtime:
+Each harness is built twice:
+
+* `fuzz-api-standalone` and `fuzz-health-standalone` are built always, need no
+  particular compiler, and run a fixed sweep of inputs as part of the CTest
+  suite. Given file arguments they replay them instead, which is how a crash
+  found by the fuzzer is reproduced.
+
+* `fuzz-api` and `fuzz-health` are the coverage-guided ones and need Clang with
+  the libFuzzer runtime:
 
   ```
-  cmake -S . -B build-fuzz -DENABLE_FUZZING=ON -DENABLE_SANITIZERS=ON
+  cmake -S . -B build-fuzz -DENABLE_FUZZING=ON
   cmake --build build-fuzz
-  ./build-fuzz/tests/fuzz/fuzz-api -max_total_time=300 corpus/
+  ./build-fuzz/tests/fuzz/fuzz-health -max_total_time=300 corpus-health/
+  ./build-fuzz/tests/fuzz/fuzz-api    -max_total_time=300 corpus-api/
   ```
 
   `ENABLE_FUZZING` instruments the whole build, not only the harness, since
-  libFuzzer guides itself by the coverage of the code under test. It is not
+  libFuzzer guides itself by the coverage of the code under test. Neither is
   registered as a test case: a fuzzing run has no end of its own.
 
-Two limits keep a run finite, both capping how much work one call is asked to
-do rather than which arguments reach it: the memory size field of the flags is
-clamped, as a 512 MB entropy pool is mapped and walked per allocation, and
-`JENT_FORCE_INTERNAL_TIMER` is kept away from the startup, whose forcing is
-one-way process-wide state that would put every later input in the fuzzer's
-process on the counting thread.
+Pair it with `-DENABLE_SANITIZERS=ON` for the memory errors a fuzzer is run to
+find - but not in the same run as the search. The sanitizers cost `fuzz-api`
+about a factor of ten in executions per second, which is most of what it has;
+the cheaper order is to build the corpus without them and then replay it under
+them, which the standalone programs do from the command line:
+
+```
+cmake -S . -B build-asan -DENABLE_SANITIZERS=ON && cmake --build build-asan
+./build-asan/tests/fuzz/fuzz-api-standalone corpus-api/*
+```
+
+Three limits keep a run finite. The first two cap how much work one call is
+asked to do rather than which arguments reach it, and both are in the flag word
+`fuzz-api` hands to the allocation:
+
+* the hash loop field is clamped. It multiplies the conditioning done for every
+  single time delta, so `JENT_HASHLOOP_128` makes a call a hundred times more
+  expensive than the default, and left unclamped the search collapses onto
+  inputs that time out - it was measured under one execution per second. Any
+  non-default setting reaches the decoding, which is what is worth reaching.
+
+* the memory size field is clamped, as the pool is allocated and zeroed per
+  collector: the 512 MB the field can ask for is half a gigabyte resident for
+  one allocation, and the four an input may hold at once are past the RSS limit
+  libFuzzer stops the run at. The size does not change how the pool is walked.
+
+* `JENT_FORCE_INTERNAL_TIMER` is kept away from the startup, whose forcing is
+  one-way process-wide state that would put every later input in the fuzzer's
+  process on the counting thread.
 
 ## Replaying time stamps
 

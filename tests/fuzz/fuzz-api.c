@@ -54,12 +54,26 @@
  * harness therefore uses assert() deliberately and must be built with NDEBUG
  * unset; the CMake build below states that.
  *
- * Two limits keep the runs finite. Neither hides a defect - both cap how much
- * work one call is asked to do, not which arguments reach it:
+ * Three limits keep the runs finite. None hides a defect - the first two cap
+ * how much work one call is asked to do, not which arguments reach it:
  *
- *   - the memory size field of the flags is clamped, as a 512 MB entropy pool
- *     is mapped and walked per allocation and every input would time out
- *     before reaching a second call, and
+ *   - the hash loop field of the flags is clamped. It is a multiplier on the
+ *     conditioning performed for every single time delta, so the top setting
+ *     of JENT_HASHLOOP_128 makes an allocation and a read a hundred times
+ *     more expensive than the default - with the highest accepted oversampling
+ *     rate, seconds per call in a plain build and over half a minute under the
+ *     sanitizers. Left unclamped it does not merely slow the fuzzer down, it
+ *     stops it: the search collapses onto inputs that time out, and a
+ *     coverage-guided run measured under one execution per second. What is
+ *     worth reaching is the decoding, and any non-default setting reaches it,
+ *     so the ceiling is placed just above the default.
+ *   - the memory size field of the flags is clamped, as the entropy pool is
+ *     allocated and zeroed per collector: the 512 MB the field can ask for is
+ *     a quarter of a second and half a gigabyte resident for one allocation,
+ *     and the four an input may hold at once are past the RSS limit libFuzzer
+ *     stops the run at. The size does not change how the pool is walked - the
+ *     number of accesses is the same - so nothing but the footprint is given
+ *     up here, and
  *   - JENT_FORCE_INTERNAL_TIMER is masked out of everything that could reach
  *     jent_entropy_init_ex(): forcing the internal timer is one-way
  *     process-wide state, so one input would put every later input in the
@@ -113,6 +127,15 @@
  */
 #define FZ_MAX_MEMSIZE_FIELD	13	/* JENT_MAX_MEMSIZE_4MB */
 
+/*
+ * The hash loop the flags may ask for, folded the same way and for the same
+ * reason - except that this one multiplies the work of every time delta rather
+ * than the cost of one allocation, which is why the ceiling sits one step
+ * above the default rather than anywhere near the JENT_HASHLOOP_128 the field
+ * can express. See the head of the file.
+ */
+#define FZ_MAX_HASHLOOP_FIELD	1	/* JENT_HASHLOOP_2 */
+
 struct fz_state {
 	const uint8_t *data;
 	size_t len;
@@ -152,20 +175,27 @@ static unsigned int fz_osr(struct fz_state *s)
 {
 	uint8_t pick = fz_u8(s);
 
-	switch (pick % 8) {
+	switch (pick % 9) {
 	case 0:
 		return 0;			/* "the default", not a rate */
 	case 1:
-		return 1;
+		return 1;			/* below JENT_MIN_OSR, clamped up */
 	case 2:
-		return 3;			/* the documented default */
+		return 3;			/* JENT_MIN_OSR, the documented default */
 	case 3:
-		return 20;			/* beyond JENT_MAX_OSR */
+		/*
+		 * JENT_MAX_OSR, the highest rate an allocation accepts - and
+		 * the most expensive one, as it is the number of times every
+		 * measurement is repeated.
+		 */
+		return 20;
 	case 4:
-		return UINT_MAX - 1;
+		return 21;			/* one past it, to be refused */
 	case 5:
-		return UINT_MAX;
+		return UINT_MAX - 1;
 	case 6:
+		return UINT_MAX;
+	case 7:
 		return (unsigned int)pick;
 	default:
 		return fz_u32(s);
@@ -181,11 +211,18 @@ static unsigned int fz_flags(struct fz_state *s)
 	unsigned int flags = fz_u32(s);
 	unsigned int memsize = (flags & JENT_MAX_MEMSIZE_MASK) >>
 			       JENT_FLAGS_TO_MEMSIZE_SHIFT;
+	unsigned int hashloop = JENT_FLAGS_TO_HASHLOOP(flags);
 
 	if (memsize > FZ_MAX_MEMSIZE_FIELD) {
 		memsize %= (FZ_MAX_MEMSIZE_FIELD + 1);
 		flags = (flags & ~(unsigned int)JENT_MAX_MEMSIZE_MASK) |
 			(memsize << JENT_FLAGS_TO_MEMSIZE_SHIFT);
+	}
+
+	if (hashloop > FZ_MAX_HASHLOOP_FIELD) {
+		hashloop %= (FZ_MAX_HASHLOOP_FIELD + 1);
+		flags = (flags & ~(unsigned int)JENT_MAX_HASHLOOP_MASK) |
+			JENT_HASHLOOP_TO_FLAGS(hashloop);
 	}
 
 	return flags;
