@@ -172,6 +172,13 @@ static JENT_UT_MAYBE_UNUSED void ze_free(void *ptr)
 # define munmap ze_munmap
 #endif
 #define free ze_free
+/*
+ * The atomic accessors of the process-wide state. Absorbed ahead of
+ * everything else because it depends on nothing else and nearly everything
+ * else depends on it - see arch/jitterentropy-arch-atomic.h.
+ */
+#include "jitterentropy-arch-atomic.c"
+
 #include "jitterentropy-arch-memory.c"
 #undef free
 #ifdef ZE_WINDOWS

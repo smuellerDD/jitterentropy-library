@@ -45,6 +45,13 @@
 #include <errno.h>
 #include <stdlib.h>
 
+/*
+ * The atomic accessors of the process-wide state. Absorbed ahead of
+ * everything else because it depends on nothing else and nearly everything
+ * else depends on it - see arch/jitterentropy-arch-atomic.h.
+ */
+#include "jitterentropy-arch-atomic.c"
+
 #include "jitterentropy-sha3.c"
 #include "jitterentropy-gcd.c"
 #include "jitterentropy-health.c"
