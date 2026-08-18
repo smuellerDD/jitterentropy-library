@@ -76,8 +76,9 @@ int jent_fips_enabled(void)
  * ever fail. The answer was still correct - no file, not in FIPS mode - but the
  * dispatch said nothing about which platforms actually have the concept.
  */
+/* No /proc on a baremetal target, and nothing else there to ask either. */
 #if !defined(LIBGCRYPT) && !defined(AWSLC) && !defined(OPENSSL) && \
-    defined(__linux__)
+    !defined(JENT_BAREMETAL) && defined(__linux__)
 # include <errno.h>
 # include <fcntl.h>
 # include <sys/types.h>

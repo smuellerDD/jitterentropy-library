@@ -264,6 +264,37 @@ extern "C" {
 #endif
 
 /*
+ * A build with no operating system behind it: an EFI application, a bootloader,
+ * a firmware image. The Jitter RNG needs no OS - it reads a counter and hashes
+ * what it measures - but every arch/ backend has to be told, because a
+ * freestanding target is normally compiled by the host's own compiler and so
+ * still announces the host: an EFI application built on Linux with
+ * -ffreestanding defines __linux__ and __unix__ throughout, and without this
+ * the backends would reach for mmap(), mlock(), sysconf(), sched_getaffinity()
+ * and getrandom() on a machine that has none of them.
+ *
+ * -ffreestanding is what says so, and both GCC and Clang report it by setting
+ * __STDC_HOSTED__ to zero, which is what the C standard defines the macro to
+ * mean. Definable directly for a toolchain that does not, or to force the port
+ * on a hosted one.
+ *
+ * The kernels are excluded because they are freestanding as well and have
+ * backends of their own, which they select on their own macros.
+ *
+ * What such a build still expects from its integrator is six functions - the
+ * ones a freestanding C implementation does not provide and the compiler may
+ * emit calls to regardless: memcpy(), memset(), malloc(), free(), strlen() and
+ * snprintf(). tests/efi supplies exactly those, on top of the EFI boot
+ * services, and is what keeps this path building and running.
+ */
+#if !defined(JENT_BAREMETAL) &&						       \
+    !defined(LINUX_KERNEL) && !defined(__KERNEL__) &&			       \
+    !(defined(_KERNEL) && defined(__FreeBSD__)) &&			       \
+    defined(__STDC_HOSTED__) && (__STDC_HOSTED__ == 0)
+# define JENT_BAREMETAL
+#endif
+
+/*
  * Threading back-end for the internal timer.
  */
 #if !defined(JENT_PTHREAD) && !defined(JENT_WIN_THREADS) && \
@@ -286,8 +317,7 @@ extern "C" {
 # define JENT_ARCH_THREAD_LINUX_KERNEL
 #elif defined(_KERNEL) && defined(__FreeBSD__)
 # define JENT_ARCH_THREAD_FREEBSD_KERNEL
-#elif defined(JENT_BAREMETAL) || \
-      (defined(__STDC_HOSTED__) && (__STDC_HOSTED__ == 0))
+#elif defined(JENT_BAREMETAL)
 # define JENT_ARCH_THREAD_BAREMETAL
 #else
 # define JENT_ARCH_THREAD_HOSTED

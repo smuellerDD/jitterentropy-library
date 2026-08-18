@@ -95,6 +95,11 @@
  */
 #ifdef LINUX_KERNEL
 # define JENT_ARCH_MEM_LINUX_KERNEL
+#elif defined(JENT_BAREMETAL)
+/*
+ * Neither backend: there is no kernel here to ask for a locked page, and no
+ * VirtualLock() either. The plain allocator below stands.
+ */
 #elif defined(_MSC_VER) || defined(__MINGW32__)
 # define JENT_ARCH_MEM_WINDOWS
 #else

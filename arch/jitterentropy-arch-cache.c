@@ -105,20 +105,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
+/*
+ * The OS interfaces are skipped on a baremetal target - there is no sysfs to
+ * read and no sysctl to call. The chain does not end there: the generic CPUID
+ * backend further down needs no operating system at all and is exactly what
+ * such a build wants, so the branches are made unreachable rather than the
+ * whole chain being cut short.
+ */
+#if !defined(JENT_BAREMETAL) && (defined(_MSC_VER) || defined(__MINGW32__))
 # include <windows.h>
 # define JENT_ARCH_CACHE_WINDOWS
-#elif defined(__linux__)
+#elif !defined(JENT_BAREMETAL) && defined(__linux__)
 # include <unistd.h>
 # include <fcntl.h>
 # include <errno.h>
 # include <limits.h>
 # include <stdio.h>
 # define JENT_ARCH_CACHE_LINUX
-#elif defined(__APPLE__)
+#elif !defined(JENT_BAREMETAL) && defined(__APPLE__)
 # include <sys/sysctl.h>
 # define JENT_ARCH_CACHE_APPLE
-#elif defined(_AIX)
+#elif !defined(JENT_BAREMETAL) && defined(_AIX)
 # include <sys/systemcfg.h>
 # define JENT_ARCH_CACHE_AIX
 #elif (defined(__x86_64__) || defined(__i386__)) && \
