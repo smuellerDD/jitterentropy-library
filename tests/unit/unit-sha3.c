@@ -197,9 +197,13 @@ static void test_shake256(void)
 	if (i == 17)
 		JENT_UT_FAIL("%s", "the generated block is all zero");
 
+	jent_ut_checks++;
 	for (i = 17; i < sizeof(a); i++) {
-		JENT_UT_EQ(a[i], 0, "nothing is written past the requested length");
-		break;
+		if (a[i]) {
+			JENT_UT_FAIL("something was written past the "
+				     "requested length of 17, at %zu", i);
+			break;
+		}
 	}
 }
 
