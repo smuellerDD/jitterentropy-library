@@ -64,14 +64,14 @@ int main(int argc, char *argv[])
 	for (i = 0; i < ELEM; i++)
 		jent_gcd_add_value(gcd, i * EXP_GCD, i);
 
-	if (jent_gcd_analyze(gcd, ELEM, osr)) {
+	if (jent_gcd_analyze(gcd, ELEM, osr, JENT_GCD_CLOCK_PLATFORM)) {
 		jent_gcd_fini(gcd, ELEM);
 		return 1;
 	}
 
 	jent_gcd_fini(gcd, ELEM);
 
-	if (jent_gcd_get(&val))
+	if (jent_gcd_get(&val, JENT_GCD_CLOCK_PLATFORM))
 		return 2;
 
 	if (val != EXP_GCD)

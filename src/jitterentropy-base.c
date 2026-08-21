@@ -393,6 +393,21 @@ static int jent_health_failure_reset(
 	/* Remember flags value */
 	flags = (*ec)->flags;
 
+	/*
+	 * A compliance mode does not change its noise source underneath the
+	 * caller: pin the clock this instance was validated on, so the startup
+	 * re-run below cannot fall back to the other one - and cannot force
+	 * the internal timer for the whole process while doing so. If the
+	 * pinned clock no longer passes, the reset fails and the caller is
+	 * told. Everywhere else the fallback is unchanged.
+	 */
+	if ((*ec)->is_fips_enabled) {
+		if ((*ec)->enable_notime)
+			flags |= JENT_FORCE_INTERNAL_TIMER;
+		else
+			flags |= JENT_DISABLE_INTERNAL_TIMER;
+	}
+
 	/* generic arbitrary cutoff to prevent running "forever" */
 	if (osr > JENT_MAX_OSR)
 		return -1;
@@ -428,12 +443,10 @@ static int jent_health_failure_reset(
 
 	/*
 	 * Duplicate the state of the health tests to ensure the newly allocated
-	 * state will continue from the current health state.
+	 * state will continue from the current health state - as far as it
+	 * applies to the clock the replacement ended up on.
 	 */
-	jent_apt_duplicate(new_ec, *ec);
-	jent_rct_duplicate(new_ec);
-	jent_lag_duplicate(new_ec, *ec);
-	jent_rct_mem_duplicate(new_ec, *ec);
+	jent_health_duplicate(new_ec, *ec);
 
 	/*
 	 * Carry the instance identifier over so the reallocated collector keeps
@@ -753,16 +766,6 @@ static struct rand_data
 					    jent_health_init_type_ntg1 :
 					    jent_health_init_type_common);
 
-	/* Was jent_entropy_init run (establishing the common GCD)? */
-	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd)) {
-		/*
-		 * It was not. This should probably be an error, but this
-		 * behavior breaks the test code. Set the gcd to a value that
-		 * won't hurt anything.
-		 */
-		entropy_collector->jent_common_timer_gcd = 1;
-	}
-
 	/*
 	 * Use timer-less noise source - note, OSR must be set in
 	 * entropy_collector!
@@ -770,6 +773,27 @@ static struct rand_data
 	if (!(flags & JENT_DISABLE_INTERNAL_TIMER)) {
 		if (jent_notime_enable(entropy_collector, flags))
 			goto err;
+	}
+
+	/*
+	 * The common divisor of the clock this collector reads. Asked after
+	 * the clock is chosen, as the divisor belongs to the clock - and
+	 * jent_notime_enable() above is where the counting thread's own
+	 * startup establishes it.
+	 *
+	 * None established means no startup has ever measured this clock,
+	 * which for an instance that is to generate entropy from it is an
+	 * error: it would be normalizing by a divisor nothing measured, on a
+	 * noise source nothing validated. Only the instances that do the
+	 * measuring run without one - they are what establishes it - and they
+	 * take the deltas as the clock produces them.
+	 */
+	if (jent_gcd_get(&entropy_collector->jent_common_timer_gcd,
+			 entropy_collector->enable_notime)) {
+		if (!(flags & JENT_INT_MEASURE_CLOCK))
+			goto err;
+
+		entropy_collector->jent_common_timer_gcd = 1;
 	}
 
 	return entropy_collector;
@@ -887,8 +911,13 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	/*
 	 * max_mem_set is recorded in jent_entropy_collector_alloc_internal()
 	 * so that it is already valid during the startup health-test resets.
+	 *
+	 * The internal flags are the library's to set, whatever the caller
+	 * passed: this one would let an instance generate from a clock no
+	 * startup measured.
 	 */
-	return _jent_entropy_collector_alloc(osr, flags);
+	return _jent_entropy_collector_alloc(osr,
+					     flags & ~JENT_INT_MEASURE_CLOCK);
 }
 
 #ifdef LINUX_KERNEL
@@ -907,7 +936,9 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
 						   unsigned int flags)
 {
-	return jent_entropy_collector_alloc_internal(osr, flags);
+	return jent_entropy_collector_alloc_internal(osr,
+						     flags |
+						     JENT_INT_MEASURE_CLOCK);
 }
 #endif /* LINUX_KERNEL */
 
@@ -981,7 +1012,9 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	 * are really bad.
 	 */
 	flags |= JENT_FORCE_FIPS;
-	ec = jent_entropy_collector_alloc_internal(osr, flags);
+	ec = jent_entropy_collector_alloc_internal(osr,
+						  flags |
+						  JENT_INT_MEASURE_CLOCK);
 	if (!ec) {
 		ret = EMEM;
 		goto out;
@@ -1091,8 +1124,9 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 		goto out;
 	}
 
+	/* ec->enable_notime rather than the flags: it did the measuring. */
 	ret = jent_gcd_analyze(delta_history, JENT_POWERUP_TESTLOOPCOUNT,
-			       ec->osr);
+			       ec->osr, ec->enable_notime);
 	if (ret)
 		goto out;
 
