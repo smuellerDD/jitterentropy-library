@@ -778,6 +778,37 @@ void jent_rct_duplicate(struct rand_data *new_ec)
 }
 
 /**
+ * Carry the health test state of a collector over to its replacement
+ *
+ * The reallocation must not become a way to clear the tests, so the
+ * replacement starts primed at the intermittent cutoffs.
+ *
+ * The RCT and the RCT with memory carry nothing the old clock produced: the
+ * duplication only primes their counters at a cutoff, and a non-stuck
+ * measurement of the new source clears the priming again, so it can make the
+ * test stricter but never weaker. The APT base and the lag history are delta
+ * values of the old clock, which outside a compliance mode the replacement
+ * need not be reading: carrying them would leave the APT counting repeats of a
+ * symbol the new source does not produce, for a whole window. Those two
+ * therefore start on the new source's own measurements.
+ *
+ * @param[in] new_ec The replacement, already allocated and health-initialized
+ * @param[in] old_ec The collector it replaces
+ */
+void jent_health_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
+{
+	jent_rct_duplicate(new_ec);
+	jent_rct_mem_duplicate(new_ec, old_ec);
+
+	/* A different clock: the two below describe another source. */
+	if (new_ec->enable_notime != old_ec->enable_notime)
+		return;
+
+	jent_apt_duplicate(new_ec, old_ec);
+	jent_lag_duplicate(new_ec, old_ec);
+}
+
+/**
  * Repetition Count Test as defined in SP800-90B section 4.4.1
  *
  * @param[in] ec Reference to entropy collector

@@ -428,6 +428,200 @@ static void test_state_duplication(void)
 	jent_entropy_collector_free(new_ec);
 }
 
+
+/*
+ * The same state when the reallocation changed the clock, which the recovery
+ * does on its own: the startup re-run at the raised OSR may fall back to
+ * forcing the internal timer. The state built from delta values must not
+ * follow to a different source; the state built from counters must.
+ */
+static void test_state_duplication_clock_change(void)
+{
+	struct rand_data *old_ec, *new_ec;
+
+	jent_ut_group("a replacement that reads the other clock");
+
+	old_ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	new_ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	if (!old_ec || !new_ec) {
+		JENT_UT_SKIP("the clock change", "no collector");
+		jent_entropy_collector_free(old_ec);
+		jent_entropy_collector_free(new_ec);
+		return;
+	}
+
+	old_ec->apt_base = 0xc0ffee;
+	old_ec->apt_observations = 42;
+	old_ec->apt_base_set = 1;
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	old_ec->lag_observations = 1234;
+	old_ec->lag_delta_history[0] = 0x1000;
+#else
+	old_ec->last_delta = 0x1000;
+	old_ec->last_delta2 = 0x2000;
+#endif
+
+	/* On one clock, everything is carried over as before. */
+	old_ec->enable_notime = 0;
+	new_ec->enable_notime = 0;
+	new_ec->apt_base = 0;
+	new_ec->apt_observations = 0;
+	new_ec->rct_count = 0;
+	jent_health_duplicate(new_ec, old_ec);
+	JENT_UT_EQ(new_ec->apt_base, 0xc0ffee,
+		   "two collectors on one clock carry the APT base over");
+	JENT_UT_EQ(new_ec->apt_observations, 42, "with the window position");
+	JENT_UT_EQ(new_ec->rct_count, new_ec->rct_cutoff,
+		   "and the RCT primed at its intermittent cutoff");
+
+	/* On the other, the counters still are and the delta values are not. */
+	new_ec->apt_base = 0;
+	new_ec->apt_observations = 0;
+	new_ec->apt_base_set = 0;
+	new_ec->rct_count = 0;
+	new_ec->rct_mem_count = 0;
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	new_ec->lag_observations = 0;
+	new_ec->lag_delta_history[0] = 0;
+#else
+	new_ec->last_delta = 0;
+	new_ec->last_delta2 = 0;
+#endif
+	new_ec->enable_notime = 1;
+
+	jent_health_duplicate(new_ec, old_ec);
+
+	JENT_UT_EQ(new_ec->apt_base, 0,
+		   "a replacement on the other clock takes no APT base");
+	JENT_UT_EQ(new_ec->apt_base_set, 0,
+		   "and takes it from its own first measurement instead");
+	JENT_UT_EQ(new_ec->apt_observations, 0,
+		   "nor the window position of the other source");
+	JENT_UT_EQ(new_ec->rct_count, new_ec->rct_cutoff,
+		   "while the RCT is primed as ever - the priming is a cutoff, "
+		   "not a measurement of the old clock");
+	JENT_UT_EQ(new_ec->rct_mem_count, new_ec->rct_mem_cutoff,
+		   "as is the RCT with memory");
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	JENT_UT_EQ(new_ec->lag_observations, 0,
+		   "the lag predictor starts on its own source");
+	JENT_UT_EQ(new_ec->lag_delta_history[0], 0,
+		   "with none of the other one's history");
+#else
+	JENT_UT_EQ(new_ec->last_delta, 0,
+		   "the stuck test starts on its own source");
+	JENT_UT_EQ(new_ec->last_delta2, 0, "with none of the other one's");
+#endif
+
+	/* Not left claiming a counting thread it never had. */
+	new_ec->enable_notime = 0;
+
+	jent_entropy_collector_free(old_ec);
+	jent_entropy_collector_free(new_ec);
+}
+
+
+/*
+ * A clock nothing has measured has no common divisor, and an instance that
+ * would generate from it is refused rather than given an invented one. Only
+ * the instances that do the measuring - the startup's own collector and the
+ * raw noise recording - run without one, and a caller cannot claim to be one.
+ */
+static void test_alloc_needs_a_measured_clock(void)
+{
+	struct rand_data *ec;
+	uint64_t divisor;
+	int saved_selftest_run;
+
+	jent_ut_group("an instance whose clock nothing has measured");
+
+	if (jent_gcd_get(&divisor, JENT_GCD_CLOCK_PLATFORM)) {
+		JENT_UT_SKIP("the unmeasured clock",
+			     "no divisor was established on this machine");
+		return;
+	}
+
+	/*
+	 * Pinned, so that the allocations below skip the startup - which would
+	 * establish the divisor again and defeat the check.
+	 */
+	saved_selftest_run = jent_atomic_load_int(&jent_selftest_run);
+	jent_atomic_store_int(&jent_selftest_run, 1);
+	jent_atomic_store_int(
+		&jent_common_timer_gcd_set[JENT_GCD_CLOCK_PLATFORM], 0);
+
+	ec = jent_entropy_collector_alloc_internal(JENT_MIN_OSR, 0);
+	JENT_UT_TRUE(ec == NULL, "the allocation is refused");
+	jent_entropy_collector_free(ec);
+
+	ec = jent_entropy_collector_alloc(JENT_MIN_OSR,
+					  JENT_INT_MEASURE_CLOCK);
+	JENT_UT_TRUE(ec == NULL, "and a caller cannot ask to be excused");
+	jent_entropy_collector_free(ec);
+
+	ec = jent_entropy_collector_alloc_internal(JENT_MIN_OSR,
+						   JENT_INT_MEASURE_CLOCK);
+	JENT_UT_TRUE(ec != NULL, "the instance that measures the clock is not");
+	if (ec)
+		JENT_UT_EQ(ec->jent_common_timer_gcd, 1,
+			   "and takes the deltas as the clock produces them");
+	jent_entropy_collector_free(ec);
+
+	jent_atomic_store_int(
+		&jent_common_timer_gcd_set[JENT_GCD_CLOCK_PLATFORM], 1);
+	jent_atomic_store_int(&jent_selftest_run, saved_selftest_run);
+}
+
+/*
+ * And a compliance-mode instance is not moved to the other clock at all.
+ *
+ * Last in this program, and it has to be: it forces the internal timer, which
+ * is one-way and process-wide.
+ */
+static void test_recovery_pins_the_clock(void)
+{
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	struct rand_data *ec, *before;
+
+	jent_ut_group("the recovery of a compliance-mode instance keeps its clock");
+
+	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	if (!ec || ec->enable_notime) {
+		JENT_UT_SKIP("the pinned clock",
+			     "no compliance-mode collector on the platform "
+			     "clock could be built here");
+		jent_entropy_collector_free(ec);
+		return;
+	}
+
+	/* What one caller asking for the internal timer does to the process. */
+	jent_notime_force();
+
+	before = ec;
+	JENT_UT_NE(jent_health_failure_reset(&ec,
+					     jent_entropy_collector_alloc_internal),
+		   0, "the reallocation is refused rather than switching");
+	JENT_UT_TRUE(ec == before,
+		     "and the instance is left as it was");
+	JENT_UT_EQ(ec->enable_notime, 0, "still on the platform clock");
+	jent_entropy_collector_free(ec);
+
+	/* Outside the compliance modes it still moves. */
+	ec = jent_entropy_collector_alloc(0, 0);
+	if (!ec) {
+		JENT_UT_SKIP("the unpinned clock", "no collector");
+		return;
+	}
+	JENT_UT_EQ(ec->enable_notime, 1,
+		   "a collector built after the forcing drives a counting "
+		   "thread");
+	jent_entropy_collector_free(ec);
+#else
+	jent_ut_group("the recovery of a compliance-mode instance keeps its clock");
+	JENT_UT_SKIP("the pinned clock", "the internal timer is not compiled in");
+#endif
+}
+
 static size_t count_occurrences(const char *haystack, const char *needle)
 {
 	size_t n = 0;
@@ -574,8 +768,17 @@ int main(void)
 	test_recovery_gives_up();
 	test_recovery_keeps_caller_memsize();
 	test_state_duplication();
+	test_state_duplication_clock_change();
+	test_alloc_needs_a_measured_clock();
 	test_status_both_arms();
 	test_failure_callback();
+
+	/*
+	 * Last, because it forces the internal timer for the rest of the
+	 * process - every collector allocated afterwards would come back
+	 * driving a counting thread.
+	 */
+	test_recovery_pins_the_clock();
 
 	return jent_ut_report("unit-error");
 }

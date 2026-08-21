@@ -72,7 +72,8 @@ static void test_analyze(void)
 	 */
 	for (i = 0; i < ELEM; i++)
 		deltas[i] = (i & 1) ? 101 : 100;
-	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR), 0,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_PLATFORM), 0,
 		   "a varying history with a GCD of 1 passes");
 
 	/*
@@ -81,7 +82,8 @@ static void test_analyze(void)
 	 */
 	for (i = 0; i < ELEM; i++)
 		deltas[i] = 12345;
-	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR), EMINVARVAR,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_PLATFORM), EMINVARVAR,
 		   "a constant history is rejected");
 
 	/*
@@ -90,13 +92,16 @@ static void test_analyze(void)
 	 */
 	for (i = 0; i < ELEM; i++)
 		deltas[i] = (uint64_t)(i + 1) * (UINT32_MAX / 2);
-	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR), ECOARSETIME,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_PLATFORM), ECOARSETIME,
 		   "a coarse timer granularity is rejected");
 
 	/* No history at all is not an error, it is nothing to analyze. */
-	JENT_UT_EQ(jent_gcd_analyze(NULL, ELEM, JENT_MIN_OSR), 0,
+	JENT_UT_EQ(jent_gcd_analyze(NULL, ELEM, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_PLATFORM), 0,
 		   "a NULL history is tolerated");
-	JENT_UT_EQ(jent_gcd_analyze(deltas, 0, JENT_MIN_OSR), 0,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, 0, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_PLATFORM), 0,
 		   "an empty history is tolerated");
 
 	/*
@@ -106,9 +111,11 @@ static void test_analyze(void)
 	 */
 	for (i = 0; i < ELEM; i++)
 		deltas[i] = (i == ELEM - 1) ? 1001 : 1000;
-	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, 1), EMINVARVAR,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, 1,
+				    JENT_GCD_CLOCK_PLATFORM), EMINVARVAR,
 		   "a barely varying history is rejected at osr 1");
-	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, ELEM), 0,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, ELEM,
+				    JENT_GCD_CLOCK_PLATFORM), 0,
 		   "the same history passes at an osr as large as the sample count");
 
 	jent_gcd_fini(deltas, ELEM);
@@ -117,9 +124,9 @@ static void test_analyze(void)
 }
 
 /*
- * The common GCD is module-global and established once, so these three run in
- * order and before test_analyze(), whose passing cases would establish one as a
- * side effect.
+ * The common GCD is module-global and established once per clock, so these
+ * four run in order and before test_analyze(), whose passing cases would
+ * establish one as a side effect.
  */
 
 /* Nothing has analyzed a timer yet, so there is no GCD to hand out. */
@@ -129,9 +136,12 @@ static void test_gcd_get_unset(void)
 
 	jent_ut_group("jent_gcd_get before any analysis");
 
-	JENT_UT_EQ(jent_gcd_get(&value), 1,
+	JENT_UT_EQ(jent_gcd_get(&value, JENT_GCD_CLOCK_PLATFORM), 1,
 		   "jent_gcd_get reports that no GCD is established");
 	JENT_UT_EQ(value, 0, "and leaves the caller's value alone");
+	JENT_UT_EQ(jent_gcd_get(&value, JENT_GCD_CLOCK_NOTIME), 1,
+		   "for the counting thread as well");
+	JENT_UT_EQ(value, 0, "and leaves the caller's value alone there too");
 }
 
 /* Establishing one through the documented path, and reading it back. */
@@ -150,9 +160,11 @@ static void test_gcd_establish(void)
 
 	for (i = 0; i < ELEM; i++)
 		deltas[i] = (uint64_t)i * 50;
-	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR), 0,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_PLATFORM), 0,
 		   "a history with a GCD of 50 passes");
-	JENT_UT_EQ(jent_gcd_get(&value), 0, "jent_gcd_get now reports a GCD");
+	JENT_UT_EQ(jent_gcd_get(&value, JENT_GCD_CLOCK_PLATFORM), 0,
+		   "jent_gcd_get now reports a GCD");
 	JENT_UT_EQ(value, 50, "and it is the one the history has");
 
 	jent_gcd_fini(deltas, ELEM);
@@ -178,10 +190,52 @@ static void test_gcd_sticky(void)
 
 	for (i = 0; i < ELEM; i++)
 		deltas[i] = (i & 1) ? 101 : 100;
-	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR), 0,
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_PLATFORM), 0,
 		   "a second history with a GCD of 1 passes");
-	JENT_UT_EQ(jent_gcd_get(&value), 0, "a GCD is still reported");
+	JENT_UT_EQ(jent_gcd_get(&value, JENT_GCD_CLOCK_PLATFORM), 0,
+		   "a GCD is still reported");
 	JENT_UT_EQ(value, 50, "and it is still the first one");
+
+	jent_gcd_fini(deltas, ELEM);
+}
+
+/*
+ * The divisor belongs to the clock it was measured from, and the two have
+ * unrelated granularities, so establishing one says nothing about the other.
+ * Runs after the two above, which left the platform clock at 50.
+ */
+static void test_gcd_per_clock(void)
+{
+	uint64_t *deltas = jent_gcd_init(ELEM, 0);
+	uint64_t value = 0;
+	unsigned int i;
+
+	jent_ut_group("each clock keeps a divisor of its own");
+
+	if (!deltas) {
+		JENT_UT_SKIP("jent_gcd_per_clock", "allocation failed");
+		return;
+	}
+
+	JENT_UT_EQ(jent_gcd_get(&value, JENT_GCD_CLOCK_NOTIME), 1,
+		   "the platform clock's divisor is not the counting thread's");
+	JENT_UT_EQ(value, 0, "and nothing is handed out in its place");
+
+	/* Establish one for the counting thread, from its own history. */
+	for (i = 0; i < ELEM; i++)
+		deltas[i] = (uint64_t)i * 7;
+	JENT_UT_EQ(jent_gcd_analyze(deltas, ELEM, JENT_MIN_OSR,
+				    JENT_GCD_CLOCK_NOTIME), 0,
+		   "a counting-thread history with a GCD of 7 passes");
+	JENT_UT_EQ(jent_gcd_get(&value, JENT_GCD_CLOCK_NOTIME), 0,
+		   "the counting thread now has a divisor");
+	JENT_UT_EQ(value, 7, "and it is the one its own history has");
+
+	/* And establishing it did not disturb the other one. */
+	JENT_UT_EQ(jent_gcd_get(&value, JENT_GCD_CLOCK_PLATFORM), 0,
+		   "the platform clock still has its own");
+	JENT_UT_EQ(value, 50, "and it is unchanged");
 
 	jent_gcd_fini(deltas, ELEM);
 }
@@ -233,6 +287,7 @@ int main(void)
 	test_gcd_get_unset();
 	test_gcd_establish();
 	test_gcd_sticky();
+	test_gcd_per_clock();
 	test_analyze();
 	test_selftest();
 

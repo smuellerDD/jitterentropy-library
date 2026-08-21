@@ -27,14 +27,26 @@ extern "C"
 {
 #endif
 
+/*
+ * The clocks a delta history can come from, and the indices of their divisors.
+ * Both exist whether or not the internal timer is compiled in, so the callers
+ * need not be compiled two ways.
+ */
+#define JENT_GCD_CLOCK_PLATFORM	0	/* jent_get_nstime() */
+#define JENT_GCD_CLOCK_NOTIME	1	/* the internal timer's counting thread */
+#define JENT_GCD_CLOCKS		2
+
+/* @param[in] notime The clock measured, as enable_notime records it. */
 JENT_PRIVATE_STATIC
-int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr);
+int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr,
+		     unsigned int notime);
 JENT_PRIVATE_STATIC
 uint64_t *jent_gcd_init(size_t nelem, unsigned int flags);
 JENT_PRIVATE_STATIC
 void jent_gcd_fini(uint64_t *delta_history, size_t nelem);
+/* @param[in] notime The clock whose divisor is wanted. */
 JENT_PRIVATE_STATIC
-int jent_gcd_get(uint64_t *value);
+int jent_gcd_get(uint64_t *value, unsigned int notime);
 JENT_PRIVATE_STATIC
 int jent_gcd_selftest(unsigned int flags);
 

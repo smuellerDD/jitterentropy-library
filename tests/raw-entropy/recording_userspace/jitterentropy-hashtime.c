@@ -251,7 +251,9 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 	 * Use the internal allocation to prevent checking and updating the
 	 * OSR, memory size or hash loop count.
 	 */
-	ec = jent_entropy_collector_alloc_internal(osr, flags);
+	ec = jent_entropy_collector_alloc_internal(osr,
+						  flags |
+						  JENT_INT_MEASURE_CLOCK);
 	if (!ec) {
 		printf("Allocation of the entropy collector failed\n");
 		/*

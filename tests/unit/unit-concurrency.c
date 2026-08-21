@@ -35,19 +35,24 @@
  *   - the FIPS failure callback is a process-wide registration that is closed
  *     once a collector has bound it, and the closing is one-way,
  *   - the instance identifier and the entropy pool are per collector, so two
- *     collectors built at the same time must not come out sharing either.
+ *     collectors built at the same time must not come out sharing either,
+ *   - the clock is per collector as well: one built with the internal timer
+ *     carries a counting thread and a counter of its own.
  *
- * Two tests, because those are two different races:
+ * Three tests, because those are three different races:
  *
  *   - the whole life cycle at once - jent_entropy_init_ex() through the
  *     allocation, the reads and the free - which is where the one-time startup
- *     state is contended, and
+ *     state is contended,
  *   - the process-wide registrations against the collectors that close them,
- *     where threads that only register race threads that only allocate.
+ *     where threads that only register race threads that only allocate, and
+ *   - the counting thread against the platform clock: several collectors
+ *     driving one each, at one OSR, while others read the platform clock at
+ *     another.
  *
- * Both release their threads from a gate rather than letting them start where
- * pthread_create() put them. Creating a thread takes long enough that the
- * first one can be through the one-time initialization before the last one
+ * All of them release their threads from a gate rather than letting them start
+ * where pthread_create() put them. Creating a thread takes long enough that
+ * the first one can be through the one-time initialization before the last one
  * exists, which would leave the race the test is named for untested on a fast
  * machine and tested on a slow one - the worst of both. Past the gate they all
  * reach the library within a scheduling quantum of each other.
@@ -66,15 +71,19 @@
  * outcome: the same verdict everywhere, every collector built, every
  * generation delivered, no two instances alike. Built with -fsanitize=thread
  * instead, it also checks how the shared state is reached, and it is expected
- * to report nothing - the one-time state these threads race for is published
- * through arch/jitterentropy-arch-atomic.h. The CMake build has that build:
+ * to report nothing beyond the two entries of tests/tsan.supp - the one-time
+ * state is published through arch/jitterentropy-arch-atomic.h, and the counter
+ * of an internal timer is unsynchronized on purpose. The CMake build has that
+ * build:
  *
  *   cmake -S . -B build-tsan -DENABLE_THREAD_SANITIZER=ON
  *   cmake --build build-tsan
- *   ctest --test-dir build-tsan -R unit-concurrency --output-on-failure
+ *   TSAN_OPTIONS=halt_on_error=1:suppressions=$PWD/tests/tsan.supp \
+ *     ctest --test-dir build-tsan -R unit-concurrency --output-on-failure
  *
- * That run is what found the races those atomics answer, so a report from it
- * is a regression and not a property of the test.
+ * The suppressions are needed because the third test drives counting threads.
+ * That run is what found the races the atomics answer, so any other report is
+ * a regression and not a property of the test.
  */
 
 #ifdef __linux__
@@ -137,6 +146,27 @@
 #define UT_REGISTRATIONS 16
 
 /*
+ * The third test. Different over sampling rates, so the arms differ in more
+ * than their clock: the OSR is what the startup runs at, what the cutoffs are
+ * looked up with and what the measurements per block come from. Both are at
+ * least JENT_MIN_OSR, the slower arm taking the lower one.
+ */
+#define UT_OSR_NOTIME	3	/* the collectors driving a counting thread */
+#define UT_OSR_TIMER	5	/* the collectors reading the platform clock */
+/*
+ * Life cycles per counting-thread thread. Few: each is a whole counting thread
+ * started, measured through and joined, and the arm is here to have several at
+ * once rather than many in a row.
+ */
+#define UT_NOTIME_ROUNDS 2
+/*
+ * The platform-clock arm reads until the other arm is done, so the two really
+ * overlap. This bounds that wait, and is only reached when no counting-thread
+ * thread was ever started.
+ */
+#define UT_TIMER_MAX_ROUNDS 4096
+
+/*
  * One thread's work and what came of it. Written by that thread alone and read
  * after the join, so no lock is needed - and none is taken, as a lock here
  * would serialize the very overlap the test is for.
@@ -144,6 +174,7 @@
 struct ut_worker {
 	unsigned int idx;
 	unsigned int flags;		/* what its collectors are built with */
+	unsigned int osr;		/* and the over sampling rate it asks for */
 	void (*work)(struct ut_worker *w);
 
 	int init_ret;			/* the startup verdict it was given */
@@ -159,6 +190,14 @@ struct ut_worker {
 	int registrations;		/* attempts it made */
 	int reg_blocked;		/* attempts refused with -EAGAIN */
 	int reg_reopened;		/* a refusal followed by an acceptance */
+
+	/* The third test: which clock its collectors turned out to be on. */
+	struct rand_data *ec;		/* a collector built before the run */
+	int notime_used;		/* collectors that ran off a counting thread */
+	int notime_crossed;		/* ... that were built for the other clock */
+	int ticked;			/* counting threads seen to have counted */
+	unsigned int osr_seen;		/* the OSR its last collector settled on */
+	uint64_t divisor;		/* the common timer divisor it was given */
 
 	char uuid[JENT_UUID_STRLEN];	/* the identity of its last collector */
 	unsigned char block[UT_BLOCK];	/* the first block it generated */
@@ -403,6 +442,150 @@ static void ut_work_registrations(struct ut_worker *w)
 		ut_check_stateless(w);
 	}
 }
+
+
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+
+/*
+ * The third test: the counting thread against the platform clock.
+ *
+ * With the internal timer, a collector's clock is a thread of its own that
+ * increments a counter, all of it per instance. One arm has several of those
+ * running at once; the other reads the platform clock.
+ *
+ * The second arm cannot be arranged after the fact: asking any collector for
+ * the internal timer forces it process-wide and one way, and every collector
+ * built afterwards gets a counting thread whether it asked or not. So its
+ * collectors are built before the run and only read from - which is also why
+ * it uses jent_read_entropy() and not the safe variant, whose reallocation
+ * would build the replacement after the forcing.
+ */
+
+/*
+ * Which arm a thread belongs to. Odd indices drive a counting thread, even
+ * ones the platform clock, so at UT_MIN_THREADS there are two of each.
+ */
+static int ut_notime_arm(unsigned int idx)
+{
+	return !!(idx & 1);
+}
+
+/*
+ * How the platform-clock arm learns that the other one is finished. One flag
+ * per thread rather than a counter: the atomics here are loads and stores, and
+ * a counter read-modify-written by several threads would be a data race of the
+ * kind this program exists to catch.
+ */
+static int ut_notime_done[UT_MAX_THREADS];
+
+static void ut_notime_done_reset(unsigned int nthreads)
+{
+	unsigned int i;
+
+	/* Anything but a counting-thread thread about to run counts as done. */
+	for (i = 0; i < UT_MAX_THREADS; i++)
+		jent_atomic_store_int(&ut_notime_done[i],
+				      (i < nthreads && ut_notime_arm(i)) ? 0 : 1);
+}
+
+static int ut_notime_pending(void)
+{
+	unsigned int i;
+
+	for (i = 0; i < UT_MAX_THREADS; i++) {
+		if (!jent_atomic_load_int(&ut_notime_done[i]))
+			return 1;
+	}
+
+	return 0;
+}
+
+static void ut_notime_read(struct ut_worker *w, struct rand_data *ec)
+{
+	unsigned char buf[UT_BLOCK];
+	ssize_t rc;
+
+	/* Which clock it is on was decided when it was built. */
+	if (ec->enable_notime) {
+		w->notime_used++;
+		if (!(w->flags & JENT_FORCE_INTERNAL_TIMER))
+			w->notime_crossed++;
+	} else if (w->flags & JENT_FORCE_INTERNAL_TIMER) {
+		w->notime_crossed++;
+	}
+
+	/* The rate and the divisor it ended up with, judged after the join. */
+	w->osr_seen = ec->osr;
+	w->divisor = ec->jent_common_timer_gcd;
+
+	if (jent_uuid(ec, w->uuid, sizeof(w->uuid)))
+		w->status_err = 1;
+
+	rc = jent_read_entropy(ec, (char *)buf, sizeof(buf));
+	if (rc == (ssize_t)sizeof(buf)) {
+		w->reads++;
+		if (w->reads == 1)
+			memcpy(w->block, buf, sizeof(buf));
+	} else if (!w->read_err) {
+		w->read_err = (int)rc;
+	}
+
+	/*
+	 * The read joined this instance's counting thread, so the counter is
+	 * safe to look at - and one that moved is the evidence that the clock
+	 * measured really was the thread.
+	 */
+	if (ec->enable_notime && ec->notime_timer)
+		w->ticked++;
+}
+
+static void ut_work_notime(struct ut_worker *w)
+{
+	unsigned int round;
+
+	if (!ut_notime_arm(w->idx)) {
+		/*
+		 * The platform-clock arm: one collector, built before the run,
+		 * read from until the other arm is finished. A fixed round
+		 * count would not do - a read costs a fraction of building a
+		 * counting-thread collector, so this arm would be long done
+		 * before the first counting thread existed.
+		 */
+		for (round = 0; round < UT_TIMER_MAX_ROUNDS && w->ec; round++) {
+			if (round >= UT_ROUNDS && !ut_notime_pending())
+				break;
+
+			ut_notime_read(w, w->ec);
+			ut_check_stateless(w);
+		}
+
+		return;
+	}
+
+	/*
+	 * The counting-thread arm, building its collector here because that is
+	 * the interesting part: it starts a counting thread, runs the startup
+	 * through it and joins it, on every thread of the arm at once.
+	 */
+	for (round = 0; round < UT_NOTIME_ROUNDS; round++) {
+		struct rand_data *ec =
+			jent_entropy_collector_alloc(w->osr, w->flags);
+
+		if (!ec)
+			continue;
+		w->allocs++;
+
+		ut_notime_read(w, ec);
+		ut_check_stateless(w);
+
+		jent_entropy_collector_free(ec);
+	}
+
+	/* Releases the other arm, which reads until every one of these is set. */
+	jent_atomic_store_int(&ut_notime_done[w->idx], 1);
+}
+
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 #ifdef UT_WIN_THREADS
 
@@ -700,6 +883,209 @@ static void test_concurrent_registrations(void)
 		     "the registering threads ran alongside them");
 }
 
+
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+
+/* The clock each arm asks for, the counting-thread one explicitly. */
+static unsigned int ut_notime_flags(unsigned int idx)
+{
+	return ut_notime_arm(idx) ? JENT_FORCE_INTERNAL_TIMER : 0;
+}
+
+static void test_concurrent_notime(void)
+{
+	struct ut_worker workers[UT_MAX_THREADS];
+	unsigned int nthreads = ut_threads();
+	unsigned int started, i, j;
+	unsigned int notime_threads = 0, notime_used = 0, ticked = 0;
+	unsigned int allocs = 0, reads = 0, timer_reads = 0;
+	unsigned int read_errs = 0, status_errs = 0, misc_errs = 0;
+	unsigned int crossed = 0, osr_low = 0, wrong_divisor = 0;
+	uint64_t divisor[2];
+	struct rand_data *probe;
+
+	jent_ut_group("the counting thread against the platform clock");
+
+	if (jent_notime_forced()) {
+		/*
+		 * The platform clock did not pass the startup, so every
+		 * collector here is on the counting thread already and there
+		 * is no second arm. The configuration the timer exists for.
+		 */
+		JENT_UT_SKIP("the two clocks against each other",
+			     "this machine has no usable clock of its own");
+		return;
+	}
+
+	ut_init_workers(workers, nthreads, ut_work_notime, ut_notime_flags);
+	for (i = 0; i < nthreads; i++)
+		workers[i].osr = ut_notime_arm(i) ? UT_OSR_NOTIME :
+						    UT_OSR_TIMER;
+
+	/*
+	 * The platform-clock collectors, built here and not in their threads:
+	 * the forcing below is one-way and process-wide.
+	 */
+	for (i = 0; i < nthreads; i++) {
+		if (ut_notime_arm(i))
+			continue;
+
+		workers[i].ec = jent_entropy_collector_alloc(workers[i].osr,
+							     workers[i].flags);
+		if (!workers[i].ec)
+			continue;
+
+		workers[i].allocs++;
+		JENT_UT_EQ(workers[i].ec->enable_notime, 0,
+			   "a collector built first is on the platform clock");
+	}
+
+	/*
+	 * The probe that says whether this machine can build one at all - the
+	 * counting thread needs a CPU of its own - so that an arm building
+	 * none does not leave the test passing on nothing. It also forces.
+	 */
+	probe = jent_entropy_collector_alloc(UT_OSR_NOTIME,
+					     JENT_FORCE_INTERNAL_TIMER);
+	if (probe) {
+		JENT_UT_EQ(probe->enable_notime, 1,
+			   "a collector asking for the internal timer gets it");
+		jent_entropy_collector_free(probe);
+	}
+
+	/* And the property the arms are built around. */
+	for (i = 0; i < nthreads; i++) {
+		if (!ut_notime_arm(i) && workers[i].ec)
+			JENT_UT_EQ(workers[i].ec->enable_notime, 0,
+				   "and does not move one already built");
+	}
+
+	if (!probe) {
+		for (i = 0; i < nthreads; i++)
+			jent_entropy_collector_free(workers[i].ec);
+
+		JENT_UT_SKIP("the counting-thread arm",
+			     "no collector with an internal timer can be "
+			     "built on this machine");
+		return;
+	}
+
+	ut_notime_done_reset(nthreads);
+	started = ut_run(workers, nthreads);
+
+	for (i = 0; i < nthreads; i++)
+		jent_entropy_collector_free(workers[i].ec);
+
+	if (!started) {
+		JENT_UT_SKIP("the two clocks against each other",
+			     "no thread could be created");
+		return;
+	}
+
+	/* What each clock established, substituting one as the library does. */
+	for (i = 0; i < 2; i++) {
+		if (jent_gcd_get(&divisor[i], i))
+			divisor[i] = 1;
+	}
+
+	/* Counted over the threads that ran, not the ones asked for. */
+	for (i = 0; i < started; i++) {
+		allocs += (unsigned int)workers[i].allocs;
+		reads += (unsigned int)workers[i].reads;
+		notime_used += (unsigned int)workers[i].notime_used;
+		ticked += (unsigned int)workers[i].ticked;
+		crossed += (unsigned int)workers[i].notime_crossed;
+		read_errs += workers[i].read_err ? 1u : 0u;
+		status_errs += workers[i].status_err ? 1u : 0u;
+		misc_errs += workers[i].misc_err ? 1u : 0u;
+
+		if (ut_notime_arm(i))
+			notime_threads++;
+		else
+			timer_reads += (unsigned int)workers[i].reads;
+
+		/* Never below what was asked for - a health failure raises it. */
+		if (workers[i].reads && workers[i].osr_seen < workers[i].osr)
+			osr_low++;
+
+		/*
+		 * And its deltas by the divisor of the clock it read: handed
+		 * the other one's, it divides the jitter away rather than
+		 * measuring conservatively.
+		 */
+		if (workers[i].reads &&
+		    workers[i].divisor != divisor[ut_notime_arm(i)])
+			wrong_divisor++;
+
+		if (workers[i].read_err)
+			printf("  note: thread %u: a read returned %d\n", i,
+			       workers[i].read_err);
+	}
+
+	printf("  note: %u threads, %u with a counting thread at OSR %u, "
+	       "%u on the platform clock at OSR %u\n", started, notime_threads,
+	       UT_OSR_NOTIME, started - notime_threads, UT_OSR_TIMER);
+	printf("  note: %u collectors, %u generations (%u on the platform "
+	       "clock)\n", allocs, reads, timer_reads);
+	printf("  note: common timer divisor %llu for the platform clock, "
+	       "%llu for the counting thread\n",
+	       (unsigned long long)divisor[0], (unsigned long long)divisor[1]);
+
+	JENT_UT_TRUE(notime_threads > 1,
+		     "several collectors drive a counting thread at once");
+	JENT_UT_EQ(allocs, started - notime_threads +
+			   notime_threads * UT_NOTIME_ROUNDS,
+		   "every collector of both arms was built");
+	JENT_UT_EQ(read_errs, 0u, "no generation was refused on either clock");
+	JENT_UT_EQ(status_errs, 0u,
+		   "every collector reported an identity of its own");
+	JENT_UT_EQ(misc_errs, 0u,
+		   "the process-wide queries answer the same on every thread");
+
+	/* The one that matters, whatever the other threads are doing. */
+	JENT_UT_EQ(crossed, 0u,
+		   "every collector ran on the clock it was built with");
+	JENT_UT_EQ(notime_used, notime_threads * UT_NOTIME_ROUNDS,
+		   "the counting-thread arm used a counting thread throughout");
+	JENT_UT_EQ(ticked, notime_used,
+		   "and every one of those threads was seen to count");
+	JENT_UT_TRUE(timer_reads > 0,
+		     "the platform-clock arm generated alongside it");
+	JENT_UT_EQ(osr_low, 0u,
+		   "no instance generated below the OSR it was built for");
+	JENT_UT_EQ(wrong_divisor, 0u,
+		   "and every one divided its deltas by its own clock's "
+		   "divisor");
+
+	/* And the instances stayed apart, across the two clocks as within. */
+	for (i = 0; i < started; i++) {
+		if (!workers[i].reads)
+			continue;
+
+		for (j = i + 1; j < started; j++) {
+			if (!workers[j].reads)
+				continue;
+
+			JENT_UT_TRUE(memcmp(workers[i].block, workers[j].block,
+					    UT_BLOCK) != 0,
+				     "two threads generate different blocks");
+			JENT_UT_TRUE(strcmp(workers[i].uuid,
+					    workers[j].uuid) != 0,
+				     "two collectors carry different UUIDs");
+		}
+	}
+}
+
+#else /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
+static void test_concurrent_notime(void)
+{
+	jent_ut_group("the counting thread against the platform clock");
+	JENT_UT_SKIP("the counting thread", "not compiled in");
+}
+
+#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
+
 int main(void)
 {
 	jent_ut_setup();
@@ -714,6 +1100,14 @@ int main(void)
 	 */
 	test_concurrent_registrations();
 	test_concurrent_lifecycle();
+
+	/*
+	 * And the internal timer last, for the same kind of reason: the first
+	 * collector that asks for it forces it for the life of the process,
+	 * and every collector the tests above build would then drive a
+	 * counting thread instead of reading the platform clock.
+	 */
+	test_concurrent_notime();
 
 	return jent_ut_report("unit-concurrency");
 }

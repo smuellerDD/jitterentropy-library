@@ -187,6 +187,20 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 #endif /* LINUX_KERNEL */
 
 /*
+ * An instance that measures a clock rather than generating entropy from it:
+ * the startup's own collector, and the raw noise recording. Both want the
+ * deltas as the clock produces them, and the first of them is what
+ * establishes the common divisor the others are normalized by - so these are
+ * the only instances allowed to run without one.
+ *
+ * Internal, and not in jitterentropy.h: the library sets it on the flags it
+ * passes down, a caller never does. The public allocation clears it. The bit
+ * is above the public flags and below the hash loop field; internal flags
+ * grow downwards from here.
+ */
+#define JENT_INT_MEASURE_CLOCK	(UINT32_C(1) << 23)
+
+/*
  * JENT_-prefixed, and defined outside the LINUX_KERNEL split above, for the
  * same reason JENT_FALLTHROUGH is: the bare names belong to the environment,
  * not to this library.
