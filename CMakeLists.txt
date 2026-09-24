@@ -203,7 +203,51 @@ set(JITTER_PC_CFLAGS "")
 if(WIN32)
     if(MSVC)
         # MSVC deprecates the portable spellings for its own _s variants.
-        list(APPEND JITTER_C_FLAGS  /Od /W4 /D_CRT_SECURE_NO_WARNINGS)
+        list(APPEND JITTER_C_FLAGS  /Od /Ob0 /W4 /D_CRT_SECURE_NO_WARNINGS)
+
+        # The entropy core must not be optimized, and the __OPTIMIZE__ guard
+        # in src/jitterentropy-base.c does not exist on MSVC. Appending /Od is
+        # not enough: the /Ob2 and /Ob1 of Release and RelWithDebInfo outlive
+        # it, and jent_delta(), jent_udiv64() and uint32rotl() were inlined
+        # into the timed loop. So the configuration flags are rewritten, in
+        # directory scope: the library and every test below that compiles the
+        # sources into itself, not a parent project. The /Od /Ob0 in
+        # JITTER_C_FLAGS still come last, which covers add_compile_options().
+        #
+        # /GL is refused: it defers code generation to the linker under /LTCG,
+        # which no flag checked here controls.
+        foreach(_var CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+                     CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS_MINSIZEREL)
+            if("${${_var}}" MATCHES "[-/]GL( |$)")
+                message(FATAL_ERROR
+                    "${_var} carries /GL: whole-program optimization defers "
+                    "code generation to the linker, where the unoptimized "
+                    "build the entropy core requires cannot be enforced. "
+                    "Remove it.")
+            endif()
+            string(REGEX REPLACE "[-/]O[12x]( |$)" "/Od\\1" ${_var} "${${_var}}")
+            string(REGEX REPLACE "[-/]Ob[123]( |$)" "/Ob0\\1" ${_var} "${${_var}}")
+        endforeach()
+        foreach(_var CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS
+                     CMAKE_STATIC_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
+            foreach(_cfg "" _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+                if("${${_var}${_cfg}}" MATCHES "[-/]LTCG")
+                    message(FATAL_ERROR
+                        "${_var}${_cfg} carries /LTCG: link-time code "
+                        "generation is where /GL defers the optimization the "
+                        "entropy core must not have. Remove it.")
+                endif()
+            endforeach()
+        endforeach()
+        foreach(_cfg "" _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+            if(CMAKE_INTERPROCEDURAL_OPTIMIZATION${_cfg})
+                message(FATAL_ERROR
+                    "CMAKE_INTERPROCEDURAL_OPTIMIZATION${_cfg} is on: on MSVC "
+                    "that is /GL and /LTCG, which defer code generation to the "
+                    "linker, where the unoptimized build the entropy core "
+                    "requires cannot be enforced. Turn it off.")
+            endif()
+        endforeach()
     else()
         list(APPEND JITTER_C_FLAGS  -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -Wcast-align
         -Wmissing-field-initializers -Wshadow -Wswitch-enum -Wextra -Wall -pedantic -O0 -fwrapv -Wconversion)
