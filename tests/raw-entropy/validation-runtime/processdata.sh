@@ -1,13 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Process the entropy data
+
+set -euxo pipefail
 
 ############################################################
 # Configuration values                                     #
 ############################################################
 
-ENTROPYDATA_DIR=$1
-RESULTS_DIR=$2
+ENTROPYDATA_DIR=${1:-}
+RESULTS_DIR=${2:-}
 
 if [ -n "$RESULTS_DIR" ]
 then

@@ -1,118 +1,141 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
-# Tool to validaets the test results for various Jitter RNG memory settings
+# Validate the restart test results for various Jitter RNG memory settings
 #
 # This tool is only needed if you have insufficient entropy. See ../README.md
 # for details
 #
+# It analyzes one measurement directory per memory size, recorded for the
+# --max-mem values 1 (1 kB) to 20 (512 MB) of the recording tools with, e.g.:
+#
+#	cd ../recording_userspace
+#	for n in $(seq 1 20); do
+#		OUTDIR=../results-measurements-maxmem$n MAX_MEMORY_SIZE=$n \
+#			./invoke_testing.sh || break
+#	done
+#
+# Missing memory sizes are skipped. The table in ../results-restart-multi lists the memory
+# size in powers of 2, i.e. the --max-mem value + 9.
+#
+
+set -euxo pipefail
 
 RESULT="../results-restart-multi"
 ENT_DIR="../results-measurements"
 RES_DIR="../results-analysis-restart"
 NUM_CPU=1
-USED_CPUS=0
+# "pid:target" of the running jobs, and the configurations that failed
+JOBS=""
+FAILED=""
 
-echo -e "Number of blocks\tBlocksize\tmin entropy" > $RESULT
+# The --max-mem values with a measurement directory
+MAXMEM=""
+for maxmem in $(seq 1 20)
+do
+	if [ -d "$ENT_DIR-maxmem$maxmem" ]
+	then
+		MAXMEM="$MAXMEM $maxmem"
+	fi
+done
 
-trap "make clean" 0 1 2 3 15
+if [ -z "$MAXMEM" ]
+then
+	echo "ERROR: no measurement directory $ENT_DIR-maxmem<1..20> found, see $0 for how to record them" >&2
+	exit 1
+fi
+
+trap "make clean" 0
+trap "exit 1" 1 2 3 15
 make clean
 make
+
+# Wait for every job and note each failed configuration.
+reap() {
+	for job in $JOBS
+	do
+		wait ${job%%:*} || FAILED="$FAILED ${job#*:}"
+	done
+	JOBS=""
+}
 
 crunch_numbers() {
 	local source=$1
 	local target=$2
 
-	if [ $USED_CPUS -eq $NUM_CPU ]
+	set -- $JOBS
+	if [ $# -ge $NUM_CPU ]
 	then
-		# wait for all
-		wait
-		USED_CPUS=0
+		reap
 	fi
 
-	if [ ! -d $target ]
-	then
-		USED_CPUS=$(($USED_CPUS+1))
+	# Every run recomputes: a result of earlier data must not be reported.
+	rm -rf "$target"
+	# processdata.sh leaves extractlsb, built above, alone.
+	ENTROPYDATA_DIR="$source" RESULTS_DIR="$target" ./processdata.sh &
+	JOBS="$JOBS $!:$target"
+}
 
-		( BUILD_EXTRACT="no" ENTROPYDATA_DIR=$source RESULTS_DIR=$target ./processdata.sh ) &
+# min(H_r, H_c) of one configuration into ENT, noting a missing one as failed.
+# Not the tool's min(H_r, H_c, H_I): the fixed H_I would hide all differences.
+result() {
+	ENT=$(awk -F': ' '/^H_r:/ { r = $2 } /^H_c:/ { c = $2 }
+		END { if (r != "" && c != "") printf "%f", (r < c ? r : c) }' \
+		"$1/jent-raw-noise-restart-consolidated.minentropy_FF_8bits.txt" 2>/dev/null) || true
+	if [ -z "$ENT" ]
+	then
+		ENT="-"
+		case " $FAILED " in
+		*" $1 "*) ;;
+		*) FAILED="$FAILED $1" ;;
+		esac
 	fi
 }
 
-linearmem_written=0
 calc() {
 	local crunch=$1
 
-	for memsize in 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 16777216 33554432 67108864 134217728 268435456 536870912
+	if [ "$crunch" -eq 0 ]
+	then
+		printf "Memory size in powers of 2\t%s\n" "min(H_r, H_c)" > "$RESULT"
+	fi
+
+	for maxmem in $MAXMEM
 	do
-		for blocks in 64 128 256 512 1024 2048 4096 8192 16384
-		do
-			for blocksize in 32 64 128 256 512 1024 2048 4096 8192 16384
-			do
-				local target="$RES_DIR-${blocks}blocks-${blocksize}blocksize-${memsize}bytes"
-				local source="$ENT_DIR-${blocks}blocks-${blocksize}blocksize-${memsize}bytes"
+		local target="$RES_DIR-maxmem$maxmem"
+		local source="$ENT_DIR-maxmem$maxmem"
 
-				if [ ! -d "$source" ]
-				then
-					continue
-				fi
-
-				if [ $linearmem_written -eq 0 ]
-				then
-					echo -e "Max memory size\tNumber of blocks\tBlocksize\tmin entropy" > $RESULT
-					linearmem_written=1
-				fi
-
-				if [ $crunch -eq 0 ]
-				then
-					ent=$(grep min $target/jent-raw-noise-restart-consolidated.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
-					echo -e "$memsize\t$blocks\t$blocksize\t$ent" >> $RESULT
-				else
-					crunch_numbers $source $target
-				fi
-			done
-		done
-	done
-}
-
-randmem_written=0
-calc_randmem() {
-	local crunch=$1
-
-	for bits in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
-	do
-		local target="$RES_DIR-random_memaccess-${bits}bits-${memsize}bytes"
-		local source="$ENT_DIR-random_memaccess-${bits}bits-${memsize}bytes"
-
-		if [ ! -d "$source" ]
+		if [ "$crunch" -eq 0 ]
 		then
-			continue
-		fi
-
-		if [ $randmem_written -eq 0 ]
-		then
-			echo -e "Number of bits\tmin entropy" > $RESULT
-			randmem_written=1
-		fi
-
-		if [ $crunch -eq 0 ]
-		then
-			ent=$(grep min $target/jent-raw-noise-restart-consolidated.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
-			echo -e "$bits\t$ent" >> $RESULT
+			result "$target"
+			printf "%s\t%s\n" "$((maxmem + 9))" "$ENT" >> "$RESULT"
 		else
-			crunch_numbers $source $target
+			crunch_numbers "$source" "$target"
 		fi
 	done
 }
 
-if [ -f /proc/cpuinfo ]
+# The online CPUs; /proc/cpuinfo only as a fallback, counting its "processor"
+# lines (not the last one's number: s390x numbers differently, and a model
+# name may contain the word).
+ncpu=$(getconf _NPROCESSORS_ONLN 2>/dev/null) || true
+if [ -z "$ncpu" ] && [ -f /proc/cpuinfo ]
 then
-	NUM_CPU=$(cat /proc/cpuinfo  | grep processor | tail -n1 | cut -d":" -f 2)
-	NUM_CPU=$(($NUM_CPU+1))
+	ncpu=$(grep -c '^processor' /proc/cpuinfo) || true
 fi
-
-calc_randmem 1
-wait
-calc_randmem 0
+case "$ncpu" in
+	''|*[!0-9]*|0) ;;
+	*) NUM_CPU=$ncpu ;;
+esac
 
 calc 1
-wait
+reap
 calc 0
+
+if [ -n "$FAILED" ]
+then
+	for target in $FAILED
+	do
+		echo "ERROR: analysis of $target failed, see its processdata.log" >&2
+	done
+	exit 1
+fi

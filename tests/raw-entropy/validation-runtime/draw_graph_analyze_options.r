@@ -3,7 +3,7 @@
 # 1. create results-runtime-multi with analyze_options.sh:
 #
 # $ cat results-runtime-multi
-# Number of bits  min entropy
+# Memory size in powers of 2  min entropy
 # 10       0.406505
 # 11       0.445082
 # 12       0.402972
@@ -34,6 +34,20 @@ if (length(args) != 1) {
 file <- args[1]
 
 data <- read.csv(file=file, header=TRUE, sep="\t")
+
+# analyze_options.sh records a failed memory size as "-": coerce the column
+# (which read.csv then keeps as text) and plot the sizes that have a result.
+entropy <- suppressWarnings(as.numeric(data[,2]))
+failed <- is.na(entropy)
+if (any(failed)) {
+	warning("no min entropy for memory size(s) ",
+		paste(data[failed,1], collapse=", "), ", not plotted")
+}
+data <- data.frame(size=data[!failed,1], entropy=entropy[!failed])
+
+if (nrow(data) == 0) {
+	stop("no memory size has a min entropy result")
+}
 
 pdf("memory_access_times.pdf", width=8, height=5, pointsize=10)
 

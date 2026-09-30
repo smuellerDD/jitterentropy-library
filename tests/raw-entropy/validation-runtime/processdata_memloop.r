@@ -44,6 +44,8 @@ x <- c(1:length(deterministic))
 coln <- c("90B Entropy", "Min Entropy", "Min Entropy Pairs", "Min Entropy Triplets")
 rown <- c("1kB", "2kB", "4kB", "8kB", "16kB", "32kB", "64kB", "128kB", "256kB", "512kB",
 	  "1MB", "2MB", "4MB", "8MB", "16MB", "32MB", "64MB", "128MB", "256MB", "512MB")
+# A sweep that ended early holds only the smallest sizes
+rown <- rown[x]
 
 # Print out the matrix of data
 rawdata <- matrix(c(deterministic, min_deterministic, min_pairs_deterministic, min_triple_deterministic), ncol=4,

@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -217,7 +218,8 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	fd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL|O_BINARY, 0777);
+	/* The SP800-90B assessment input: not writable by others. */
+	fd = open(argv[2], O_CREAT|O_WRONLY|O_EXCL|O_BINARY, 0644);
 	if (fd < 0) {
 		fprintf(stderr, "File %s cannot be opened for write: %s\n",
 			argv[2], strerror(errno));
@@ -231,20 +233,9 @@ int main(int argc, char *argv[])
 	while (i < count && fgets(buf, sizeof(buf), f)) {
 		uint64_t sample;
 		unsigned char var;
-		char *saveptr = NULL;
-	 	char *res = NULL;
+		char *res = buf;
 
 		i++;
-
-#if defined(_MSC_VER)
-		res = strtok_s(buf, " ", &saveptr);
-#else
-		res = strtok_r(buf, " ", &saveptr);
-#endif
-		if (!res) {
-			fprintf(stderr, "strtok_r/s error (%s)\n", buf);
-			goto err;
-		}
 
 		/*
 		 * Reject lines that are not a plain non-negative decimal
@@ -252,11 +243,26 @@ int main(int argc, char *argv[])
 		 * they would silently parse as 0 (or wrap around) and inject a
 		 * bogus symbol into the SP800-90B input data.
 		 */
+		/*
+		 * strtoull skips leading white space and accepts a sign after
+		 * it: "\t-3" would wrap. The number must start with a digit.
+		 */
+		while (isspace((unsigned char)*res))
+			res++;
 		errno = 0;
 		endptr = NULL;
 		sample = strtoull(res, &endptr, 10);
-		if (errno || endptr == res || *res == '-' ||
-		    (*endptr != '\0' && *endptr != '\n' && *endptr != '\r')) {
+		if (errno || endptr == res || !isdigit((unsigned char)*res)) {
+			fprintf(stderr, "Invalid sample line [%s]\n", res);
+			goto err;
+		}
+		/*
+		 * Only white space, the line end included, may follow the
+		 * number: "12 garbage" is stray text, not the sample 12.
+		 */
+		while (isspace((unsigned char)*endptr))
+			endptr++;
+		if (*endptr != '\0') {
 			fprintf(stderr, "Invalid sample line [%s]\n", res);
 			goto err;
 		}
@@ -282,18 +288,25 @@ int main(int argc, char *argv[])
 		goto err;
 	}
 
+	/* A write error reported only on close (NFS, quota) truncated it. */
+	if (close(fd)) {
+		fd = -1;
+		fprintf(stderr, "write error: %s\n", strerror(errno));
+		goto err;
+	}
+
 	printf("Processed %" PRIu32 " items from %s samples with mask [0x%016llx] significant bits [%d]\n", i, argv[1], (unsigned long long)mask, bitcount(mask));
 
 	printf("Constant 0s in sample: \n%s\n", printbits(unchanged0s, 0));
 	printf("Constant 1s in sample: \n%s\n", printbits(unchanged1s, 1));
 
 	fclose(f);
-	close(fd);
 	return 0;
 
 err:
 	fclose(f);
-	close(fd);
+	if (fd >= 0)
+		close(fd);
 	/*
 	 * Do not leave a partial output file behind: it would be analyzed as
 	 * if it were complete and, due to O_EXCL, block any re-run.

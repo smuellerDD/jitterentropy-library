@@ -5,13 +5,16 @@
 # Load the file created by processdata_hashloop.sh
 args <- commandArgs(trailingOnly = TRUE)
 
-if (length(args) != 2) {
-	stop("Invoke with <heading> <input file>")
+if (length(args) != 3) {
+	stop("Invoke with <heading> <input file> <hash loop factor>")
 }
 
 main <- args[1]
 src <- args[2]
 out <- args[2]
+# Hash loop iterations per time delta for each --hloopcnt: 3 for the NTG.1
+# hash loop alone (JENT_HASH_LOOP_INIT), 1 for the common operation.
+factor <- as.numeric(args[3])
 
 deterministic <- scan(src, sep=",", nlines=1, what=numeric())
 min_deterministic <- scan(src, sep=",", nlines=1, skip=1, what=numeric())
@@ -21,8 +24,7 @@ min_triple_deterministic <- scan(src, sep=",", nlines=1, skip=3, what=numeric())
 x <- c(1:length(deterministic))
 coln <- c("90B Entropy", "Min Entropy", "Min Entropy Pairs", "Min Entropy Triplets")
 
-# update if JENT_HASH_LOOP_INIT is modified
-rown <- c("3", "6", "12", "24", "48", "96", "192", "384")
+rown <- as.character(factor * 2^(0:7))
 
 # Print out the matrix of data
 rawdata <- matrix(c(deterministic, min_deterministic, min_pairs_deterministic, min_triple_deterministic), ncol=4,

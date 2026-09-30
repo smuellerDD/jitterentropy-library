@@ -1,6 +1,6 @@
 # Compile Noise Source as user space application
 
-CC ?= gcc
+CC ?= cc
 override CFLAGS +=-pedantic -Wall -Wextra -O2
 
 program_NAME := extractlsb
@@ -8,9 +8,9 @@ program_NAME := extractlsb
 # validation-restart and therefore lives in the common parent directory.
 program_C_SRCS := ../extractlsb.c
 
-program_LIBRARIES := rt
-
-LDFLAGS += $(foreach library,$(program_LIBRARIES),-l$(library))
+# No libraries: extractlsb uses only stdio and the file API. librt was named
+# here, which exists as a library of its own only on Linux and Solaris, so the
+# link failed on macOS and the BSDs.
 
 .PHONY: all clean distclean
 
