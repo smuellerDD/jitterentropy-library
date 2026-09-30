@@ -186,17 +186,32 @@ extern "C" {
 				 automatically determine the memory size for the
 				 memory access? By default it is only the L1
 				 cache size. */
-#define JENT_FORCE_SECURE_MEM (1<<8) /* Require the memory of the entropy
-				   collector to be secure memory: fail the
-				   allocation when the platform does not grant
-				   it - a memory lock the operating system
+#define JENT_FORCE_SECURE_MEM (1<<8) /* Secure memory - zeroized on free -
+				   is what every build provides. Locking it
+				   into RAM and excluding it from core dumps
+				   are extras some platforms add. This flag
+				   requires those extras for the state of the
+				   entropy collector - all of it but the
+				   memory access region, which is never
+				   locked: fail the allocation when the
+				   platform offers them but does not grant
+				   them - a memory lock the operating system
 				   refuses, or a secure memory arena that the
 				   application did not configure (libgcrypt,
 				   OpenSSL) - instead of continuing with memory
-				   that may be written to swap. Secure memory
-				   is always attempted; this flag only turns a
-				   refusal into an error. It is implied by
-				   JENT_NTG1 and JENT_FORCE_FIPS. */
+				   that may be written to swap. The extras are
+				   always attempted; this flag only turns a
+				   refusal into an error. Without effect where
+				   the platform offers no extras (AWS-LC, no
+				   memory lock). It is implied by JENT_NTG1 and
+				   JENT_FORCE_FIPS, and by the system's FIPS
+				   mode. */
+/*
+ * Bits 9 to 22 are reserved, as are memory size field values above
+ * JENT_MAX_MEMSIZE_MAX and hash loop field values above JENT_MAX_HASHLOOP
+ * (below). Flags using them are refused:
+ * jent_entropy_init_ex returns EPROGERR and jent_entropy_collector_alloc NULL.
+ */
 
 #if defined(LINUX_KERNEL) && !defined(UINT32_C)
 #define UINT32_C(c)	c ## U
