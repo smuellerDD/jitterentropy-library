@@ -600,6 +600,8 @@ struct rand_data
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
 	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
 	unsigned int in_recovery:1;	/* Flag to indicate a recovery op. */
+	unsigned int stuck_prime:2;	/* Deltas the stuck test still takes
+					 * as its reference, not judged */
 
 	/*
 	 * A jent_selftest() run bound to this instance failed. Deliberately

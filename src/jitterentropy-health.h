@@ -85,6 +85,11 @@ JENT_INTERNAL
 void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
 JENT_INTERNAL
 void jent_health_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+/*
+ * The deltas the stuck test takes as its reference from a new noise source of
+ * the startup, rather than judging them against the last source's.
+ */
+#define JENT_STUCK_PRIME	2
 JENT_INTERNAL
 unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
 /*
