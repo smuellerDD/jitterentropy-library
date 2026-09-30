@@ -27,6 +27,10 @@
  #error "The CPU Jitter random number generator must not be compiled with optimizations. See documentation. Use the compiler switch -O0 for compiling the entropy core."
 #endif
 
+/* Every oversampling rate the library accepts needs a cutoff table entry. */
+#define JENT_CUTOFF_TABLE_CHECK(t)					       \
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(t) != JENT_MAX_OSR)
+
 static jent_fnptr fips_cb = NULL;
 
 /*
@@ -108,45 +112,22 @@ static const unsigned int jent_lag_local_cutoff_permanent_lookup[20] =
 
 static void jent_lag_init(struct rand_data *ec, unsigned int osr)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_global_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_local_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_global_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_global_cutoff_permanent_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_local_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_local_cutoff_permanent_lookup);
 
 	/*
 	 * Establish the lag global and local cutoffs based on the presumed
 	 * entropy rate of 1/osr.
 	 */
-	if (osr > JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
-		ec->lag_global_cutoff =
-			jent_lag_global_cutoff_lookup[
-				JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup) - 1];
-		ec->lag_global_cutoff_permanent =
-			jent_lag_global_cutoff_permanent_lookup[
-				JENT_ARRAY_SIZE(jent_lag_global_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr - 1];
-		ec->lag_global_cutoff_permanent =
-			jent_lag_global_cutoff_permanent_lookup[osr - 1];
-	}
+	ec->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr - 1];
+	ec->lag_global_cutoff_permanent =
+		jent_lag_global_cutoff_permanent_lookup[osr - 1];
 
-	if (osr > JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup)) {
-		ec->lag_local_cutoff =
-			jent_lag_local_cutoff_lookup[
-				JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup) - 1];
-		ec->lag_local_cutoff_permanent =
-			jent_lag_local_cutoff_permanent_lookup[
-				JENT_ARRAY_SIZE(jent_lag_local_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr - 1];
-		ec->lag_local_cutoff_permanent =
-			jent_lag_local_cutoff_permanent_lookup[osr - 1];
-	}
+	ec->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr - 1];
+	ec->lag_local_cutoff_permanent =
+		jent_lag_local_cutoff_permanent_lookup[osr - 1];
 }
 
 /**
@@ -363,26 +344,16 @@ static const unsigned int jent_apt_cutoff_permanent_lookup[20]=
 
 static void jent_apt_init(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_permanent_lookup);
 
 	/*
 	 * Establish the apt_cutoff based on the presumed entropy rate of
 	 * 1/osr.
 	 */
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_apt_cutoff_lookup)) {
-		ec->apt_cutoff = jent_apt_cutoff_lookup[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
-		ec->apt_cutoff_permanent = jent_apt_cutoff_permanent_lookup[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->apt_cutoff = jent_apt_cutoff_lookup[ec->osr - 1];
-		ec->apt_cutoff_permanent =
-				jent_apt_cutoff_permanent_lookup[ec->osr - 1];
-	}
+	ec->apt_cutoff = jent_apt_cutoff_lookup[ec->osr - 1];
+	ec->apt_cutoff_permanent =
+			jent_apt_cutoff_permanent_lookup[ec->osr - 1];
 }
 
 /*
@@ -402,23 +373,12 @@ static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1[20]=
 
 static void jent_apt_init_ntg1(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_lookup_ntg1);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_permanent_lookup_ntg1);
 
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1)) {
-		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) - 1];
-		ec->apt_cutoff_permanent =
-			jent_apt_cutoff_permanent_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1) - 1];
-	} else {
-		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[ec->osr - 1];
-		ec->apt_cutoff_permanent =
-			jent_apt_cutoff_permanent_lookup_ntg1[ec->osr - 1];
-	}
+	ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[ec->osr - 1];
+	ec->apt_cutoff_permanent =
+		jent_apt_cutoff_permanent_lookup_ntg1[ec->osr - 1];
 }
 
 static void jent_apt_reinit(struct rand_data *ec,
@@ -546,23 +506,12 @@ static const unsigned short jent_rct_mem_cutoff_permanent_lookup[] =
 
 static void jent_rct_mem_init(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_permanent_lookup);
 
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup)) {
-		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup) - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[ec->osr - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup[ec->osr - 1];
-	}
+	ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[ec->osr - 1];
+	ec->rct_mem_cutoff_permanent =
+		jent_rct_mem_cutoff_permanent_lookup[ec->osr - 1];
 }
 
 /*
@@ -582,24 +531,13 @@ static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1[] =
 	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 static void jent_rct_mem_init_ntg1(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_lookup_ntg1);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_permanent_lookup_ntg1);
 
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1)) {
-		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1) - 1];
-	} else {
-		ec->rct_mem_cutoff =
-			jent_rct_mem_cutoff_lookup_ntg1[ec->osr - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup_ntg1[ec->osr - 1];
-	}
+	ec->rct_mem_cutoff =
+		jent_rct_mem_cutoff_lookup_ntg1[ec->osr - 1];
+	ec->rct_mem_cutoff_permanent =
+		jent_rct_mem_cutoff_permanent_lookup_ntg1[ec->osr - 1];
 }
 
 static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
@@ -942,11 +880,21 @@ unsigned int jent_health_failure(struct rand_data *ec)
  *
  * @param[in] ec Reference to entropy collector
  * @param[in] inittype Startup type
+ *
+ * @return 0 on success, nonzero for an oversampling rate the tables lack
  */
-void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
+int jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 {
 	/* Must start at zero to reach the correct cutoff value */
 	ec->rct_count = 0;
+
+	/*
+	 * The cutoff tables are indexed by osr - 1 and hold JENT_MAX_OSR
+	 * entries: refuse rather than read past one.
+	 */
+	if (!ec->osr || ec->osr > JENT_MAX_OSR)
+		return 1;
+
 	jent_lag_init(ec, ec->osr);
 	switch (inittype) {
 	case jent_health_init_type_ntg1:
@@ -961,4 +909,6 @@ void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 		jent_rct_mem_init(ec);
 		break;
 	}
+
+	return 0;
 }

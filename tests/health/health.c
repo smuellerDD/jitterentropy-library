@@ -483,48 +483,28 @@ static void jent_test_rct_mem(unsigned int osr,
 }
 
 /*
- * The cutoff tables are indexed by the oversampling rate and clamped to their
- * last entry above it. JENT_MAX_OSR currently equals the length of the longest
- * of them, so nothing the public API accepts reaches the clamp of every table
- * - it is what keeps a raised JENT_MAX_OSR, which is a compile-time tunable,
- * from indexing past the end. Reached here by initializing the health tests
- * directly at an oversampling rate above all of them.
+ * The cutoff tables cover exactly osr 1 to JENT_MAX_OSR, and an oversampling
+ * rate outside them must be refused rather than index past their ends.
  */
-static void jent_test_cutoff_clamping(enum jent_health_init_type inittype)
+static void jent_test_osr_bounds(enum jent_health_init_type inittype)
 {
-	struct rand_data ec, max_ec;
-	const unsigned int beyond = JENT_MAX_OSR + 5;
+	struct rand_data ec;
+	int ok;
 
-	jent_test_init(&max_ec, JENT_MAX_OSR, inittype);
-	jent_test_init(&ec, beyond, inittype);
+	memset(&ec, 0, sizeof(ec));
+	ec.is_fips_enabled = 1;
+	ec.osr = JENT_MAX_OSR + 1;
+	ok = jent_health_init(&ec, inittype) != 0;
 
-	printf("  %-34s %6u osr    -> ", "cutoff clamping", beyond);
+	memset(&ec, 0, sizeof(ec));
+	ec.is_fips_enabled = 1;
+	ok = ok && jent_health_init(&ec, inittype) != 0;
 
-	if (ec.rct_mem_cutoff == max_ec.rct_mem_cutoff &&
-	    ec.apt_cutoff == max_ec.apt_cutoff &&
-#ifdef JENT_HEALTH_LAG_PREDICTOR
-	    ec.lag_local_cutoff == max_ec.lag_local_cutoff &&
-	    ec.lag_global_cutoff == max_ec.lag_global_cutoff &&
-	    ec.lag_local_cutoff_permanent == max_ec.lag_local_cutoff_permanent &&
-	    ec.lag_global_cutoff_permanent == max_ec.lag_global_cutoff_permanent &&
-#endif
-	    ec.rct_mem_cutoff_permanent == max_ec.rct_mem_cutoff_permanent &&
-	    ec.apt_cutoff_permanent == max_ec.apt_cutoff_permanent) {
-		printf("every table clamped : passed\n");
-	} else {
-		printf("a table was not clamped : FAILED\n");
+	printf("  %-34s %6s    -> %s\n",
+	       "osr outside the tables refused", "-",
+	       ok ? "passed" : "FAILED");
+	if (!ok)
 		failures++;
-	}
-
-	/*
-	 * The RCT is computed rather than looked up, so it scales instead of
-	 * clamping - stated here so that the difference is deliberate.
-	 */
-	if (ec.rct_cutoff <= max_ec.rct_cutoff) {
-		printf("  %-34s %6s    -> the computed RCT cutoff did not "
-		       "scale : FAILED\n", "RCT cutoff scaling", "-");
-		failures++;
-	}
 }
 
 static void jent_test_run(unsigned int osr,
@@ -554,7 +534,7 @@ static void jent_test_run(unsigned int osr,
 	jent_test_apt(osr, inittype);
 	jent_test_lag(osr, inittype);
 	jent_test_rct_mem(osr, inittype);
-	jent_test_cutoff_clamping(inittype);
+	jent_test_osr_bounds(inittype);
 	printf("\n");
 }
 
