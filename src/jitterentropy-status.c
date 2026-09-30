@@ -22,13 +22,6 @@
 #include "jitterentropy-internal.h"
 
 #ifdef LINUX_KERNEL
-/*
- * Do not rely on transitive includes for the string helpers: snprintf() and
- * strlen()/memcpy() live in <linux/kernel.h> (which pulls in the sprintf
- * declarations across the supported kernel range) and <linux/string.h>. This
- * file is not part of the -O0 entropy core, so the heavier headers are safe
- * here.
- */
 #include <linux/kernel.h>
 #include <linux/string.h>
 #elif defined(_KERNEL) && defined(__FreeBSD__)
@@ -47,25 +40,22 @@
 int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 {
 	size_t used;
+	int written, truncated = 0;
 
 	if (!buf || buflen == 0)
 		return -1;
 
-	/*
-	 * Append to what is already in @buf, stopping once it is full.
-	 *
-	 * The guard is "used + 1 < buflen", not "used < buflen": snprintf()
-	 * always terminates within the size it is given, so strlen(buf) never
-	 * reaches buflen and the latter would be true at every call site
-	 * below, walking the rest of the document one useless snprintf() at a
-	 * time. The output is the same either way - an snprintf() with a size
-	 * of one writes only the NUL that is already there.
-	 */
+	/* Truncation is taken from snprintf(), the length cannot tell it. */
 	#define jent_add_to_status(...)					\
 	{								\
 		used = strlen(buf);					\
-		if (used + 1 < buflen)					\
-			snprintf(buf + used, buflen - used, __VA_ARGS__);\
+		if (used < buflen) {					\
+			written = snprintf(buf + used, buflen - used,	\
+					   __VA_ARGS__);		\
+			if (written < 0 ||				\
+			    (size_t)written >= buflen - used)		\
+				truncated = 1;				\
+		}							\
 	}
 
 	/* needed as plain snprintf to make jent_add_to_status len calculation usable */
@@ -75,23 +65,15 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 			   JENT_MAJVERSION, JENT_MINVERSION, JENT_PATCHLEVEL)
 
 	if (!ec) {
-		/*
-		 * Terminate the version line without the field separator: a
-		 * trailing comma before the closing brace is invalid JSON.
-		 */
+		/* No trailing comma before the closing brace. */
 		jent_add_to_status("\n")
 		goto out;
 	}
 
-	/* stable per-instance identifier */
 	jent_add_to_status(",\n\t\"uuid\": \"%s\",\n", ec->uuid);
 
-	/* number of reinitializations (reallocations on health-test recovery) */
 	jent_add_to_status("\t\"reinitializations\": %u,\n", ec->reinit_count);
 
-	/*
-	 * output accounting over the instance's lifetime
-	 */
 	jent_add_to_status("\t\"output\": {\n");
 	jent_add_to_status("\t\t\"invocations\": %llu,\n",
 			   (unsigned long long)ec->read_invocations);
@@ -143,6 +125,76 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t},\n");
 
 	/*
+	 * Counters, window positions and cutoffs of the health tests. Nothing
+	 * derived from a time delta - the APT base, the stuck test's deltas,
+	 * the lag history - is reported.
+	 */
+	jent_add_to_status("\t\"healthTests\": {\n");
+
+	jent_add_to_status("\t\t\"rct\": {\n");
+	jent_add_to_status("\t\t\t\"count\": %u,\n", ec->rct_count);
+	jent_add_to_status("\t\t\t\"cutoff\": %u,\n",
+			   (unsigned int)ec->rct_cutoff);
+	jent_add_to_status("\t\t\t\"cutoffPermanent\": %u\n",
+			   (unsigned int)ec->rct_cutoff_permanent);
+	jent_add_to_status("\t\t},\n");
+
+	jent_add_to_status("\t\t\"rctMemory\": {\n");
+	jent_add_to_status("\t\t\t\"count\": %u,\n",
+			   (unsigned int)ec->rct_mem_count);
+	jent_add_to_status("\t\t\t\"observations\": %u,\n",
+			   (unsigned int)ec->rct_mem_ctr);
+	jent_add_to_status("\t\t\t\"windowSize\": %u,\n",
+			   (unsigned int)ec->rct_mem_nosr);
+	jent_add_to_status("\t\t\t\"cutoff\": %u,\n",
+			   (unsigned int)ec->rct_mem_cutoff);
+	jent_add_to_status("\t\t\t\"cutoffPermanent\": %u\n",
+			   (unsigned int)ec->rct_mem_cutoff_permanent);
+	jent_add_to_status("\t\t},\n");
+
+	jent_add_to_status("\t\t\"apt\": {\n");
+	jent_add_to_status("\t\t\t\"count\": %u,\n", ec->apt_count);
+	jent_add_to_status("\t\t\t\"observations\": %u,\n",
+			   ec->apt_observations);
+	jent_add_to_status("\t\t\t\"windowSize\": %u,\n",
+			   (unsigned int)JENT_APT_WINDOW_SIZE);
+	jent_add_to_status("\t\t\t\"cutoff\": %u,\n", ec->apt_cutoff);
+	jent_add_to_status("\t\t\t\"cutoffPermanent\": %u\n",
+			   ec->apt_cutoff_permanent);
+	jent_add_to_status("\t\t}");
+
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	jent_add_to_status(",\n");
+
+	jent_add_to_status("\t\t\"lag\": {\n");
+	jent_add_to_status("\t\t\t\"successCount\": %u,\n",
+			   ec->lag_prediction_success_count);
+	jent_add_to_status("\t\t\t\"successRun\": %u,\n",
+			   ec->lag_prediction_success_run);
+	jent_add_to_status("\t\t\t\"observations\": %u,\n",
+			   ec->lag_observations);
+	jent_add_to_status("\t\t\t\"windowSize\": %u,\n",
+			   (unsigned int)JENT_LAG_WINDOW_SIZE);
+	jent_add_to_status("\t\t\t\"globalCutoff\": %u,\n",
+			   ec->lag_global_cutoff);
+	jent_add_to_status("\t\t\t\"globalCutoffPermanent\": %u,\n",
+			   ec->lag_global_cutoff_permanent);
+	jent_add_to_status("\t\t\t\"localCutoff\": %u,\n",
+			   ec->lag_local_cutoff);
+	jent_add_to_status("\t\t\t\"localCutoffPermanent\": %u\n",
+			   ec->lag_local_cutoff_permanent);
+	jent_add_to_status("\t\t}\n");
+#else
+	jent_add_to_status("\n");
+#endif
+
+	jent_add_to_status("\t},\n");
+
+	jent_add_to_status("\t\"selftestFailed\": %s,\n",
+			   jent_atomic_load_int(&ec->selftest_failed) ?
+			   "true" : "false");
+
+	/*
 	 * runtime environment
 	 */
 	jent_add_to_status( "\t\"runtimeEnvironment\": {\n");
@@ -163,11 +215,16 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status( "\t\"configuration\": {\n");
 
 	jent_add_to_status( "\t\t\"osr\": %u,\n", ec->osr);
-	jent_add_to_status( "\t\t\"memoryBlockSizeBytes\": %u,\n", jent_memsize(ec->flags));
+	jent_add_to_status( "\t\t\"osrMin\": %u,\n",
+			   (unsigned int)JENT_MIN_OSR);
+	jent_add_to_status( "\t\t\"osrMax\": %u,\n",
+			   (unsigned int)JENT_MAX_OSR);
+	jent_add_to_status( "\t\t\"memoryBlockSizeBytes\": %u,\n",
+			   ec->memmask ? (unsigned int)(ec->memmask + 1) : 0);
 
 	jent_add_to_status("\t\t\"hashLoopCount\": {\n");
-	jent_add_to_status("\t\t\t\"runtime\": %u,\n", jent_hashloop_cnt(ec->flags));
-	jent_add_to_status("\t\t\t\"initialization\": %u\n", jent_hashloop_cnt(ec->flags) * JENT_HASH_LOOP_INIT);
+	jent_add_to_status("\t\t\t\"runtime\": %u,\n", ec->hashloopcnt);
+	jent_add_to_status("\t\t\t\"initialization\": %u\n", ec->hashloopcnt * JENT_HASH_LOOP_INIT);
 	jent_add_to_status("\t\t},\n");
 
 	jent_add_to_status("\t\t\"memoryLoopCount\": {\n");
@@ -178,12 +235,6 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t\t\"secureMemory\": %s,\n", jent_memory_is_secure(ec->flags) ? "true" : "false");
 	jent_add_to_status("\t\t\"secureMemoryBackend\": \"%s\",\n", jent_memory_backend_name());
 	jent_add_to_status("\t\t\"internalTimer\": %s,\n", ec->enable_notime ? "true" : "false");
-	/*
-	 * Whether this build can have its time source replaced by the caller -
-	 * a property of the build, not of whether a callback is registered
-	 * right now, as a status taken between two replays would otherwise
-	 * claim nothing was ever mocked.
-	 */
 #ifdef JENT_CONF_ENABLE_MOCK_TIMER
 	jent_add_to_status("\t\t\"mockedTimerBuild\": true,\n");
 	jent_add_to_status("\t\t\"mockedTimerActive\": %s,\n",
@@ -215,12 +266,12 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 out:
 	jent_add_to_status("}\n");
 
-	used = strlen(buf);
-	return (used >= buflen - 1) ? -1 : 0;
+	return truncated ? -1 : 0;
 #undef jent_add_to_status
 }
 
-int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen)
+int jent_entropy_collector_uuid(const struct rand_data *ec, char *buf,
+				size_t buflen)
 {
 	size_t len;
 
@@ -233,4 +284,76 @@ int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen)
 
 	memcpy(buf, ec->uuid, len);
 	return 0;
+}
+
+/*
+ * The value of every accessor for a NULL collector, with errno set to EINVAL
+ * where there is one: not in a kernel, and not without a C library, where
+ * errno would be a symbol nothing defines.
+ */
+static unsigned int jent_entropy_collector_null(void)
+{
+#if !defined(LINUX_KERNEL) && !(defined(_KERNEL) && defined(__FreeBSD__)) && \
+    !defined(JENT_BAREMETAL)
+	errno = EINVAL;
+#endif
+	return 0;
+}
+
+unsigned int jent_entropy_collector_osr(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->osr;
+}
+
+unsigned int jent_entropy_collector_flags(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->flags;
+}
+
+/* As jent_status reports it: no region, no mask. */
+size_t jent_entropy_collector_memsize(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->memmask ? (size_t)ec->memmask + 1 : 0;
+}
+
+unsigned int jent_entropy_collector_health_failure(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->health_failure;
+}
+
+unsigned int
+jent_entropy_collector_reinitializations(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->reinit_count;
+}
+
+uint64_t jent_entropy_collector_read_invocations(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->read_invocations;
+}
+
+uint64_t jent_entropy_collector_bytes_output(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->bytes_output;
+}
+
+unsigned int jent_entropy_collector_hashloops(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->hashloopcnt;
 }

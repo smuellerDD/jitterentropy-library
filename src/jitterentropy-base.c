@@ -754,10 +754,8 @@ uint32_t jent_memsize(unsigned int flags)
 		JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX);
 
 	/*
-	 * Flags of collectors instantiated with JENT_DISABLE_MEMORY_ACCESS are
-	 * never normalized by jent_update_memsize(), so an out-of-range
-	 * caller-provided size field can reach this point (e.g. via
-	 * jent_status()). Clamp it: the shift below would otherwise exceed the
+	 * The only caller passes flags normalized by jent_update_memsize(), so
+	 * the clamp is defensive: the shift below would otherwise exceed the
 	 * uint32_t width, which is undefined behavior.
 	 */
 	if (memsize > max_field)

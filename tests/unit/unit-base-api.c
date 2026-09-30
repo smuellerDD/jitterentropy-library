@@ -333,8 +333,9 @@ static void test_status_truncation(void)
 }
 
 /*
- * jent_uuid() hands out the instance identifier the status output carries. Its
- * contract is a buffer of at least JENT_UUID_STRLEN bytes.
+ * jent_entropy_collector_uuid() hands out the instance identifier the status
+ * output carries. Its contract is a buffer of at least JENT_UUID_STRLEN
+ * bytes.
  */
 static void test_uuid_api(void)
 {
@@ -343,14 +344,15 @@ static void test_uuid_api(void)
 	char status[8192];
 	char tiny[JENT_UUID_STRLEN - 1];	/* not `small`, see test_status() */
 
-	jent_ut_group("jent_uuid");
+	jent_ut_group("jent_entropy_collector_uuid");
 
 	if (!ec) {
-		JENT_UT_SKIP("jent_uuid", "no collector could be allocated");
+		JENT_UT_NO_COLLECTOR("jent_entropy_collector_uuid", 0);
 		return;
 	}
 
-	JENT_UT_EQ(jent_uuid(ec, uuid, sizeof(uuid)), 0, "the UUID is produced");
+	JENT_UT_EQ(jent_entropy_collector_uuid(ec, uuid, sizeof(uuid)), 0,
+		   "the UUID is produced");
 	JENT_UT_EQ(strlen(uuid), JENT_UUID_STRLEN - 1,
 		   "and has the canonical length");
 
@@ -359,12 +361,13 @@ static void test_uuid_api(void)
 		JENT_UT_TRUE(strstr(status, uuid) != NULL,
 			     "and is the one jent_status reports");
 
-	JENT_UT_NE(jent_uuid(ec, tiny, sizeof(tiny)), 0,
+	JENT_UT_NE(jent_entropy_collector_uuid(ec, tiny, sizeof(tiny)), 0,
 		   "a buffer that is too small is an error");
-	JENT_UT_NE(jent_uuid(NULL, uuid, sizeof(uuid)), 0,
+	JENT_UT_NE(jent_entropy_collector_uuid(NULL, uuid, sizeof(uuid)), 0,
 		   "no entropy collector is an error");
-	JENT_UT_NE(jent_uuid(ec, NULL, sizeof(uuid)), 0, "no buffer is an error");
-	JENT_UT_NE(jent_uuid(ec, uuid, 0), 0,
+	JENT_UT_NE(jent_entropy_collector_uuid(ec, NULL, sizeof(uuid)), 0,
+		   "no buffer is an error");
+	JENT_UT_NE(jent_entropy_collector_uuid(ec, uuid, 0), 0,
 		   "a zero-length buffer is an error");
 
 	/* Two instances are two identities. */
@@ -373,7 +376,8 @@ static void test_uuid_api(void)
 		char other_uuid[JENT_UUID_STRLEN];
 
 		if (other) {
-			jent_uuid(other, other_uuid, sizeof(other_uuid));
+			jent_entropy_collector_uuid(other, other_uuid,
+						    sizeof(other_uuid));
 			jent_ut_checks++;
 			if (!strcmp(uuid, other_uuid))
 				JENT_UT_FAIL("%s",
