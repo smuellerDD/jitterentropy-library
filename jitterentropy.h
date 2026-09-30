@@ -484,6 +484,25 @@ int jent_selftest(struct rand_data *ec);
 /*
  * Set a callback to run on health failure in FIPS mode.
  * This function will take an action determined by the caller.
+ * Invoked for the caller's instances only, not for the timer tests of
+ * jent_entropy_init*. Once per newly raised failure bit, with every bit then
+ * standing.
+ *
+ * It is invoked wherever the health tests of an instance are checked: during
+ * generation, and also during the startup entropy collection that every
+ * jent_entropy_collector_alloc and every recovery of jent_read_entropy_safe
+ * runs on the new collector - where an intermittent failure makes the startup
+ * replace that collector in turn. The instance it is handed carries the
+ * identifier (jent_entropy_collector_uuid) and output totals of the instance
+ * the caller holds in each of these cases, including a replacement still in
+ * its startup.
+ *
+ * The ec it is handed is valid for the duration of the call only: a failure
+ * may be followed by a reallocation, which frees the pointer moments later,
+ * and during a startup the collector is not yet one the caller holds.
+ * Anything the callback needs afterwards - the identifier from
+ * jent_entropy_collector_uuid(), a status line - has to be read out and
+ * copied while it runs, not stored as a pointer.
  */
 typedef void (*jent_fips_failure_cb)(struct rand_data *ec,
 				     unsigned int health_failure);

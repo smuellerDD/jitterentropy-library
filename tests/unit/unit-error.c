@@ -372,16 +372,21 @@ static void test_state_duplication(void)
 	JENT_UT_EQ(new_ec->apt_observations, 0xdead,
 		   "a window that has not begun carries nothing over");
 
-	/* APT: an observation window in progress is carried over. */
+	/*
+	 * APT: an observation window in progress is carried over, with the
+	 * repetitions it holds - not primed at a cutoff, which would credit
+	 * the window with repetitions it never saw (see jent_apt_duplicate()).
+	 */
 	old_ec->apt_base = 0xc0ffee;
+	old_ec->apt_count = 27;
 	old_ec->apt_observations = 42;
 	old_ec->apt_base_set = 1;
 	jent_apt_duplicate(new_ec, old_ec);
 	JENT_UT_EQ(new_ec->apt_observations, 42,
 		   "the APT window position is carried over");
 	JENT_UT_EQ(new_ec->apt_base, 0xc0ffee, "with its base symbol");
-	JENT_UT_EQ(new_ec->apt_count, new_ec->apt_cutoff,
-		   "and the count primed at the intermittent cutoff");
+	JENT_UT_EQ(new_ec->apt_count, 27,
+		   "and the count of repetitions the window holds");
 
 	/* RCT with memory: likewise primed at its intermittent cutoff. */
 	jent_rct_mem_duplicate(new_ec, old_ec);

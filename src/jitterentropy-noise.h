@@ -49,7 +49,28 @@ JENT_INTERNAL
 unsigned int jent_measure_jitter(struct rand_data *ec,
 				 uint64_t loop_cnt,
 				 uint64_t *ret_current_delta);
+/*
+ * The same, health testing the time delta only with @health set. A call with
+ * @health 0 primes ->prev_time, keeping that delta out of the health tests;
+ * at the loop count of the measurements that follow, so that the delta of the
+ * first of them spans a measurement at their count - see jent_hash_loop().
+ */
+JENT_INTERNAL
+unsigned int jent_measure_jitter_one(struct rand_data *ec,
+				     uint64_t loop_cnt,
+				     uint64_t *ret_current_delta,
+				     int health);
+/*
+ * Collect the entropy for one 256-bit output block into ->hash_state, running
+ * the startup stage the collector is in.
+ */
+JENT_INTERNAL
 void jent_random_data(struct rand_data *ec);
+/* The blocks of an RCT-with-memory recovery, the startup stage unchanged. */
+JENT_INTERNAL
+void jent_random_data_recovery(struct rand_data *ec, unsigned int loops);
+/* Generate up to one 256-bit block from ->hash_state with XDRBG-256. */
+JENT_INTERNAL
 void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len);
 
 #ifdef __cplusplus

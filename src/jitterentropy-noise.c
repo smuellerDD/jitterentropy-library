@@ -484,18 +484,20 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
  * entropy pool.
  *
  * WARNING: ensure that ->prev_time is primed before using the output
- * 	    of this function! This can be done by calling this function
- * 	    and not using its result.
+ * 	    of this function! This is done by a call with @health 0,
+ * 	    which keeps the priming delta out of the health tests.
  *
  * @param[in] ec Reference to entropy collector
  * @param[in] loop_cnt see jent_hash_loop
  * @param[out] ret_current_delta Test interface: return time delta - may be NULL
+ * @param[in] health Run the health tests on the time delta
  *
  * @return: result of stuck test
  */
-unsigned int jent_measure_jitter(struct rand_data *ec,
-				 uint64_t loop_cnt,
-				 uint64_t *ret_current_delta)
+unsigned int jent_measure_jitter_one(struct rand_data *ec,
+				     uint64_t loop_cnt,
+				     uint64_t *ret_current_delta,
+				     int health)
 {
 	/* Size of intermediary ensures a Keccak operation during hash_update */
 	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
@@ -521,7 +523,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	ec->prev_time = time_now;
 
 	/* Check whether we have a stuck measurement. */
-	stuck = jent_stuck(ec, current_delta);
+	stuck = health ? jent_stuck(ec, current_delta) : 0;
 
 	/* Invoke hash loop noise source */
 	jent_hash_loop(ec, intermediary, loop_cnt);
@@ -539,22 +541,12 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	return stuck;
 }
 
-/*
- * We multiply the loop value with ->osr to obtain the oversampling rate
- * requested by the caller
- */
-#define JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)                     \
-	((DATA_SIZE_BITS + (_safety_factor)) * (_osr))
-
-/*
- * The health test RCT with memory operates on multiples of three time deltas.
- * Therefore, round up the jitter loop counter to the nearest multiple of three.
- */
-#define JENT_ROUNDUP_TO_THREE(x)                                               \
-	(jent_udiv64((x) + 2, 3) * 3)
-#define JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)            \
-	JENT_ROUNDUP_TO_THREE(                                                 \
-		JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor))
+unsigned int jent_measure_jitter(struct rand_data *ec,
+				 uint64_t loop_cnt,
+				 uint64_t *ret_current_delta)
+{
+	return jent_measure_jitter_one(ec, loop_cnt, ret_current_delta, 1);
+}
 
 static void jent_random_data_one(
 	struct rand_data *ec,
@@ -562,32 +554,19 @@ static void jent_random_data_one(
 			               uint64_t loop_cnt,
 				       uint64_t *ret_current_delta))
 {
-	unsigned int safety_factor = 0, ctr = 0;
-	uint64_t nosr;
-
-	if (ec->is_fips_enabled)
-		safety_factor = ENTROPY_SAFETY_FACTOR;
+	unsigned int ctr = 0;
 
 	/* RCT with memory: start a new iteration loop */
 	ec->rct_mem_ctr = 0;
 
-	/*
-	 * Obtain number of loop iterations.
-	 *
-	 * Safety measure against wrapping: compute in 64 bits and verify the
-	 * count fits the unsigned short window counters and covers at least
-	 * one output block. With the default JENT_MAX_OSR of 20 this cannot
-	 * trigger, but JENT_MAX_OSR is a compile-time tunable and a truncated
-	 * count would silently shrink the RCT-with-memory window below what
-	 * the cutoff tables assume, disabling the health test.
-	 */
-	nosr = JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR((uint64_t)ec->osr,
-						     safety_factor);
-	if (nosr > USHRT_MAX || nosr < DATA_SIZE_BITS) {
+	/* Obtain number of loop iterations */
+	ec->rct_mem_nosr = jent_rct_mem_window(ec);
+
+	/* Safety measure against wrapping */
+	if (!ec->rct_mem_nosr) {
 		ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
 		return;
 	}
-	ec->rct_mem_nosr = (unsigned short)nosr;
 
 	/* Entropy collection loop */
 	while (!jent_health_failure(ec)) {
@@ -597,6 +576,39 @@ static void jent_random_data_one(
 
 		if (++ctr >= ec->rct_mem_nosr)
 			break;
+	}
+}
+
+/**
+ * Generate the additional blocks of an RCT-with-memory recovery loop
+ * without advancing ->startup_state
+ *
+ * @param[in] ec Reference to entropy collector
+ * @param[in] loops Number of blocks to generate
+ */
+void jent_random_data_recovery(struct rand_data *ec, unsigned int loops)
+{
+	unsigned int i;
+
+	for (i = 0; i < loops; i++) {
+		if (jent_health_failure(ec))
+			break;
+
+		switch (ec->startup_state) {
+		case jent_startup_memory:
+			jent_random_data_one(ec,
+					     jent_measure_jitter_ntg1_memaccess);
+			break;
+		case jent_startup_sha3:
+			jent_random_data_one(ec, jent_measure_jitter_ntg1_sha3);
+			break;
+		case jent_startup_completed:
+		default:
+			/* priming of the ->prev_time value */
+			jent_measure_jitter_one(ec, 0, NULL, 0);
+			jent_random_data_one(ec, jent_measure_jitter);
+			break;
+		}
 	}
 }
 
@@ -627,9 +639,13 @@ void jent_random_data(struct rand_data *ec)
 		 * Initialize the health tests as we fall through to
 		 * independently invoke the next noise source.
 		 */
-		jent_health_init(ec, ec->flags & JENT_NTG1 ?
-				     jent_health_init_type_ntg1 :
-				     jent_health_init_type_common);
+		if (jent_health_init(ec, ec->flags & JENT_NTG1 ?
+					 jent_health_init_type_ntg1 :
+					 jent_health_init_type_common)) {
+			ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
+			return;
+		}
+		ec->stuck_prime = JENT_STUCK_PRIME;
 
 		JENT_FALLTHROUGH;
 	case jent_startup_sha3:
@@ -640,15 +656,19 @@ void jent_random_data(struct rand_data *ec)
 		 * Initialize the health tests as we fall through to
 		 * independently invoke the next noise source.
 		 */
-		jent_health_init(ec, ec->flags & JENT_NTG1 ?
-				     jent_health_init_type_ntg1 :
-				     jent_health_init_type_common);
+		if (jent_health_init(ec, ec->flags & JENT_NTG1 ?
+					 jent_health_init_type_ntg1 :
+					 jent_health_init_type_common)) {
+			ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
+			return;
+		}
+		ec->stuck_prime = JENT_STUCK_PRIME;
 
 		break;
 	case jent_startup_completed:
 	default:
 		/* priming of the ->prev_time value */
-		jent_measure_jitter(ec, 0, NULL);
+		jent_measure_jitter_one(ec, 0, NULL, 0);
 		jent_random_data_one(ec, jent_measure_jitter);
 	}
 }

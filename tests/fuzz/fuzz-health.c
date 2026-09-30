@@ -104,9 +104,10 @@
  * deterministic, which a fuzzing target has to be or its crashes do not
  * reproduce.
  */
-void jent_random_data(struct rand_data *ec)
+void jent_random_data_recovery(struct rand_data *ec, unsigned int loops)
 {
 	(void)ec;
+	(void)loops;
 }
 
 /* Time stamps per input: enough to cross the APT window several times. */

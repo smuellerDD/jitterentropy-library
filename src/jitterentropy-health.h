@@ -78,6 +78,7 @@ static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 
 JENT_INTERNAL
 void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+JENT_INTERNAL
 void jent_apt_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
 JENT_INTERNAL
 void jent_rct_duplicate(struct rand_data *new_ec);
@@ -85,25 +86,15 @@ JENT_INTERNAL
 void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
 JENT_INTERNAL
 void jent_health_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+/*
+ * The deltas the stuck test takes as its reference from a new noise source of
+ * the startup, rather than judging them against the last source's.
+ */
+#define JENT_STUCK_PRIME	2
 JENT_INTERNAL
 unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
-/*
- * Insert an externally obtained time stamp into the health tests of @ec: the
- * delta against the previous stamp is formed as the noise source forms it and
- * every health test is run on it. The verdict is read back with
- * jent_health_failure(); the return value says whether the measurement was
- * stuck.
- *
- * This judges time stamps the library did not measure itself - a raw entropy
- * recording replayed through the very tests that judge the noise source at
- * runtime, as tests/health does - reaching the same verdict because it is the
- * same code. It produces no entropy. Internal, like everything in this header.
- *
- * The collector must be one dedicated to this, as the call advances the health
- * test state, and the tests only report in FIPS mode. The first stamp is a
- * delta against whatever the collector last measured, so a replay should
- * discard its first result or insert the first stamp twice.
- */
+/* Run the health tests on an externally obtained time stamp (tests only). */
+JENT_INTERNAL
 unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 					  uint64_t timestamp);
 JENT_INTERNAL
@@ -113,8 +104,9 @@ enum jent_health_init_type {
 	jent_health_init_type_common,
 	jent_health_init_type_ntg1,
 };
-void jent_health_init(struct rand_data *ec,
-		      enum jent_health_init_type inittype);
+JENT_INTERNAL
+int jent_health_init(struct rand_data *ec,
+		     enum jent_health_init_type inittype);
 
 #ifdef __cplusplus
 }

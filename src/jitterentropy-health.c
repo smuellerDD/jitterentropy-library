@@ -27,14 +27,11 @@
  #error "The CPU Jitter random number generator must not be compiled with optimizations. See documentation. Use the compiler switch -O0 for compiling the entropy core."
 #endif
 
-static jent_fnptr fips_cb = NULL;
+/* Every oversampling rate the library accepts needs a cutoff table entry. */
+#define JENT_CUTOFF_TABLE_CHECK(t)					       \
+	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(t) != JENT_MAX_OSR)
 
-/*
- * Closed once by the initialization and read by every later caller of
- * jent_set_fips_failure_callback(), from whichever thread. Atomic for the
- * reason given in arch/jitterentropy-arch-atomic.h: the value a race could
- * produce is the only one there is, but the access is a data race all the same.
- */
+static jent_fnptr fips_cb = NULL;
 static int jent_health_cb_switch_blocked = 0;
 
 void jent_health_cb_block_switch(void)
@@ -67,15 +64,14 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
  * alpha=2^-30, but operate on much smaller window sizes. This larger selection
  * of alpha makes the behavior per-lag-window similar to the APT test.
  *
- * The permanent cutoffs use alpha=2^(-44), i.e. the square of the intermittent
- * alpha. This follows the convention of the RCT and the APT, which derive
- * their permanent cutoff from alpha=2^-60 out of the intermittent alpha=2^-30.
+ * The permanent cutoffs use alpha=2^(-44), the square of the intermittent one.
  *
  * The global cutoffs are calculated using the
- * InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
- * The local cutoffs are somewhat more complicated: the probability of no run
- * of length r in n trials is (1 - p x) / ((r + 1 - r x) q) * x^-(n+1), where x
- * is the root near 1 of 1 - x + q p^r x^(r+1).
+ * 1 + InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
+ * The local cutoffs are somewhat more complicated. For background, see Feller's
+ * _Introduction to Probability Theory and Its Applications_ Vol. 1,
+ * Chapter 13, section 7 (in particular see equation 7.11, where x is a root
+ * of the denominator of equation 7.6).
  *
  * We'll proceed using the notation of SP 800-90B Section 6.3.8 (which is
  * developed in Kelsey-McKay-Turan paper "Predictive Models for Min-entropy
@@ -92,13 +88,13 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
  * against the ones below.
  */
 static const unsigned int jent_lag_global_cutoff_lookup[20] =
-	{ 66443,  93504, 104761, 110875, 114707, 117330, 119237, 120686, 121823,
-	 122739, 123493, 124124, 124660, 125120, 125520, 125871, 126181, 126457,
-	 126704, 126926 };
+	{ 66444,  93505, 104762, 110876, 114708, 117331, 119238, 120687, 121824,
+	 122740, 123494, 124125, 124661, 125121, 125521, 125872, 126182, 126458,
+	 126705, 126927 };
 static const unsigned int jent_lag_global_cutoff_permanent_lookup[20] =
-	{ 66876,  93896, 105108, 111188, 114993, 117596, 119486, 120920, 122045,
-	 122951, 123696, 124318, 124847, 125301, 125695, 126041, 126346, 126617,
-	 126860, 127079 };
+	{ 66877,  93897, 105109, 111189, 114994, 117597, 119487, 120921, 122046,
+	 122952, 123697, 124319, 124848, 125302, 125696, 126042, 126347, 126618,
+	 126861, 127080 };
 static const unsigned int jent_lag_local_cutoff_lookup[20] =
 	{  38,  75, 111, 146, 181, 215, 250, 284, 318, 351,
 	  385, 419, 452, 485, 518, 551, 584, 617, 650, 683 };
@@ -108,55 +104,56 @@ static const unsigned int jent_lag_local_cutoff_permanent_lookup[20] =
 
 static void jent_lag_init(struct rand_data *ec, unsigned int osr)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_global_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_lag_local_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_global_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_global_cutoff_permanent_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_local_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_lag_local_cutoff_permanent_lookup);
 
 	/*
 	 * Establish the lag global and local cutoffs based on the presumed
 	 * entropy rate of 1/osr.
 	 */
-	if (osr > JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup)) {
-		ec->lag_global_cutoff =
-			jent_lag_global_cutoff_lookup[
-				JENT_ARRAY_SIZE(jent_lag_global_cutoff_lookup) - 1];
-		ec->lag_global_cutoff_permanent =
-			jent_lag_global_cutoff_permanent_lookup[
-				JENT_ARRAY_SIZE(jent_lag_global_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr - 1];
-		ec->lag_global_cutoff_permanent =
-			jent_lag_global_cutoff_permanent_lookup[osr - 1];
-	}
+	ec->lag_global_cutoff = jent_lag_global_cutoff_lookup[osr - 1];
+	ec->lag_global_cutoff_permanent =
+		jent_lag_global_cutoff_permanent_lookup[osr - 1];
 
-	if (osr > JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup)) {
-		ec->lag_local_cutoff =
-			jent_lag_local_cutoff_lookup[
-				JENT_ARRAY_SIZE(jent_lag_local_cutoff_lookup) - 1];
-		ec->lag_local_cutoff_permanent =
-			jent_lag_local_cutoff_permanent_lookup[
-				JENT_ARRAY_SIZE(jent_lag_local_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr - 1];
-		ec->lag_local_cutoff_permanent =
-			jent_lag_local_cutoff_permanent_lookup[osr - 1];
+	ec->lag_local_cutoff = jent_lag_local_cutoff_lookup[osr - 1];
+	ec->lag_local_cutoff_permanent =
+		jent_lag_local_cutoff_permanent_lookup[osr - 1];
+}
+
+/* Reverse lag_delta_history[from..to], a step of the rotation below. */
+static void jent_lag_history_reverse(struct rand_data *ec, unsigned int from,
+				     unsigned int to)
+{
+	while (from < to) {
+		uint64_t tmp = ec->lag_delta_history[from];
+
+		ec->lag_delta_history[from] = ec->lag_delta_history[to];
+		ec->lag_delta_history[to] = tmp;
+		from++;
+		to--;
 	}
 }
 
 /**
  * Reset the lag counters
  *
+ * The delta history is kept, as the stuck test derives from it, and rotated
+ * to where JENT_LAG_HISTORY() looks once lag_observations restarts at zero.
+ *
  * @param[in] ec Reference to entropy collector
  */
 static void jent_lag_reset(struct rand_data *ec)
 {
-	unsigned int i;
+	unsigned int i, rot = ec->lag_observations & JENT_LAG_MASK;
+
+	/* Rotate left by rot, in place: three reversals. */
+	if (rot) {
+		jent_lag_history_reverse(ec, 0, rot - 1);
+		jent_lag_history_reverse(ec, rot, JENT_LAG_HISTORY_SIZE - 1);
+		jent_lag_history_reverse(ec, 0, JENT_LAG_HISTORY_SIZE - 1);
+	}
 
 	/* Reset Lag counters */
 	ec->lag_prediction_success_count = 0;
@@ -166,7 +163,6 @@ static void jent_lag_reset(struct rand_data *ec)
 
 	for (i = 0; i < JENT_LAG_HISTORY_SIZE; i++) {
 		ec->lag_scoreboard[i] = 0;
-		ec->lag_delta_history[i] = 0;
 	}
 }
 
@@ -292,6 +288,7 @@ void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 	}
 }
 
+
 #else /* JENT_HEALTH_LAG_PREDICTOR */
 
 static inline void jent_lag_insert(struct rand_data *ec, uint64_t current_delta)
@@ -322,6 +319,11 @@ static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
 	(void)osr;
 }
 
+static inline void jent_lag_reset(struct rand_data *ec)
+{
+	(void)ec;
+}
+
 void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 {
 	new_ec->last_delta = old_ec->last_delta;
@@ -349,10 +351,9 @@ void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
  * arbitrary precision. tests/health/cutoffs.py computes these tables with
  * mpmath, and --check compares them against the ones below.
  *
- * From osr 15 on this yields the maximal allowable value of 512 (by FIPS 140-2
- * IG 7.19 Resolution # 16, we cannot choose a cutoff value that renders the
- * test unable to fail). The tables cover osr 1 to JENT_MAX_OSR; the build
- * assertion below keeps them doing so.
+ * For any value above 14, this yields the maximal allowable value of 512
+ * (by FIPS 140-2 IG 7.19 Resolution # 16, we cannot choose a cutoff value that
+ * renders the test unable to fail).
  */
 static const unsigned int jent_apt_cutoff_lookup[20]=
 	{ 325, 422, 459, 477, 488, 494, 499, 502, 505, 507,
@@ -363,26 +364,16 @@ static const unsigned int jent_apt_cutoff_permanent_lookup[20]=
 
 static void jent_apt_init(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_permanent_lookup);
 
 	/*
 	 * Establish the apt_cutoff based on the presumed entropy rate of
 	 * 1/osr.
 	 */
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_apt_cutoff_lookup)) {
-		ec->apt_cutoff = jent_apt_cutoff_lookup[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_lookup) - 1];
-		ec->apt_cutoff_permanent = jent_apt_cutoff_permanent_lookup[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->apt_cutoff = jent_apt_cutoff_lookup[ec->osr - 1];
-		ec->apt_cutoff_permanent =
-				jent_apt_cutoff_permanent_lookup[ec->osr - 1];
-	}
+	ec->apt_cutoff = jent_apt_cutoff_lookup[ec->osr - 1];
+	ec->apt_cutoff_permanent =
+			jent_apt_cutoff_permanent_lookup[ec->osr - 1];
 }
 
 /*
@@ -402,23 +393,12 @@ static const unsigned int jent_apt_cutoff_permanent_lookup_ntg1[20]=
 
 static void jent_apt_init_ntg1(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_lookup_ntg1);
+	JENT_CUTOFF_TABLE_CHECK(jent_apt_cutoff_permanent_lookup_ntg1);
 
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1)) {
-		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_lookup_ntg1) - 1];
-		ec->apt_cutoff_permanent =
-			jent_apt_cutoff_permanent_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_apt_cutoff_permanent_lookup_ntg1) - 1];
-	} else {
-		ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[ec->osr - 1];
-		ec->apt_cutoff_permanent =
-			jent_apt_cutoff_permanent_lookup_ntg1[ec->osr - 1];
-	}
+	ec->apt_cutoff = jent_apt_cutoff_lookup_ntg1[ec->osr - 1];
+	ec->apt_cutoff_permanent =
+		jent_apt_cutoff_permanent_lookup_ntg1[ec->osr - 1];
 }
 
 static void jent_apt_reinit(struct rand_data *ec,
@@ -444,9 +424,9 @@ static void jent_apt_reinit(struct rand_data *ec,
 
 void jent_apt_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 {
-	if (old_ec->apt_observations) {
-		/* APT re-initialization to intermittent error */
-		jent_apt_reinit(new_ec, old_ec->apt_base, 0,
+	/* Continue a window in progress with the repetitions it holds. */
+	if (old_ec->apt_observations && old_ec->apt_base_set) {
+		jent_apt_reinit(new_ec, old_ec->apt_base, old_ec->apt_count,
 				old_ec->apt_observations);
 	}
 }
@@ -506,23 +486,18 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  * entropy value (potentially adjusted by a safety factor).
  *
  * The test is defined to cover the window required non-rejected time deltas
- * to be generated for one output block of 256 bits of data. This window
- * is 321 * OSR as implemented by jent_random_data_one, of which tau = 3
- * leaves n = 107 * OSR observations.
+ * to be generated for one output block of 256 bits of data. In FIPS mode
+ * this window is 321 * OSR as implemented by jent_random_data_one, of which
+ * tau = 3 leaves n = 107 * OSR observations. Outside FIPS mode the window
+ * has no safety factor (256 * OSR rounded up to a multiple of three, see
+ * jent_rct_mem_window()); its observations stay below the intermittent
+ * cutoff, so the test never fires there.
  *
- * With p = 2^(1 - safety_factor/OSR), twice the 2^(-H) of the heuristic
- * entropy H = safety_factor/OSR, and p' = min(p, 1/2), which holds the
- * variance at its maximum once p passes one half, both cutoffs are
- *
- *   floor(n*p + tau * sqrt(n * p' * (1 - p')))
- *
- * capped at n, and at n + 1 for the permanent one. tau is 4 for the
- * intermittent and 5 for the permanent cutoff - the significance levels
- * pnorm(-4) and pnorm(-5) named at the NTG.1 tables below - and safety_factor
- * is 1 for the common case and 8 for NTG.1.
- *
- * In the common case p >= 1 at every OSR, so both cutoffs are the cap and the
- * test cannot fail: that is what disables it there.
+ * With p = 2^(1 - safety_factor/OSR) and p' = min(p, 1/2), the cutoffs are
+ * floor(n*p + tau * sqrt(n * p' * (1 - p'))) with tau 4 for the intermittent
+ * and 5 for the permanent cutoff, where safety_factor is 1 for common case,
+ * 8 for the NTG.1. The intermittent cutoff is capped at n, the permanent one
+ * at n + 1.
  *
  * tests/health/cutoffs.py computes all four tables from that formula, and
  * --check compares them against the ones below.
@@ -535,38 +510,27 @@ static void jent_apt_insert(struct rand_data *ec, uint64_t current_delta)
  */
 #define JENT_RCT_MEM_RECOVERY_LOOP_CNT 10
 
-/* RCT with memory, safety factor 1, tau = 4: the cap, so no failure. */
+/* RCT with memory using tau = 4, capped at n */
 static const unsigned short jent_rct_mem_cutoff_lookup[] =
 	{ 107,  214,  321,  428,  535,  642,  749,  856,  963, 1070,
 	  1177, 1284, 1391, 1498, 1605, 1712, 1819, 1926, 2033, 2140 };
-/* RCT with memory, safety factor 1, tau = 5: the cap, so no failure. */
+/* RCT with memory using tau = 5, capped at n + 1 */
 static const unsigned short jent_rct_mem_cutoff_permanent_lookup[] =
 	{ 108,  215,  322,  429,  536,  643,  750,  857,  964, 1071,
 	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 
 static void jent_rct_mem_init(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_lookup);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_permanent_lookup);
 
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup)) {
-		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup) - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup) - 1];
-	} else {
-		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[ec->osr - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup[ec->osr - 1];
-	}
+	ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup[ec->osr - 1];
+	ec->rct_mem_cutoff_permanent =
+		jent_rct_mem_cutoff_permanent_lookup[ec->osr - 1];
 }
 
 /*
- * For NTG.1: 8-fold security margin with tau = 4, a significance level of
+ * For NTG.1: 8-fold security margin using tau 4 with a significance level
  * pnorm(-4) yielding 3.17e-05 (roughly 2^-15) for first-order errors. Due to
  * the recovery loop we can afford such higher value.
  */
@@ -574,7 +538,7 @@ static const unsigned short jent_rct_mem_cutoff_lookup_ntg1[] =
 	{ 4,    46,   134,  255,  399,  560,  733,  856,  963,  1070,
 	  1177, 1284, 1391, 1498, 1605, 1712, 1819, 1926, 2033, 2140 };
 /*
- * For NTG.1: 8-fold security margin with tau = 5, a significance level of
+ * For NTG.1: 8-fold security margin using tau 5 with a significance level of
  * pnorm(-5) yielding about 2^-20.
  */
 static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1[] =
@@ -582,31 +546,24 @@ static const unsigned short jent_rct_mem_cutoff_permanent_lookup_ntg1[] =
 	  1178, 1285, 1392, 1499, 1606, 1713, 1820, 1927, 2034, 2141 };
 static void jent_rct_mem_init_ntg1(struct rand_data *ec)
 {
-	/* Every oversampling rate the library accepts needs an entry. */
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) <
-			  JENT_MAX_OSR);
-	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1) <
-			  JENT_MAX_OSR);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_lookup_ntg1);
+	JENT_CUTOFF_TABLE_CHECK(jent_rct_mem_cutoff_permanent_lookup_ntg1);
 
-	if (ec->osr >= JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1)) {
-		ec->rct_mem_cutoff = jent_rct_mem_cutoff_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_lookup_ntg1) - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup_ntg1[
-			JENT_ARRAY_SIZE(jent_rct_mem_cutoff_permanent_lookup_ntg1) - 1];
-	} else {
-		ec->rct_mem_cutoff =
-			jent_rct_mem_cutoff_lookup_ntg1[ec->osr - 1];
-		ec->rct_mem_cutoff_permanent =
-			jent_rct_mem_cutoff_permanent_lookup_ntg1[ec->osr - 1];
-	}
+	ec->rct_mem_cutoff =
+		jent_rct_mem_cutoff_lookup_ntg1[ec->osr - 1];
+	ec->rct_mem_cutoff_permanent =
+		jent_rct_mem_cutoff_permanent_lookup_ntg1[ec->osr - 1];
 }
 
 static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 {
-	/* Start of a new window */
-	if (ec->rct_mem_ctr == 0)
-		ec->rct_mem_count = 0;
+	/* Start of a new window, unless jent_rct_mem_duplicate() primed it */
+	if (ec->rct_mem_ctr == 0) {
+		if (ec->rct_mem_primed)
+			ec->rct_mem_primed = 0;
+		else
+			ec->rct_mem_count = 0;
+	}
 
 	/*
 	 * If we are outside of a window, do not bother any more: the health
@@ -642,7 +599,8 @@ static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 	if (ec->rct_mem_count >= ec->rct_mem_cutoff_permanent) {
 		if (JENT_RCT_MEM_IN_WINDOW)
 			ec->health_failure |= JENT_RCT_MEM_FAILURE_PERMANENT;
-	} else if (ec->rct_mem_count == ec->rct_mem_cutoff) {
+	} else if (ec->rct_mem_count == ec->rct_mem_cutoff &&
+		   !ec->in_recovery && JENT_RCT_MEM_IN_WINDOW) {
 		/*
 		 * This is a "recovery loop" to recover from expected false
 		 * positives of the health test. Note, the health test cutoffs
@@ -654,72 +612,47 @@ static void jent_rct_mem_insert(struct rand_data *ec, unsigned int stuck)
 		 * can ignore. The random data generated by that recovery
 		 * loop is simply added to the internal state and thus is not
 		 * wasted.
+		 *
+		 * The outer window is closed while the recovery blocks run
+		 * windows of their own, and restored with a fresh count.
 		 */
-		if (!ec->in_recovery) {
-			enum jent_startup_state saved_state = ec->startup_state;
-			unsigned int i;
+		unsigned short saved_ctr = ec->rct_mem_ctr;
 
-			/*
-			 * Clear the RCT with mem counter to generate fresh
-			 * data.
-			 */
-			ec->rct_mem_count = 0;
-			ec->in_recovery = 1;
+		ec->rct_mem_ctr = ec->rct_mem_nosr;
+		ec->rct_mem_count = 0;
 
-			/*
-			 * The recovery loop may fire while an outer
-			 * jent_random_data() invocation is still inside a
-			 * FIPS/NTG.1 startup stage. Park the state machine in
-			 * the completed state for the recursive calls: they
-			 * would otherwise re-run the startup stages and
-			 * advance startup_state underneath the outer
-			 * invocation, whose subsequent stale-state decrement
-			 * would push startup_state below
-			 * jent_startup_completed - and the startup loop in
-			 * _jent_entropy_collector_alloc() would then never
-			 * terminate.
-			 */
-			ec->startup_state = jent_startup_completed;
-			for (i = 0; i < JENT_RCT_MEM_RECOVERY_LOOP_CNT; i++)
-				jent_random_data(ec);
-			ec->startup_state = saved_state;
-			ec->in_recovery = 0;
+		ec->in_recovery = 1;
+		jent_random_data_recovery(ec, JENT_RCT_MEM_RECOVERY_LOOP_CNT);
+		ec->in_recovery = 0;
 
-			/*
-			 * We now leave the set health falures incurred from
-			 * the jent_random_data loop. If that loop did not
-			 * detect a failure, we have no failure at this point
-			 * either. Also, leave the rct_mem_count value as is.
-			 */
-		} else {
-			if (JENT_RCT_MEM_IN_WINDOW)
-				ec->health_failure |= JENT_RCT_MEM_FAILURE;
-		}
+		ec->rct_mem_ctr = saved_ctr;
+		ec->rct_mem_count = 0;
 	}
 
 	/*
 	 * Count up the seen measurements if we are in the window - this
 	 * prevents also a wrap-around.
 	 */
-	if (JENT_RCT_MEM_IN_WINDOW)
+	if (JENT_RCT_MEM_IN_WINDOW) {
 		ec->rct_mem_ctr++;
+
+		/*
+		 * A recovery block is judged once its window closed, so that
+		 * its count can still reach the permanent cutoff.
+		 */
+		if (ec->in_recovery && !JENT_RCT_MEM_IN_WINDOW &&
+		    ec->rct_mem_count >= ec->rct_mem_cutoff &&
+		    ec->rct_mem_count < ec->rct_mem_cutoff_permanent)
+			ec->health_failure |= JENT_RCT_MEM_FAILURE;
+	}
 }
 
 void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 {
-	/*
-	 * RCT with memory re-initialization to intermittent error.
-	 *
-	 * NOTE: this priming is currently ineffective. Every output block
-	 * starts with jent_random_data_one() setting rct_mem_ctr = 0, and the
-	 * first jent_rct_mem_insert() of a window then clears rct_mem_count
-	 * before any cutoff comparison sees it - so, unlike the RCT/APT/lag
-	 * duplication, no escalation state actually survives the reset. Making
-	 * it effective would change the health-test semantics (the window-
-	 * start reset in jent_rct_mem_insert() would need to spare a primed
-	 * value once).
-	 */
 	new_ec->rct_mem_count = old_ec->rct_mem_cutoff;
+	/* Primes the first window, closed until jent_random_data_one() */
+	new_ec->rct_mem_ctr = new_ec->rct_mem_nosr;
+	new_ec->rct_mem_primed = 1;
 }
 
 /***************************************************************************
@@ -742,6 +675,9 @@ static void jent_rct_init(struct rand_data *ec, unsigned short safety)
 {
 	unsigned short osr = (unsigned short)ec->osr;
 
+	JENT_BUILD_BUG_ON(JENT_HEALTH_RCT_PERMANENT_CUTOFF(JENT_MAX_OSR) >
+			  USHRT_MAX);
+
 	ec->rct_cutoff = JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr);
 	ec->rct_cutoff_permanent = JENT_HEALTH_RCT_PERMANENT_CUTOFF(osr);
 
@@ -756,16 +692,10 @@ static void jent_rct_init(struct rand_data *ec, unsigned short safety)
 void jent_rct_duplicate(struct rand_data *new_ec)
 {
 	/*
-	 * RCT re-initialization to intermittent error: prime the new RCT with
-	 * the intermittent cutoff established by jent_rct_init() for the new
-	 * collector, so a continuing streak of stuck values escalates to the
-	 * permanent error instead of restarting from zero.
-	 *
-	 * Use the collector's rct_cutoff member instead of recomputing it via
-	 * JENT_HEALTH_RCT_INTERMITTENT_CUTOFF: in NTG.1 mode the cutoffs carry
-	 * the 8-fold safety divisor, and the undivided value would already
-	 * exceed rct_cutoff_permanent, turning the first stuck measurement
-	 * after the reallocation into a spurious permanent failure.
+	 * RCT re-initialization to intermittent error: As during a reset,
+	 * the OSR is updated and the OSR is at the same time the cutoff for
+	 * the RCT, we re-initialize the new RCT to the intermittent error
+	 * value based on the new OSR (and the NTG.1 safety divisor).
 	 */
 	new_ec->rct_count = (unsigned int)new_ec->rct_cutoff;
 }
@@ -773,17 +703,13 @@ void jent_rct_duplicate(struct rand_data *new_ec)
 /**
  * Carry the health test state of a collector over to its replacement
  *
- * The reallocation must not become a way to clear the tests, so the
- * replacement starts primed at the intermittent cutoffs.
- *
- * The RCT and the RCT with memory carry nothing the old clock produced: the
- * duplication only primes their counters at a cutoff, and a non-stuck
- * measurement of the new source clears the priming again, so it can make the
- * test stricter but never weaker. The APT base and the lag history are delta
- * values of the old clock, which outside a compliance mode the replacement
- * need not be reading: carrying them would leave the APT counting repeats of a
- * symbol the new source does not produce, for a whole window. Those two
- * therefore start on the new source's own measurements.
+ * The RCTs are primed and the stuck test keeps its reference deltas. The APT
+ * and the lag predictor describe the old source, so they are only carried
+ * when the replacement samples the same clock in the same startup stage -
+ * which the recoveries of today never meet: a replacement is made for a FIPS
+ * or NTG.1 collector only, starts in the memory stage, and replaces one that
+ * has completed its startup, so both tests start afresh on it. The carry-over
+ * is kept for a replacement that would continue where the old one stood.
  *
  * @param[in] new_ec The replacement, already allocated and health-initialized
  * @param[in] old_ec The collector it replaces
@@ -793,12 +719,20 @@ void jent_health_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 	jent_rct_duplicate(new_ec);
 	jent_rct_mem_duplicate(new_ec, old_ec);
 
-	/* A different clock: the two below describe another source. */
-	if (new_ec->enable_notime != old_ec->enable_notime)
+	/*
+	 * Across a change of clock or startup stage, the replacement primes
+	 * the stuck test's reference from its own source.
+	 */
+	if (new_ec->enable_notime != old_ec->enable_notime ||
+	    new_ec->startup_state != old_ec->startup_state) {
+		new_ec->stuck_prime = JENT_STUCK_PRIME;
 		return;
+	}
 
 	jent_apt_duplicate(new_ec, old_ec);
+	/* With the stuck test's reference, which derives from the lag state. */
 	jent_lag_duplicate(new_ec, old_ec);
+	new_ec->stuck_prime = old_ec->stuck_prime;
 }
 
 /**
@@ -845,6 +779,17 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	unsigned int stuck = !current_delta || !delta2 || !delta3;
 
 	/*
+	 * A noise source's first deltas only establish the reference of
+	 * delta2 and delta3: unjudged, and reported stuck so that they are
+	 * measured again rather than counted.
+	 */
+	if (ec->stuck_prime) {
+		ec->stuck_prime--;
+		jent_lag_insert(ec, current_delta);
+		return 1;
+	}
+
+	/*
 	 * Insert the result of the comparison of two back-to-back time
 	 * deltas.
 	 */
@@ -861,15 +806,6 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 /**
  * Insert an externally obtained time stamp into the health tests
  *
- * The delta against the previously inserted stamp is formed exactly as the
- * noise source forms it - the division by the common timer divisor included -
- * and every health test is run on it; the verdict is read back with
- * jent_health_failure() as usual. Same code, so the same verdict the noise
- * source would have reached. See jitterentropy-health.h for what for.
- *
- * The first stamp of a sequence only primes the reference and is reported as
- * stuck, as the first measurement of a collector is.
- *
  * @param[in] ec Reference to entropy collector
  * @param[in] timestamp Externally obtained time stamp
  *
@@ -878,12 +814,7 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 					  uint64_t timestamp)
 {
-	/*
-	 * jent_entropy_collector_alloc() never leaves the divisor at zero - it
-	 * substitutes one when no common divisor was established - but a
-	 * caller that assembled the collector itself, as the induced failure
-	 * tests do, can. Substitute here too rather than dividing by it.
-	 */
+	/* A collector assembled by a test may have no divisor. */
 	uint64_t gcd = ec->jent_common_timer_gcd ?
 		       ec->jent_common_timer_gcd : 1;
 	uint64_t current_delta = jent_udiv64(jent_delta(ec->prev_time,
@@ -896,12 +827,6 @@ unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 
 /**
  * Report any health test failures
- *
- * The health tests judge the noise source, and they only report in FIPS
- * mode. A failed conditioning self test (jent_selftest()) is deliberately
- * not part of this bitmask: it judges the conditioning implementation and
- * has to stop the output in every mode, so jent_read_entropy() checks the
- * collector's selftest_failed word directly instead of going through here.
  *
  * @param[in] ec Reference to entropy collector
  *
@@ -924,13 +849,12 @@ unsigned int jent_health_failure(struct rand_data *ec)
 	if (!ec->is_fips_enabled)
 		return 0;
 
-	/*
-	 * Read once, so that the call cannot be made on a pointer that was
-	 * replaced between the test and it.
-	 */
 	cb = (jent_fips_failure_cb)jent_atomic_load_fnptr(&fips_cb);
 
-	if (cb && ec->health_failure) {
+	/* Once per failure, not once per check of it. */
+	if (cb && !ec->measure_clock &&
+	    (ec->health_failure & ~ec->health_failure_reported)) {
+		ec->health_failure_reported = ec->health_failure;
 		cb(ec, ec->health_failure);
 	}
 
@@ -942,11 +866,28 @@ unsigned int jent_health_failure(struct rand_data *ec)
  *
  * @param[in] ec Reference to entropy collector
  * @param[in] inittype Startup type
+ *
+ * @return 0 on success, nonzero for an oversampling rate the tables lack
  */
-void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
+int jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 {
 	/* Must start at zero to reach the correct cutoff value */
 	ec->rct_count = 0;
+	ec->rct_mem_nosr = jent_rct_mem_window(ec);
+
+	/*
+	 * The cutoff tables are indexed by osr - 1 and hold JENT_MAX_OSR
+	 * entries: refuse rather than read past one. A window of 0 is
+	 * jent_rct_mem_window() saying the RCT with memory cannot run at this
+	 * rate (counters too narrow, or less than one output block).
+	 */
+	if (!ec->osr || ec->osr > JENT_MAX_OSR || !ec->rct_mem_nosr)
+		return 1;
+
+	/* Each startup stage samples another noise source. */
+	jent_apt_reset(ec);
+	jent_lag_reset(ec);
+
 	jent_lag_init(ec, ec->osr);
 	switch (inittype) {
 	case jent_health_init_type_ntg1:
@@ -961,4 +902,6 @@ void jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 		jent_rct_mem_init(ec);
 		break;
 	}
+
+	return 0;
 }

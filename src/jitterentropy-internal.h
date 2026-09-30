@@ -607,6 +607,7 @@ struct rand_data
 					 * window. */
 	uint64_t apt_base;		/* APT base reference */
 	unsigned int health_failure;	/* Permanent health failure */
+	unsigned int health_failure_reported; /* Bits the callback saw */
 
 	/* RCT with memory */
 	unsigned short rct_mem_ctr;	/* Loop iteration for generating random bytes */
@@ -620,15 +621,16 @@ struct rand_data
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
 	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
 	unsigned int in_recovery:1;	/* Flag to indicate a recovery op. */
+	unsigned int rct_mem_primed:1;	/* RCT-mem count carried into the
+					 * next window */
+	unsigned int stuck_prime:2;	/* Deltas the stuck test still takes
+					 * as its reference, not judged */
 
-	/*
-	 * A jent_selftest() run bound to this instance failed. Deliberately
-	 * not a bit in health_failure: that word only reports under FIPS,
-	 * while a broken conditioning component must stop the output in every
-	 * mode. A full word rather than a bitfield: the self test may run on
-	 * another thread, and setting a bitfield would rewrite its neighbors.
-	 */
-	unsigned int selftest_failed:1;
+	unsigned int measure_clock:1;	/* Measures the clock (startup, raw
+					 * recording): no FIPS callback */
+
+	/* Bound jent_selftest() failed; no bitfield, set from another thread */
+	int selftest_failed;
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
@@ -698,6 +700,34 @@ struct rand_data
 	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE];
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 };
+
+/* The window of the RCT with memory: the measurements of one output block. */
+#define JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)                     \
+	((DATA_SIZE_BITS + (_safety_factor)) * (_osr))
+
+/*
+ * The health test RCT with memory operates on multiples of three time deltas.
+ * Therefore, round up the jitter loop counter to the nearest multiple of three.
+ */
+#define JENT_ROUNDUP_TO_THREE(x)                                               \
+	(jent_udiv64((x) + 2, 3) * 3)
+#define JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)            \
+	JENT_ROUNDUP_TO_THREE(                                                 \
+		JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor))
+
+/* 0 when the window does not fit the counters or cover one output block. */
+static inline unsigned short jent_rct_mem_window(const struct rand_data *ec)
+{
+	unsigned int safety_factor = ec->is_fips_enabled ?
+				     ENTROPY_SAFETY_FACTOR : 0;
+	uint64_t nosr = JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR((uint64_t)ec->osr,
+							      safety_factor);
+
+	if (nosr > USHRT_MAX || nosr < DATA_SIZE_BITS)
+		return 0;
+
+	return (unsigned short)nosr;
+}
 
 #ifdef __cplusplus
 }
