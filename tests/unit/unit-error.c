@@ -304,6 +304,30 @@ static void test_safe_recovery(void)
 }
 
 /*
+ * A replacement carries the health state on beyond its own startup, whose
+ * stages restart the health tests: a failure that continues must escalate
+ * rather than start over.
+ */
+static void test_recovery_keeps_priming(void)
+{
+	struct rand_data *ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+
+	jent_ut_group("a replacement stays primed after its startup");
+
+	if (!ec) {
+		JENT_UT_SKIP("the primed replacement", "no collector");
+		return;
+	}
+
+	JENT_UT_EQ(jent_health_failure_reset(&ec, 1), 0,
+		   "the reallocation with a startup succeeds");
+	JENT_UT_EQ(ec->rct_count, ec->rct_cutoff,
+		   "and the replacement's RCT is primed at its cutoff");
+
+	jent_entropy_collector_free(ec);
+}
+
+/*
  * The recovery raises the oversampling rate each time and gives up once it
  * would exceed JENT_MAX_OSR, returning the failure rather than looping.
  */
@@ -598,9 +622,8 @@ static void test_recovery_pins_the_clock(void)
 	jent_notime_force();
 
 	before = ec;
-	JENT_UT_NE(jent_health_failure_reset(&ec,
-					     jent_entropy_collector_alloc_internal),
-		   0, "the reallocation is refused rather than switching");
+	JENT_UT_NE(jent_health_failure_reset(&ec, 0), 0,
+		   "the reallocation is refused rather than switching");
 	JENT_UT_TRUE(ec == before,
 		     "and the instance is left as it was");
 	JENT_UT_EQ(ec->enable_notime, 0, "still on the platform clock");
@@ -765,6 +788,7 @@ int main(void)
 	test_permanent_precedence();
 	test_no_report_without_fips();
 	test_safe_recovery();
+	test_recovery_keeps_priming();
 	test_recovery_gives_up();
 	test_recovery_keeps_caller_memsize();
 	test_state_duplication();
