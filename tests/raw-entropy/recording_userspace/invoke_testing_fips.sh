@@ -1,4 +1,6 @@
-#!/bin/sh
+#!/usr/bin/env bash
+
+set -euxo pipefail
 
 . ./invoke_testing_helper.sh
 
