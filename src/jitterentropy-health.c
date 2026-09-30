@@ -22,18 +22,11 @@
 #include "jitterentropy-health.h"
 #include "jitterentropy-noise.h"
 
-/*
- * The registered callback, and unlike the switch below it is not a latch: two
- * threads may register at the same time, and one may register while another is
- * already generating from a collector that reaches jent_health_failure() and
- * reads it. Whose registration wins is the caller's business - registering
- * from two threads at once names no winner - but the access has to be atomic
- * or it is a data race, and a torn function pointer is one the reader calls.
- *
- * Held as a jent_fnptr, which is what the atomic accessors are typed on, and
- * converted back to its own type before it is called. See
- * arch/jitterentropy-arch-atomic.h for why that is the shape.
- */
+/* As in jitterentropy-base.c: the entropy core must not be optimized. */
+#ifdef __OPTIMIZE__
+ #error "The CPU Jitter random number generator must not be compiled with optimizations. See documentation. Use the compiler switch -O0 for compiling the entropy core."
+#endif
+
 static jent_fnptr fips_cb = NULL;
 
 /*
