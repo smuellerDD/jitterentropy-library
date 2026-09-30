@@ -892,6 +892,23 @@ static unsigned int ut_notime_flags(unsigned int idx)
 	return ut_notime_arm(idx) ? JENT_FORCE_INTERNAL_TIMER : 0;
 }
 
+/*
+ * Whether a run raced anything. A short run still exercises the library, but
+ * one thread passes every check without overlapping anything, so it is a
+ * skip. Two suffices; arms needing more check for it themselves.
+ */
+static int ut_raced(unsigned int started, const char *what)
+{
+	if (started >= 2)
+		return 1;
+
+	JENT_UT_SKIP(what, started ?
+			   "only one thread could be created, so nothing ran "
+			   "concurrently" :
+			   "no thread could be created");
+	return 0;
+}
+
 static void test_concurrent_notime(void)
 {
 	struct ut_worker workers[UT_MAX_THREADS];
@@ -964,9 +981,8 @@ static void test_concurrent_notime(void)
 		for (i = 0; i < nthreads; i++)
 			jent_entropy_collector_free(workers[i].ec);
 
-		JENT_UT_SKIP("the counting-thread arm",
-			     "no collector with an internal timer can be "
-			     "built on this machine");
+		JENT_UT_NO_COLLECTOR("the counting-thread arm",
+				     JENT_FORCE_INTERNAL_TIMER);
 		return;
 	}
 
@@ -976,11 +992,8 @@ static void test_concurrent_notime(void)
 	for (i = 0; i < nthreads; i++)
 		jent_entropy_collector_free(workers[i].ec);
 
-	if (!started) {
-		JENT_UT_SKIP("the two clocks against each other",
-			     "no thread could be created");
+	if (!ut_raced(started, "the two clocks against each other"))
 		return;
-	}
 
 	/* What each clock established, substituting one as the library does. */
 	for (i = 0; i < 2; i++) {

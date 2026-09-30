@@ -139,7 +139,8 @@ DBG-all: CFLAGS += -g -DDEBUG
 DBG-all: $(NAMES)
 
 check: $(NAMES)
-	@rc=0; for t in $(NAMES); do ./$$t || rc=1; done; exit $$rc
+	@rc=0; for t in $(NAMES); do ./$$t; r=$$?; \
+		[ $$r -eq 0 ] || [ $$r -eq 77 ] || rc=1; done; exit $$rc
 
 $(analyze_plists): %.plist: %.c
 	@echo "  CCSA  " $@

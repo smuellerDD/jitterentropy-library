@@ -713,7 +713,9 @@ static void test_realloc_on_read_gives_up(void)
 	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS |
 					     JENT_DISABLE_INTERNAL_TIMER);
 	if (!ec) {
-		JENT_UT_SKIP("reallocation on read", "no collector");
+		JENT_UT_NO_COLLECTOR("reallocation on read",
+				     JENT_FORCE_FIPS |
+				     JENT_DISABLE_INTERNAL_TIMER);
 		return;
 	}
 	osr_before = ec->osr;

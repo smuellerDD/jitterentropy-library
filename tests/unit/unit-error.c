@@ -339,7 +339,7 @@ static void test_recovery_gives_up(void)
 	jent_ut_group("recovery gives up above the maximum oversampling rate");
 
 	if (!ec) {
-		JENT_UT_SKIP("recovery limit", "no collector");
+		JENT_UT_NO_COLLECTOR("recovery limit", 0);
 		return;
 	}
 
@@ -743,7 +743,7 @@ static void test_recovery_keeps_caller_memsize(void)
 	jent_ut_group("recovery with a caller-configured memory size");
 
 	if (!ec) {
-		JENT_UT_SKIP("recovery", "no collector");
+		JENT_UT_NO_COLLECTOR("recovery", JENT_MAX_MEMSIZE_1MB);
 		return;
 	}
 
