@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Non-physical true random number generator based on timing jitter.
  *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
@@ -63,16 +63,6 @@
 #include <signal.h>
 
 #include "jitterentropy.h"
-
-#define MAJVERSION 1 /* API / ABI incompatible changes, functional changes that
-		      * require consumer to be updated (as long as this number
-		      * is zero, the API is not considered stable and can
-		      * change without a bump of the major version) */
-#define MINVERSION 3 /* API compatible, ABI may change, functional
-		      * enhancements only, consumer can be left unchanged if
-		      * enhancements are not considered */
-#define PATCHLEVEL 3 /* API / ABI compatible, no functional changes, no
-		      * enhancements, bug fixes only */
 
 static int Verbosity = 0;
 static int force_sp80090b = 0;
@@ -186,8 +176,9 @@ static unsigned long kern_maj = ULONG_MAX, kern_minor, kern_patchlevel;
 
 static void jentrng_versionstring(char *buf, size_t buflen)
 {
+	/* Released with the library, so its version is the daemon's. */
 	snprintf(buf, buflen, "jitterentropy-rngd %d.%d.%d",
-		 MAJVERSION, MINVERSION, PATCHLEVEL);
+		 JENT_MAJVERSION, JENT_MINVERSION, JENT_PATCHLEVEL);
 }
 
 /* Is the LRNG present instead of the legacy /dev/random? */
@@ -1237,7 +1228,7 @@ static int alloc_rng(struct kernel_rng *rng)
 	}
 
 	if (status) {
-		char buf[2500];
+		char buf[4096];
 		int ret = jent_status(rng->ec, buf, sizeof(buf));
 
 		if (ret)

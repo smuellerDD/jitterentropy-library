@@ -3,7 +3,8 @@ name: jitterentropy
 services:
     rngd:
         build:
-            context: https://github.com/smuellerDD/jitterentropy-rngd.git
+            context: ..
+            dockerfile: rngd/Dockerfile
         cap_add:
             - SYS_ADMIN
         cap_drop:
