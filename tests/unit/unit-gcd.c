@@ -96,13 +96,18 @@ static void test_analyze(void)
 				    JENT_GCD_CLOCK_PLATFORM), ECOARSETIME,
 		   "a coarse timer granularity is rejected");
 
-	/* No history at all is not an error, it is nothing to analyze. */
+	/*
+	 * No history at all is a failure, not a pass with nothing done. It
+	 * used to answer 0, which left the timer GCD unset while the startup
+	 * recorded a pass - and that mark is one-way, so the clock stayed
+	 * unusable for the life of the process.
+	 */
 	JENT_UT_EQ(jent_gcd_analyze(NULL, ELEM, JENT_MIN_OSR,
-				    JENT_GCD_CLOCK_PLATFORM), 0,
-		   "a NULL history is tolerated");
+				    JENT_GCD_CLOCK_PLATFORM), ENOMONOTONIC,
+		   "a NULL history is refused rather than passed");
 	JENT_UT_EQ(jent_gcd_analyze(deltas, 0, JENT_MIN_OSR,
-				    JENT_GCD_CLOCK_PLATFORM), 0,
-		   "an empty history is tolerated");
+				    JENT_GCD_CLOCK_PLATFORM), ENOMONOTONIC,
+		   "as is an empty one");
 
 	/*
 	 * The oversampling rate is the divisor of the variation requirement, so
