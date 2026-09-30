@@ -459,9 +459,11 @@ err:
 	return ret ? ret : (ssize_t)orig_len;
 }
 
-static int jent_health_failure_reset(
-	struct rand_data **ec, struct rand_data *(*alloc)(unsigned int osr,
-							  unsigned int flags))
+static struct rand_data
+*jent_entropy_collector_alloc_internal(unsigned int osr, unsigned int flags);
+static struct rand_data *jent_entropy_collector_startup(struct rand_data *ec);
+
+static int jent_health_failure_reset(struct rand_data **ec, int startup)
 {
 	struct rand_data *new_ec;
 	unsigned int osr, flags;
@@ -508,7 +510,7 @@ static int jent_health_failure_reset(
 			return -1;
 	}
 
-	new_ec = alloc(osr, flags);
+	new_ec = jent_entropy_collector_alloc_internal(osr, flags);
 
 	/*
 	 * In case of an error, leave the existing ec state untouched as a
@@ -519,13 +521,6 @@ static int jent_health_failure_reset(
 
 	/* Remember whether caller configured memory size */
 	new_ec->max_mem_set = !!(*ec)->max_mem_set;
-
-	/*
-	 * Duplicate the state of the health tests to ensure the newly allocated
-	 * state will continue from the current health state - as far as it
-	 * applies to the clock the replacement ended up on.
-	 */
-	jent_health_duplicate(new_ec, *ec);
 
 	/*
 	 * Carry the instance identifier over so the reallocated collector keeps
@@ -539,14 +534,27 @@ static int jent_health_failure_reset(
 	new_ec->read_invocations = (*ec)->read_invocations;
 	new_ec->bytes_output = (*ec)->bytes_output;
 
+	/*
+	 * Run the startup only on the replacement carrying all of the above,
+	 * so that a reset within it passes it on as well. A reset of a startup
+	 * itself runs none: that startup carries on with the replacement.
+	 */
+	if (startup && !(new_ec = jent_entropy_collector_startup(new_ec)))
+		return -1;
+
+	/*
+	 * Duplicate the state of the health tests to ensure the newly allocated
+	 * state will continue from the current health state - as far as it
+	 * applies to the clock the replacement ended up on. Only after the
+	 * startup: each of its stages restarts the health tests.
+	 */
+	jent_health_duplicate(new_ec, *ec);
+
 	jent_entropy_collector_free(*ec);
 	*ec = new_ec;
 
 	return 0;
 }
-
-static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
-						       unsigned int flags);
 
 /**
  * Entry function: Obtain entropy for the caller.
@@ -637,8 +645,7 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 			 *
 			 * If we fail here, the Jitter RNG returns the error.
 			 */
-			if (jent_health_failure_reset(
-				ec, _jent_entropy_collector_alloc))
+			if (jent_health_failure_reset(ec, 1))
 				return ret;
 
 			/*
@@ -908,6 +915,23 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 	if (!ec)
 		return ec;
 
+	ec = jent_entropy_collector_startup(ec);
+	if (!ec)
+		return NULL;
+
+	/*
+	 * Assign the stable per-instance identifier. This is done once, after a
+	 * successful startup; jent_health_failure_reset() carries it over to the
+	 * replacement collector so the identity survives a reallocation.
+	 */
+	jent_uuid_generate(ec->uuid);
+
+	return ec;
+}
+
+/* Run the startup of @ec. Returns @ec, or NULL with @ec freed. */
+static struct rand_data *jent_entropy_collector_startup(struct rand_data *ec)
+{
 	/* fill the data pad with non-zero values */
 	if (jent_notime_settick(ec)) {
 		jent_entropy_collector_free(ec);
@@ -940,8 +964,7 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 			 * Re-allocate the entropy collector with updated
 			 * OSR, hash loop count and memory size.
 			 */
-			if (jent_health_failure_reset(
-				&ec, jent_entropy_collector_alloc_internal)) {
+			if (jent_health_failure_reset(&ec, 0)) {
 				jent_entropy_collector_free(ec);
 				return NULL;
 			}
@@ -967,13 +990,6 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 	} while (ec->startup_state != jent_startup_completed);
 
 	jent_notime_unsettick(ec);
-
-	/*
-	 * Assign the stable per-instance identifier. This is done once, after a
-	 * successful startup; jent_health_failure_reset() carries it over to the
-	 * replacement collector so the identity survives a reallocation.
-	 */
-	jent_uuid_generate(ec->uuid);
 
 	return ec;
 }
