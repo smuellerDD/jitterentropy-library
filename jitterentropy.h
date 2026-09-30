@@ -233,8 +233,21 @@ extern "C" {
 #define JENT_HASHLOOP_128		JENT_HASHLOOP_TO_FLAGS(UINT32_C(7))
 #define JENT_MAX_HASHLOOP		JENT_HASHLOOP_128
 
+/*
+ * JENT_PRIVATE_COMPILE: the sources are compiled as one translation unit into
+ * a program or library of their own - a private copy - and every function of
+ * the library is static there, the API through JENT_PRIVATE_STATIC and the
+ * internals one source file calls in another through JENT_INTERNAL. Nothing of
+ * the copy is then visible outside that translation unit, so it links beside
+ * another copy, or beside libjitterentropy, without either seeing the other.
+ * Marked unused, as a copy calls only part of the API.
+ */
 #ifdef JENT_PRIVATE_COMPILE
-# define JENT_PRIVATE_STATIC static
+# if defined(__GNUC__)
+#  define JENT_PRIVATE_STATIC static __attribute__((unused))
+# else
+#  define JENT_PRIVATE_STATIC static
+# endif
 #elif defined(LINUX_KERNEL)
 # define JENT_PRIVATE_STATIC
 #else /* JENT_PRIVATE_COMPILE */
@@ -261,6 +274,13 @@ extern "C" {
 #else
 #define JENT_PRIVATE_STATIC __attribute__((visibility("default")))
 #endif
+#endif
+
+/* Internal, called across the library's source files; see above. */
+#ifdef JENT_PRIVATE_COMPILE
+# define JENT_INTERNAL JENT_PRIVATE_STATIC
+#else
+# define JENT_INTERNAL
 #endif
 
 /*

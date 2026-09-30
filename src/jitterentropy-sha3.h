@@ -60,20 +60,25 @@ static inline unsigned int jent_sha3_rate(void *hash_state)
 	return ctx->r;
 }
 
+JENT_INTERNAL
 void jent_sha3_256_init(struct jent_sha_ctx *ctx);
+JENT_INTERNAL
 void jent_sha3_update(struct jent_sha_ctx *ctx, const uint8_t *in,
 		      size_t inlen);
+JENT_INTERNAL
 void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest);
 int jent_sha3_alloc(void **hash_state, unsigned int flags);
 void jent_sha3_dealloc(void *hash_state);
 int jent_sha3_tester(void);
 
+JENT_INTERNAL
 void jent_shake256_init(struct jent_sha_ctx *ctx);
 static inline void jent_shake256_set_digestsize(struct jent_sha_ctx *ctx,
 						unsigned int digestsize)
 {
 	ctx->digestsize = (uint8_t)digestsize;
 }
+JENT_INTERNAL
 void jent_drbg_generate_block(struct jent_sha_ctx *ctx, uint8_t *dst,
 			      size_t dst_len);
 

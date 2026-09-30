@@ -27,7 +27,9 @@ extern "C"
 {
 #endif
 
+JENT_INTERNAL
 void jent_health_cb_block_switch(void);
+JENT_INTERNAL
 int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb);
 
 static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
@@ -74,16 +76,16 @@ static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 /* RCT: permanent cutoff threshold for alpha = 2**-60 */
 #define JENT_HEALTH_RCT_PERMANENT_CUTOFF(x) ((x) * 60)
 
+JENT_INTERNAL
 void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
 void jent_apt_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+JENT_INTERNAL
 void jent_rct_duplicate(struct rand_data *new_ec);
+JENT_INTERNAL
 void jent_rct_mem_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
-/*
- * The four above as one call, for the reallocation on a health test failure:
- * it leaves out what belongs to the old instance's clock, which the
- * replacement need not be reading too.
- */
+JENT_INTERNAL
 void jent_health_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+JENT_INTERNAL
 unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
 /*
  * Insert an externally obtained time stamp into the health tests of @ec: the
@@ -104,7 +106,7 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
  */
 unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 					  uint64_t timestamp);
-
+JENT_INTERNAL
 unsigned int jent_health_failure(struct rand_data *ec);
 
 enum jent_health_init_type {
