@@ -785,9 +785,10 @@ static struct rand_data
 	}
 
 	/* Initialize the health tests */
-	jent_health_init(entropy_collector, flags & JENT_NTG1 ?
-					    jent_health_init_type_ntg1 :
-					    jent_health_init_type_common);
+	if (jent_health_init(entropy_collector, flags & JENT_NTG1 ?
+					        jent_health_init_type_ntg1 :
+					        jent_health_init_type_common))
+		goto err;
 
 	/*
 	 * Use timer-less noise source - note, OSR must be set in

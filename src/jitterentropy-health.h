@@ -113,8 +113,9 @@ enum jent_health_init_type {
 	jent_health_init_type_common,
 	jent_health_init_type_ntg1,
 };
-void jent_health_init(struct rand_data *ec,
-		      enum jent_health_init_type inittype);
+JENT_INTERNAL
+int jent_health_init(struct rand_data *ec,
+		     enum jent_health_init_type inittype);
 
 #ifdef __cplusplus
 }
