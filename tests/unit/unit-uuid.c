@@ -38,6 +38,11 @@
 #define _GNU_SOURCE
 #endif
 
+/* newlib hides the POSIX mkstemp() under the Makefile's strict -std=c11. */
+#ifdef __CYGWIN__
+#define _DEFAULT_SOURCE
+#endif
+
 #include "unit.h"
 
 #include <errno.h>
@@ -61,24 +66,36 @@
 #include "jitterentropy-arch-thread.c"
 #include "jitterentropy-arch-timer.c"
 #include "jitterentropy-arch-random.c"
+#include "jitterentropy-sha3.c"
 #include "jitterentropy-uuid.c"
 
-/* What jent_uuid_generate() formats when it has no bytes to format. */
+/* What jent_uuid_generate() must never produce - see below. */
 #define JENT_UT_NIL_UUID "00000000-0000-0000-0000-000000000000"
 
 /*
  * The UUID naming a collector instance in the status output. Checked against
- * the canonical 8-4-4-4-12 form and RFC 4122's version and variant nibbles,
+ * the canonical 8-4-4-4-12 form and RFC 9562's version and variant nibbles,
  * and for being different every time - it identifies an instance.
  */
 static void test_uuid(void)
 {
 	char a[JENT_UUID_STRLEN], b[JENT_UUID_STRLEN];
+	uint8_t probe[16];
+	int before, after;
 	size_t i;
 
 	jent_ut_group("jent_uuid_generate");
 
+	/*
+	 * Without a CSPRNG a version 8 UUID hashed from a counter - and also
+	 * with one that cannot answer yet: getrandom() refuses with EAGAIN
+	 * while the Linux pool is unseeded, rather than block. Which of the
+	 * two a is, is therefore asked of the CSPRNG itself, on either side
+	 * of it; only if the answer changed in between may it be either.
+	 */
+	before = !jent_os_random_bytes(probe, sizeof(probe));
 	jent_uuid_generate(a);
+	after = !jent_os_random_bytes(probe, sizeof(probe));
 	jent_uuid_generate(b);
 	printf("  note: %s\n", a);
 
@@ -101,22 +118,18 @@ static void test_uuid(void)
 	}
 	jent_ut_checks++;
 
-	/*
-	 * What the rest may assert depends on what the platform can answer.
-	 * Without a CSPRNG jent_uuid_generate() has no bytes to format and
-	 * says so with the nil UUID, which carries neither version nor variant
-	 * nibble and repeats.
-	 */
-	if (!jent_os_random_supported()) {
-		JENT_UT_TRUE(!strcmp(a, JENT_UT_NIL_UUID),
-			     "the nil UUID is generated where none exists");
-		return;
-	}
-
 	JENT_UT_TRUE(strcmp(a, JENT_UT_NIL_UUID),
-		     "a UUID is generated where a CSPRNG exists");
+		     "a generated UUID is never the nil UUID");
 
-	JENT_UT_EQ(a[14], '4', "the version nibble says version 4");
+	if (!jent_os_random_supported())
+		JENT_UT_EQ(a[14], '8', "without a CSPRNG it is version 8");
+	else if (before && after)
+		JENT_UT_EQ(a[14], '4', "from the CSPRNG it is version 4");
+	else if (!before && !after)
+		JENT_UT_EQ(a[14], '8', "the CSPRNG failing, it is version 8");
+	else
+		JENT_UT_TRUE(a[14] == '4' || a[14] == '8',
+			     "the version nibble says version 4 or 8");
 	jent_ut_checks++;
 	if (a[19] != '8' && a[19] != '9' && a[19] != 'a' && a[19] != 'b')
 		JENT_UT_FAIL("the variant nibble is '%c'", a[19]);
@@ -126,45 +139,73 @@ static void test_uuid(void)
 		JENT_UT_FAIL("%s", "two UUIDs in a row are identical");
 }
 
-#if defined(JENT_RANDOM_GETRANDOM) || defined(JENT_RANDOM_DEVURANDOM)
-static void test_uuid_helpers(void)
+/* The counter-derived UUID, which a platform with a CSPRNG never reaches. */
+static void test_uuid_counter(void)
+{
+	uint8_t a[16], b[16];
+	char out[JENT_UUID_STRLEN];
+
+	jent_ut_group("the counter-derived UUID");
+
+	jent_uuid_from_counter(a);
+	jent_uuid_from_counter(b);
+	JENT_UT_TRUE(memcmp(a, b, sizeof(a)) != 0,
+		     "two in a row differ");
+
+	a[8] = (uint8_t)((a[8] & 0x3f) | 0x80);
+	jent_uuid_format(a, out);
+	JENT_UT_EQ(out[14], '8', "the version nibble says version 8");
+}
+
+/*
+ * The formatting, which is deterministic and can therefore be checked against
+ * a fixed vector rather than only for plausibility. Whatever the backend.
+ */
+static void test_uuid_format(void)
 {
 	uint8_t b[16];
 	char out[JENT_UUID_STRLEN];
-	unsigned int i, nonzero = 0;
+	unsigned int i;
 
-	jent_ut_group("the UUID helpers");
+	jent_ut_group("the UUID formatting");
 
-	/*
-	 * The /dev/urandom fallback, which jent_os_random_bytes() only reaches
-	 * when getrandom() fails.
-	 */
-	memset(b, 0, sizeof(b));
-	if (jent_random_dev_urandom(b, sizeof(b))) {
-		JENT_UT_SKIP("jent_random_dev_urandom",
-			     "/dev/urandom is unreadable");
-	} else {
-		for (i = 0; i < sizeof(b); i++) {
-			if (b[i])
-				nonzero++;
-		}
-		JENT_UT_NE(nonzero, 0, "it produced something other than zeros");
-	}
-
-	/*
-	 * The formatting, which is deterministic and can therefore be checked
-	 * against a fixed vector rather than only for plausibility.
-	 */
 	for (i = 0; i < sizeof(b); i++)
 		b[i] = (uint8_t)(i * 0x11);
 	jent_uuid_format(b, out);
 	JENT_UT_TRUE(!strcmp(out, "00112233-4455-6677-8899-aabbccddeeff"),
 		     "the canonical hex form is produced");
 }
-#else
-static void test_uuid_helpers(void)
+
+#if defined(JENT_RANDOM_GETRANDOM) || defined(JENT_RANDOM_DEVURANDOM)
+/*
+ * The /dev/urandom fallback, which jent_os_random_bytes() only reaches when
+ * getrandom() fails.
+ */
+static void test_uuid_dev_urandom(void)
 {
-	JENT_UT_SKIP("the UUID helpers", "no CSPRNG backend for UUIDs");
+	uint8_t b[16];
+	unsigned int i, nonzero = 0;
+
+	jent_ut_group("the /dev/urandom fallback");
+
+	memset(b, 0, sizeof(b));
+	if (jent_random_dev_urandom(b, sizeof(b))) {
+		JENT_UT_SKIP("jent_random_dev_urandom",
+			     "/dev/urandom is unreadable");
+		return;
+	}
+
+	for (i = 0; i < sizeof(b); i++) {
+		if (b[i])
+			nonzero++;
+	}
+	JENT_UT_NE(nonzero, 0, "it produced something other than zeros");
+}
+#else
+static void test_uuid_dev_urandom(void)
+{
+	JENT_UT_SKIP("the /dev/urandom fallback",
+		     "the backend does not read /dev/urandom");
 }
 #endif
 
@@ -233,14 +274,17 @@ static void test_uuid_read_paths(void)
 #else
 static void test_uuid_read_paths(void)
 {
-	JENT_UT_SKIP("the CSPRNG read behind the UUID", "no CSPRNG backend");
+	JENT_UT_SKIP("the CSPRNG read behind the UUID",
+		     "the backend does not read a file");
 }
 #endif
 
 int main(void)
 {
 	test_uuid();
-	test_uuid_helpers();
+	test_uuid_counter();
+	test_uuid_format();
+	test_uuid_dev_urandom();
 	test_uuid_read_paths();
 
 	return jent_ut_report("unit-uuid");
