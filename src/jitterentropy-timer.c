@@ -174,6 +174,12 @@ int jent_notime_set_cpu(unsigned long cpu)
 
 static struct jent_notime_thread *notime_thread = &jent_notime_thread_builtin;
 
+/*
+ * The registered handler, copied: the caller's struct may be a temporary or
+ * change later, and is read only while it is registered.
+ */
+static struct jent_notime_thread jent_notime_thread_external;
+
 /**
  * Timer-replacement loop
  *
@@ -403,7 +409,14 @@ int jent_notime_switch(struct jent_notime_thread *new_thread)
 	    !new_thread->jent_notime_stop)
 		return -EINVAL;
 
-	notime_thread = new_thread;
+	/* The builtin one is recognized by its address, so it is not copied. */
+	if (new_thread == &jent_notime_thread_builtin) {
+		notime_thread = &jent_notime_thread_builtin;
+		return 0;
+	}
+
+	jent_notime_thread_external = *new_thread;
+	notime_thread = &jent_notime_thread_external;
 	return 0;
 }
 

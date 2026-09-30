@@ -556,7 +556,8 @@ int jent_secure_memory_supported(void);
  * with the API call jent_entropy_switch_notime_impl as the first
  * call to interact with the Jitter RNG, even before jent_entropy_init.
  * After jent_entropy_init is called, changing of the threading implementation
- * is not allowed.
+ * is not allowed. The handler is copied at registration: the struct passed
+ * need not outlive the call, and later changes to it have no effect.
  */
 struct jent_notime_thread {
 	int (*jent_notime_init)(void **ctx);
