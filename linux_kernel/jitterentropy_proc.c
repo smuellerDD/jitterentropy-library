@@ -4,9 +4,11 @@
  * kernel interfaces.
  *
  * Copyright (C) 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 #include <linux/atomic.h>
+#include <linux/fips.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
@@ -14,7 +16,6 @@
 #include <linux/types.h>
 
 #include "jitterentropy.h"
-#include "jitterentropy-internal.h"	/* JENT_MIN_OSR */
 #include "jitterentropy_proc.h"
 #include "jitterentropy_selftest.h"
 
@@ -24,8 +25,8 @@ struct proc_dir_entry *jent_proc_dir;
  * The effective flags and OSR values shared by the kernel interfaces,
  * including the folded-in shortcut parameters (see jitterentropy_mod.c).
  */
-extern unsigned int flags;
-extern unsigned int osr;
+extern unsigned int jent_flags;
+extern unsigned int jent_osr;
 
 /*
  * Machine-readable variants reported via /proc/jitterentropy/config/flags_raw
@@ -36,7 +37,7 @@ extern unsigned int osr;
  */
 static int jent_proc_flags_raw_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "0x%08x\n", flags);
+	seq_printf(m, "0x%08x\n", jent_flags);
 
 	return 0;
 }
@@ -77,7 +78,7 @@ static int jent_proc_interface_show(struct seq_file *m, void *v)
  */
 static int jent_proc_ntg1_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "%u\n", !!(flags & JENT_NTG1));
+	seq_printf(m, "%u\n", !!(jent_flags & JENT_NTG1));
 
 	return 0;
 }
@@ -85,8 +86,8 @@ static int jent_proc_ntg1_show(struct seq_file *m, void *v)
 static int jent_proc_fips_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%u\n",
-		   !!((flags & (JENT_FORCE_FIPS | JENT_NTG1)) ||
-		      jent_fips_enabled()));
+		   !!((jent_flags & (JENT_FORCE_FIPS | JENT_NTG1)) ||
+		      fips_enabled));
 
 	return 0;
 }
@@ -99,7 +100,8 @@ static int jent_proc_osr_show(struct seq_file *m, void *v)
 	 * parameter value - to that minimum (see
 	 * ensure_osr_is_at_least_minimal()).
 	 */
-	seq_printf(m, "%u\n", osr < JENT_MIN_OSR ? JENT_MIN_OSR : osr);
+	seq_printf(m, "%u\n",
+		   jent_osr < JENT_MIN_OSR ? JENT_MIN_OSR : jent_osr);
 
 	return 0;
 }
@@ -124,15 +126,15 @@ static const struct {
 
 static int jent_proc_flags_show(struct seq_file *m, void *v)
 {
-	unsigned int memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags);
-	unsigned int hashloop = JENT_FLAGS_TO_HASHLOOP(flags);
+	unsigned int memsize = JENT_FLAGS_TO_MAX_MEMSIZE(jent_flags);
+	unsigned int hashloop = JENT_FLAGS_TO_HASHLOOP(jent_flags);
 	unsigned int i;
 
-	seq_printf(m, "%-29s0x%08x\n", "flags:", flags);
+	seq_printf(m, "%-29s0x%08x\n", "flags:", jent_flags);
 
 	for (i = 0; i < ARRAY_SIZE(jent_proc_flags_bits); i++)
 		seq_printf(m, "%-29s%s\n", jent_proc_flags_bits[i].label,
-			   flags & jent_proc_flags_bits[i].bit ? "on" : "off");
+			   jent_flags & jent_proc_flags_bits[i].bit ? "on" : "off");
 
 	/*
 	 * The memory size field encodes 1 kB << (field - 1); field 0 selects

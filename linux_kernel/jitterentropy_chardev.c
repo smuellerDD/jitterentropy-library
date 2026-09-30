@@ -14,6 +14,7 @@
  * Kbuild.config). In that case the stubs in jitterentropy_chardev.h are used.
  *
  * Copyright (C) 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 #include <linux/fs.h>
@@ -28,6 +29,7 @@
 #include <linux/sched/signal.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 
 #include "jitterentropy.h"
@@ -36,6 +38,7 @@
 #include "jitterentropy_ioctl.h"
 #include "jitterentropy_proc.h"
 #include "jitterentropy_selftest.h"
+#include "jitterentropy_status.h"
 #include "jitterentropy_uapi.h"
 
 /*
@@ -43,8 +46,8 @@
  * shared with the crypto API interface and are configurable via the module
  * parameters of the same name (see jitterentropy_mod.c).
  */
-extern unsigned int osr;
-extern unsigned int flags;
+extern unsigned int jent_osr;
+extern unsigned int jent_flags;
 
 /*
  * Largest chunk handed to jent_read_entropy_safe() in one iteration. The
@@ -72,39 +75,15 @@ struct jent_chardev_ctx {
 
 /*
  * Emit the JSON status string of a single open instance, exported read-only as
- * /proc/jitterentropy/instances/<id>. Holds the instance lock (as read()/ioctl()
- * do) so the collector cannot be reallocated on health-test recovery while
- * jent_status() runs.
+ * /proc/jitterentropy/instances/<id>. The shared renderer holds the instance
+ * lock (as read()/ioctl() do) so the collector cannot be reallocated on
+ * health-test recovery while jent_status() runs.
  */
 static int jent_chardev_instance_status_show(struct seq_file *m, void *v)
 {
 	struct jent_chardev_ctx *ctx = m->private;
-	char *buf;
-	int ret;
 
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	if (mutex_lock_interruptible(&ctx->lock)) {
-		kvfree(buf);
-		return -ERESTARTSYS;
-	}
-	if (ctx->entropy_collector)
-		ret = jent_status(ctx->entropy_collector, buf,
-				  JENT_STATUS_MAX_LEN);
-	else
-		ret = -1;
-	mutex_unlock(&ctx->lock);
-
-	if (ret) {
-		kvfree(buf);
-		return -EIO;
-	}
-
-	seq_puts(m, buf);
-	kvfree(buf);
-	return 0;
+	return jent_status_seq_show(m, &ctx->lock, &ctx->entropy_collector);
 }
 
 /*
@@ -141,7 +120,8 @@ static int jent_chardev_open(struct inode *inode, struct file *file)
 
 	mutex_init(&ctx->lock);
 
-	ctx->entropy_collector = jent_entropy_collector_alloc(osr, flags);
+	ctx->entropy_collector =
+		jent_entropy_collector_alloc(jent_osr, jent_flags);
 	if (!ctx->entropy_collector) {
 		mutex_destroy(&ctx->lock);
 		kvfree(ctx);
@@ -195,7 +175,14 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 				 size_t nbytes, loff_t *ppos)
 {
 	struct jent_chardev_ctx *ctx = file->private_data;
-	u8 *tmp;
+	/*
+	 * Small and fixed (see JENT_CHARDEV_READ_BUF_SIZE), and this is a
+	 * read(2) handler called straight from vfs_read(), so the frame it
+	 * adds is affordable and an allocation per read is not worth its error
+	 * path. Wiped before returning, as the kvfree_sensitive() it replaces
+	 * did.
+	 */
+	u8 tmp[JENT_CHARDEV_READ_BUF_SIZE];
 	ssize_t ret = 0;
 
 	if (!ctx)
@@ -203,10 +190,6 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 
 	if (!nbytes)
 		return 0;
-
-	tmp = kvmalloc(JENT_CHARDEV_READ_BUF_SIZE, GFP_KERNEL);
-	if (!tmp)
-		return -ENOMEM;
 
 	/*
 	 * A non-blocking reader must not sleep on the instance lock and is
@@ -219,6 +202,7 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 	while (nbytes) {
 		size_t towork = min_t(size_t, nbytes,
 				      JENT_CHARDEV_READ_BUF_SIZE);
+		bool nonblock = file->f_flags & O_NONBLOCK;
 		ssize_t rc;
 
 		/*
@@ -228,7 +212,7 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 		 * per-instance proc file and this instance's own self test
 		 * run get a chance between chunks.
 		 */
-		if (file->f_flags & O_NONBLOCK) {
+		if (nonblock) {
 			if (!mutex_trylock(&ctx->lock)) {
 				/*
 				 * Preserve an already accumulated partial
@@ -293,108 +277,8 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 			cond_resched();
 	}
 
-	kvfree_sensitive(tmp, JENT_CHARDEV_READ_BUF_SIZE);
+	memzero_explicit(tmp, sizeof(tmp));
 	return ret;
-}
-
-/*
- * Serialize the JSON status string of the per-open Jitter RNG instance into a
- * user-provided buffer.
- *
- * The Jitter RNG status is derived from the state of the entropy collector, so
- * the collector lock is held while jent_status() runs: the read path may
- * reallocate the collector on health-test recovery, and this prevents a
- * concurrent read() from freeing it underneath us.
- */
-static long jent_chardev_ioctl_status(struct jent_chardev_ctx *ctx,
-				      void __user *arg)
-{
-	struct jent_status_ioctl status;
-	char *buf;
-	size_t slen;
-	long ret;
-
-	if (copy_from_user(&status, arg, sizeof(status)))
-		return -EFAULT;
-
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	if (mutex_lock_interruptible(&ctx->lock)) {
-		ret = -ERESTARTSYS;
-		goto out;
-	}
-
-	/*
-	 * Without a collector, jent_status() would emit a version-only JSON
-	 * stub; report an error instead, matching the per-instance proc file.
-	 */
-	if (ctx->entropy_collector)
-		ret = jent_status(ctx->entropy_collector, buf,
-				  JENT_STATUS_MAX_LEN);
-	else
-		ret = -1;
-	mutex_unlock(&ctx->lock);
-
-	if (ret) {
-		ret = -EIO;
-		goto out;
-	}
-
-	/* Number of bytes to copy out, including the terminating NUL. */
-	slen = strlen(buf) + 1;
-
-	if (status.length < slen) {
-		/* Buffer too small: report the required size to userspace. */
-		status.length = slen;
-		if (copy_to_user(arg, &status, sizeof(status)))
-			ret = -EFAULT;
-		else
-			ret = -EOVERFLOW;
-		goto out;
-	}
-
-	if (copy_to_user(u64_to_user_ptr(status.buf), buf, slen)) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	status.length = slen;
-	if (copy_to_user(arg, &status, sizeof(status))) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	ret = 0;
-
-out:
-	kvfree(buf);
-	return ret;
-}
-
-/*
- * The collector lock is held while the value is taken, as for the status
- * handler above; the copy to userspace can fault, so it follows the unlock.
- */
-static long jent_chardev_ioctl_field(struct jent_chardev_ctx *ctx,
-				     unsigned int cmd, void __user *arg)
-{
-	struct jent_ioctl_field field;
-	int ret;
-
-	if (mutex_lock_interruptible(&ctx->lock))
-		return -ERESTARTSYS;
-	ret = jent_ioctl_field_get(ctx->entropy_collector, cmd, &field);
-	mutex_unlock(&ctx->lock);
-
-	if (ret)
-		return ret;
-
-	if (copy_to_user(arg, &field.value, field.size))
-		return -EFAULT;
-
-	return 0;
 }
 
 static long jent_chardev_ioctl(struct file *file, unsigned int cmd,
@@ -405,15 +289,23 @@ static long jent_chardev_ioctl(struct file *file, unsigned int cmd,
 	if (!ctx)
 		return -EFAULT;
 
+	/*
+	 * The status and field handlers take ctx->lock themselves: the read
+	 * path may reallocate the collector on health-test recovery, so it must
+	 * not be read unlocked.
+	 */
 	switch (cmd) {
 	case JENT_IOCSTATUS:
-		return jent_chardev_ioctl_status(ctx, (void __user *)arg);
+		return jent_status_to_user(&ctx->lock, &ctx->entropy_collector,
+					   (void __user *)arg);
 	case JENT_IOCSELFTEST:
 		/* The run of this instance; it takes ctx->lock itself. */
 		return jent_ioctl_selftest(&ctx->selftest);
 	default:
 		if (jent_ioctl_is_field(cmd))
-			return jent_chardev_ioctl_field(ctx, cmd,
+			return jent_ioctl_field_to_user(&ctx->lock,
+							&ctx->entropy_collector,
+							cmd,
 							(void __user *)arg);
 		return -ENOTTY;
 	}

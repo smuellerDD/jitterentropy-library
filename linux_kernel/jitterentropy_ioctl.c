@@ -8,11 +8,23 @@
 
 #include <linux/build_bug.h>
 #include <linux/errno.h>
+#include <linux/mutex.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#include <linux/uaccess.h>
 
 #include "jitterentropy.h"
 #include "jitterentropy_ioctl.h"
+
+/* One answer, whichever field was asked for. */
+struct jent_ioctl_field {
+	union {
+		__u32 u32;
+		struct jent_uuid_ioctl uuid;
+		struct jent_output_ioctl output;
+	} value;
+	size_t size;		/* bytes of @value to copy out */
+};
 
 bool jent_ioctl_is_field(unsigned int cmd)
 {
@@ -37,8 +49,12 @@ static int jent_ioctl_field_u32(struct jent_ioctl_field *out, u32 val)
 	return 0;
 }
 
-int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
-			 struct jent_ioctl_field *out)
+/*
+ * Fill @out for @cmd. Called with the interface's lock held; the copy to
+ * userspace is jent_ioctl_field_to_user()'s, once it is dropped.
+ */
+static int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
+				struct jent_ioctl_field *out)
 {
 	/* Zeroed, so no padding carries kernel stack to userspace. */
 	memset(out, 0, sizeof(*out));
@@ -69,7 +85,8 @@ int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
 		out->size = sizeof(out->value.uuid);
 		return 0;
 	case JENT_IOCOSR:
-		return jent_ioctl_field_u32(out, jent_entropy_collector_osr(ec));
+		return jent_ioctl_field_u32(out,
+					    jent_entropy_collector_osr(ec));
 	case JENT_IOCFLAGS:
 		return jent_ioctl_field_u32(out,
 					    jent_entropy_collector_flags(ec));
@@ -89,4 +106,24 @@ int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
 	default:
 		return -ENOTTY;
 	}
+}
+
+long jent_ioctl_field_to_user(struct mutex *lock, struct rand_data **ec,
+			      unsigned int cmd, void __user *arg)
+{
+	struct jent_ioctl_field field;
+	int ret;
+
+	if (mutex_lock_interruptible(lock))
+		return -ERESTARTSYS;
+	ret = jent_ioctl_field_get(*ec, cmd, &field);
+	mutex_unlock(lock);
+
+	if (ret)
+		return ret;
+
+	if (copy_to_user(arg, &field.value, field.size))
+		return -EFAULT;
+
+	return 0;
 }
