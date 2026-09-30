@@ -1019,6 +1019,8 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 }
 
 #ifdef LINUX_KERNEL
+static inline int jent_entropy_init_common_pre(unsigned int flags);
+
 /*
  * Test interface support: allocate an entropy collector without running the
  * startup entropy collection and its health-test reset ladder, so the
@@ -1026,6 +1028,9 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
  * exactly what the raw noise recording measures. This mirrors the userspace
  * recording tools (tests/raw-entropy/recording_userspace), which call
  * jent_entropy_collector_alloc_internal() directly by including this file.
+ * The self tests of the conditioning run first, as they do before those
+ * tools record: a recording over a broken SHA-3 or GCD is no assessment of
+ * anything.
  *
  * Only intended for the kernel test interface
  * (linux_kernel/jitterentropy_testing.c); regular consumers must use
@@ -1034,6 +1039,12 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
 						   unsigned int flags)
 {
+	if (jent_entropy_init_common_pre(flags))
+		return NULL;
+
+	/* The memory the same flags get from jent_entropy_collector_alloc(). */
+	flags = jent_update_secure_mem(flags);
+
 	return jent_entropy_collector_alloc_internal(osr,
 						     flags |
 						     JENT_INT_MEASURE_CLOCK);
