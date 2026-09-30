@@ -10,7 +10,7 @@
 # tests/health and the unit tests do. It exists because fuzz-api cannot search:
 # every operation there measures the machine's real timer and the run manages
 # single-digit executions per second, while nothing in fuzz-health measures
-# anything and it runs four orders of magnitude faster.
+# anything and it judges orders of magnitude more measurements per second.
 #
 # Two programs are built from each harness:
 #
@@ -28,11 +28,31 @@
 # assert() and a build that defines NDEBUG would fuzz nothing but crashes. The
 # source undefines it itself, so a Release build needs no flag here.
 
+# ${PROJECT_NAME} is the library target, as the root CMakeLists.txt names it.
+# Not ${CMAKE_PROJECT_NAME}: that is the top-level project, which is someone
+# else's when this tree is pulled in with add_subdirectory().
 add_executable(fuzz-api-standalone fuzz-api.c)
 target_compile_definitions(fuzz-api-standalone PRIVATE JENT_FUZZ_STANDALONE)
 target_compile_options(fuzz-api-standalone PRIVATE ${JITTER_C_FLAGS})
-target_link_libraries(fuzz-api-standalone PRIVATE ${CMAKE_PROJECT_NAME})
+target_link_libraries(fuzz-api-standalone PRIVATE ${PROJECT_NAME})
 add_test(NAME fuzz-api-standalone COMMAND fuzz-api-standalone)
+# Its reads reach the real noise source. Not labelled "unreliable" as the
+# rng-* tests are: the contract it asserts holds on any machine and stays in a
+# gating run. Only a sweep without output on a machine whose timer the startup
+# test rejects (or, in the system's FIPS mode, whose memlock limit is too
+# tight) makes it skip, with 77; without output otherwise, it fails.
+set_tests_properties(fuzz-api-standalone PROPERTIES SKIP_RETURN_CODE 77)
+# For the system FIPS mode query of its own, BCryptGetFipsAlgorithmMode() or
+# the external libcrypto's: the library's is a private dependency a shared
+# build does not pass on. AWS-LC's is not asked, as it locks nothing.
+if(WIN32 AND NOT EXTERNAL_CRYPTO)
+    target_link_libraries(fuzz-api-standalone PRIVATE bcrypt)
+elseif(EXTERNAL_CRYPTO STREQUAL "LIBGCRYPT" OR
+       EXTERNAL_CRYPTO STREQUAL "OPENSSL")
+    target_include_directories(fuzz-api-standalone PRIVATE
+                               ${LIBCRYPTO_INCLUDE_DIR})
+    target_link_libraries(fuzz-api-standalone PRIVATE ${LIBCRYPTO_LIBRARY})
+endif()
 
 # Absorbs src/jitterentropy-health.c to reach jent_health_insert_timestamp()
 # and jent_stuck(), and so must NOT also link the library - the duplicates
@@ -53,7 +73,14 @@ if(ENABLE_FUZZING)
     target_compile_options(fuzz-api PRIVATE ${JITTER_C_FLAGS}
                            -fsanitize=fuzzer)
     target_link_options(fuzz-api PRIVATE -fsanitize=fuzzer)
-    target_link_libraries(fuzz-api PRIVATE ${CMAKE_PROJECT_NAME})
+    target_link_libraries(fuzz-api PRIVATE ${PROJECT_NAME})
+    if(WIN32 AND NOT EXTERNAL_CRYPTO)
+        target_link_libraries(fuzz-api PRIVATE bcrypt)
+    elseif(EXTERNAL_CRYPTO STREQUAL "LIBGCRYPT" OR
+           EXTERNAL_CRYPTO STREQUAL "OPENSSL")
+        target_include_directories(fuzz-api PRIVATE ${LIBCRYPTO_INCLUDE_DIR})
+        target_link_libraries(fuzz-api PRIVATE ${LIBCRYPTO_LIBRARY})
+    endif()
 
     add_executable(fuzz-health fuzz-health.c)
     target_compile_definitions(fuzz-health PRIVATE JENT_STATIC_LIB)
@@ -91,5 +118,5 @@ endif()
 # it exercises and links no library at all.
 if(WIN32 AND BUILD_SHARED_LIBS)
     set_tests_properties(fuzz-api-standalone PROPERTIES ENVIRONMENT_MODIFICATION
-        "PATH=path_list_prepend:$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>")
+        "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
 endif()

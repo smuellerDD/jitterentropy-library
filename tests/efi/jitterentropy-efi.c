@@ -73,10 +73,11 @@
  *
  * The Jitter RNG asks for its entropy pool through this, and asks for it
  * zeroed - jent_zalloc() clears what it gets, so nothing here has to. It is
- * not secure memory in the sense the library means: there is no kernel to ask
- * to keep a page off a swap device, and there is no swap device either.
- * jent_secure_memory_supported() reports that, and a caller asking for
- * JENT_FORCE_SECURE_MEM is refused rather than quietly given ordinary memory.
+ * secure memory as everywhere, since jent_zfree() wipes it before free(). The
+ * extras - a lock, a core dump exclusion - need no kernel here: there is no
+ * swap device, no second process to read it and no core dump for it to land
+ * in. So JENT_FORCE_SECURE_MEM is satisfied by this allocator rather than
+ * refused (JENT_BAREMETAL in arch/jitterentropy-arch-memory.c).
  */
 void *malloc(UINTN size);
 void free(void *ptr);
@@ -253,6 +254,11 @@ static void je_print_ascii(const char *s)
 			Print(L"\r\n");
 			continue;
 		}
+		/* Print() takes its argument as a format string. */
+		if (*s == '%') {
+			Print(L"%%");
+			continue;
+		}
 		line[0] = (CHAR16)*s;
 		Print(line);
 	}
@@ -288,8 +294,9 @@ static void je_print_hex(const unsigned char *buf, UINTN len)
 /*
  * One collector, from its allocation to its release: build it, generate from
  * it, print what came out and print what jent_status() says it settled on.
- * Every configuration goes through this same sequence, so the three documents
- * in the transcript differ only in what the library made of the flags.
+ * Every configuration goes through this same sequence, so the documents in the
+ * transcript - one per collector that came up - differ only in what the
+ * library made of the flags.
  *
  * @required says whether a refusal ends the run. It is set for the default
  * configuration, where nothing may go wrong, and clear for the compliance
@@ -301,8 +308,9 @@ static void je_print_hex(const unsigned char *buf, UINTN len)
  *
  * Both compliance modes also imply JENT_FORCE_SECURE_MEM, and here that is
  * satisfied rather than waived: there is no swap device, no second process and
- * no core dump, which is the same ground the Linux kernel backend claims
- * secure memory on. jent_status() says "secureMemory": true accordingly.
+ * no core dump, which is the same ground the Linux kernel backend claims the
+ * extras of secure memory on. jent_status() says "secureMemory": true, as it
+ * does for every build - the memory is wiped on free.
  */
 static EFI_STATUS je_collector(const CHAR16 *name, unsigned int flags,
 			       int required)
@@ -383,10 +391,9 @@ static EFI_STATUS je_collector(const CHAR16 *name, unsigned int flags,
  * a collector whose clock is a counter nothing increments, which would then
  * spin forever on the first measurement rather than return an error.
  *
- * Run last, and that is not arbitrary. A startup that fails clears the
- * process-wide latch recording that the self tests have run, so the next
- * allocation repeats them; harmless, but it would happen underneath the three
- * configurations above and they are what this program is for.
+ * Run last, after the three configurations above that this program is for. A
+ * refused startup leaves the process-wide startup verdicts as they were - a
+ * failure never retracts one - so the order is not needed for correctness.
  */
 static EFI_STATUS je_no_internal_timer(void)
 {

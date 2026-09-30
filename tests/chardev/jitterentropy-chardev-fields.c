@@ -12,6 +12,10 @@
  * Serves both interfaces: an empty "uuid" in the document is what selects the
  * -ENODATA expectation for JENT_IOCUUID on a raw test instance.
  *
+ * Every open allocates a fresh collector, so the tool reads from the file
+ * before it takes the snapshot: without that the output counters are 0 on
+ * both sides and a swapped or dropped field would agree with the document.
+ *
  * Usage: jitterentropy-chardev-fields [<device file>]
  */
 
@@ -50,7 +54,7 @@ static void fail(const char *fmt, ...)
 /*
  * jent_status() has a fixed layout, so these are string searches, not a JSON
  * parse. Each takes a region, which is how the repeated key names inside the
- * healthFailure and output objects are told apart.
+ * healthFailure, healthTests and output objects are told apart.
  */
 
 /* The text after "<key>": within [hay, end), or NULL. */
@@ -183,6 +187,12 @@ static char *get_status(int fd)
 	return buf;
 }
 
+/*
+ * Read before the snapshot; see the top of the file. A whole number of the
+ * raw interface's u64 samples, as it refuses any other length.
+ */
+#define READ_LEN 96
+
 int main(int argc, char *argv[])
 {
 	const char *devfile = "/dev/jitterentropy";
@@ -190,9 +200,12 @@ int main(int argc, char *argv[])
 	struct jent_output_ioctl output;
 	struct jent_uuid_ioctl uuid;
 	char json_uuid[JENT_UUID_IOCTL_LEN];
+	unsigned char data[READ_LEN];
 	char *json;
+	ssize_t got;
 	uint64_t n;
 	uint32_t val;
+	__u64 memsize;
 	unsigned int maj, min, patch;
 	int fd, have_uuid;
 
@@ -202,6 +215,18 @@ int main(int argc, char *argv[])
 	fd = open(devfile, O_RDONLY);
 	if (fd < 0) {
 		perror(devfile);
+		return EXIT_FAILURE;
+	}
+
+	/*
+	 * The character device hands out READ_LEN bytes of random data in
+	 * one call; the raw test interface hands out noise samples, which do
+	 * not go through the output counters.
+	 */
+	got = read(fd, data, sizeof(data));
+	if (got <= 0) {
+		perror("read");
+		close(fd);
 		return EXIT_FAILURE;
 	}
 
@@ -276,6 +301,29 @@ int main(int argc, char *argv[])
 			     "document says %" PRIu64, val, n);
 	}
 
+	/* JENT_IOCMEMSIZE against configuration.memoryBlockSizeBytes. */
+	if (ioctl(fd, JENT_IOCMEMSIZE, &memsize)) {
+		fail("JENT_IOCMEMSIZE: %s", strerror(errno));
+	} else {
+		printf("memory size:      %llu\n", (unsigned long long)memsize);
+		if (json_u64(json, NULL, "memoryBlockSizeBytes", &n))
+			fail("no \"memoryBlockSizeBytes\" in the status document");
+		else if (n != memsize)
+			fail("memory size: ioctl says %llu, status document "
+			     "says %" PRIu64, (unsigned long long)memsize, n);
+	}
+
+	/* JENT_IOCHASHLOOPS against configuration.hashLoopCount.runtime. */
+	if (ioctl(fd, JENT_IOCHASHLOOPS, &val)) {
+		fail("JENT_IOCHASHLOOPS: %s", strerror(errno));
+	} else {
+		printf("hash loops:       %u\n", val);
+		if (find_object(json, "hashLoopCount", &obj, &obj_end))
+			fail("no \"hashLoopCount\" object in the status document");
+		else if (json_u64(obj, obj_end, "runtime", &n) || n != val)
+			fail("hash loops: ioctl says %u", val);
+	}
+
 	/* configuration.flags reports the same value one bit at a time. */
 	if (ioctl(fd, JENT_IOCFLAGS, &val)) {
 		fail("JENT_IOCFLAGS: %s", strerror(errno));
@@ -314,12 +362,32 @@ int main(int argc, char *argv[])
 			{ "rctMemory",	JENT_RCT_MEM_FAILURE },
 			{ "lag",	JENT_LAG_FAILURE },
 		};
+		const char *hf = NULL, *hf_end = NULL;
 		size_t i;
 
 		printf("healthFailure:    0x%08x\n", val);
-		for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
+
+		/* healthTests repeats the test names: search healthFailure. */
+		if (find_object(json, "healthFailure", &hf, &hf_end))
+			fail("no \"healthFailure\" object in the status "
+			     "document");
+
+		/*
+		 * A healthy instance leaves every bit clear on both sides, so
+		 * at least a value shifted off the defined bits is caught.
+		 */
+		if (val & ~(uint32_t)(JENT_RCT_FAILURE | JENT_APT_FAILURE |
+				      JENT_LAG_FAILURE | JENT_RCT_MEM_FAILURE |
+				      JENT_RCT_FAILURE_PERMANENT |
+				      JENT_APT_FAILURE_PERMANENT |
+				      JENT_LAG_FAILURE_PERMANENT |
+				      JENT_RCT_MEM_FAILURE_PERMANENT))
+			fail("healthFailure: undefined bits set in 0x%08x", val);
+
+		for (i = 0; hf && i < sizeof(tests) / sizeof(tests[0]); i++) {
 			/* The lag predictor is compiled out of some builds. */
-			if (find_object(json, tests[i].object, &obj, &obj_end)) {
+			if (find_object(hf, tests[i].object, &obj, &obj_end) ||
+			    obj_end > hf_end) {
 				if (tests[i].bit != JENT_LAG_FAILURE)
 					fail("no \"%s\" object in the status "
 					     "document", tests[i].object);
@@ -333,7 +401,13 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	/* Nothing is read in between, so the two must agree exactly. */
+	/*
+	 * Nothing is read in between, so the two must agree exactly. They
+	 * also have to account for the read above: on the character device
+	 * all of its bytes, in fewer invocations than bytes (it hands the
+	 * library chunks), so swapped fields cannot pass; on the raw
+	 * interface nothing.
+	 */
 	if (ioctl(fd, JENT_IOCOUTPUT, &output)) {
 		fail("JENT_IOCOUTPUT: %s", strerror(errno));
 	} else {
@@ -353,11 +427,32 @@ int main(int argc, char *argv[])
 				fail("output.bytes: ioctl says %llu",
 				     (unsigned long long)output.bytes);
 		}
+
+		if (have_uuid) {
+			if (got != READ_LEN)
+				fail("read: %zd bytes instead of %d", got,
+				     READ_LEN);
+			if (output.bytes != (unsigned long long)got)
+				fail("output.bytes: %llu after a read of %zd "
+				     "bytes", (unsigned long long)output.bytes,
+				     got);
+			if (!output.invocations ||
+			    output.invocations >= output.bytes)
+				fail("output.invocations: %llu for %llu bytes",
+				     (unsigned long long)output.invocations,
+				     (unsigned long long)output.bytes);
+		} else if (output.invocations || output.bytes) {
+			fail("output: %llu invocations, %llu bytes on a raw "
+			     "instance", (unsigned long long)output.invocations,
+			     (unsigned long long)output.bytes);
+		}
 	}
 
 	/*
-	 * The self test is module-wide rather than a field of this instance,
-	 * so the status document has nothing to compare it against. What is
+	 * The self test is this instance's own, but an action rather than a
+	 * field: it runs the known answer tests bound to the collector behind
+	 * this file and returns a verdict, which the status document has no
+	 * value to compare against. What is
 	 * checked is the privilege rule: it runs for a caller holding
 	 * CAP_SYS_ADMIN and is refused to one without it. euid 0 stands in for
 	 * the capability - a non-root caller that holds it through a file

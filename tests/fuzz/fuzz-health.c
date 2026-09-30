@@ -34,7 +34,7 @@
  * delta against the previously inserted stamp exactly as the noise source
  * forms it and runs every health test on it, so the fuzzer supplies the
  * numbers the noise source would have measured and the run costs what the
- * tests themselves cost - four orders of magnitude more executions per second
+ * tests themselves cost - orders of magnitude more measurements per second
  * than fuzz-api reaches, spent inside the state machines that have counters,
  * windows, cutoff tables indexed by the oversampling rate, and a recovery loop
  * that re-enters the generation.
@@ -57,6 +57,12 @@
  *     would want,
  *   - every window counter stays inside its window, and the lag predictor's
  *     index stays inside the history it indexes,
+ *   - the stamps are framed into blocks as the noise source frames them -
+ *     a reported failure ends the block, and every later call measures only
+ *     its priming - and the window of the RCT with memory advances by one
+ *     per measurement while open - across a recovery too, which must restore
+ *     it - and no count carries across a window start but one a duplicate
+ *     primed,
  *   - the tests report nothing at all outside FIPS mode, whatever the state
  *     they accumulated,
  *   - no test writes outside the collector it was given, which is checked
@@ -97,24 +103,24 @@
 #include "jitterentropy-health.c"
 
 /*
- * Referenced from the recovery loop of the RCT with memory. A stub, for the
- * reason tests/health gives for its own: what is under test is that reaching
- * the cutoff outside recovery clears the counter and enters the loop, not what
- * the noise source produces while it runs - and a stub keeps the harness
- * deterministic, which a fuzzing target has to be or its crashes do not
- * reproduce.
+ * Measurements per input, recovery blocks included, in windows of the RCT
+ * with memory: a recovery is ten blocks inside the outer one, and a stall
+ * pattern can double what a block takes. Granted at one window per
+ * FH_BYTES_PER_WINDOW input bytes, so a short input stays cheap however long
+ * the runs it asks for, and a recovery costs about as many bytes at every
+ * osr - the window, and so the budget, grows with it.
  */
-void jent_random_data_recovery(struct rand_data *ec, unsigned int loops)
-{
-	(void)ec;
-	(void)loops;
-}
-
-/* Time stamps per input: enough to cross the APT window several times. */
-#define FH_MAX_STAMPS		4096
+#define FH_WINDOWS		(2 * (JENT_RCT_MEM_RECOVERY_LOOP_CNT + 2))
+#define FH_BYTES_PER_WINDOW	16
+/* The widest window, rounded up to a multiple of three as it is. */
+#define FH_MAX_STAMPS		(FH_WINDOWS *				       \
+				 (JENT_MEASURE_JITTER_LOOP_CTR(JENT_MAX_OSR,   \
+					ENTROPY_SAFETY_FACTOR) + 2))
 /* The guard around the collector, checked after every insertion. */
 #define FH_GUARD		32
 #define FH_FILL			0xa5
+/* Stamp selectors from here up start a run - see fh_next_stamp(). */
+#define FH_RUN_PICK		0xf0
 
 /* Every bit jent_health_failure() is allowed to report. */
 #define FH_FAILURE_MASK		(JENT_RCT_FAILURE | JENT_APT_FAILURE |	       \
@@ -173,24 +179,6 @@ static void fh_check_guards(const struct fh_collector *c)
 }
 
 /*
- * Window size of the RCT with memory: the number of time deltas the noise
- * source produces for one output block. Mirrors the calculation of
- * JENT_ADJUSTED_MEASURE_JITTER_LOOP_CTR in jent_random_data_one(), which is
- * where ec->rct_mem_nosr is established at runtime - as tests/health does,
- * for the same reason: without it the test never enters its window and the
- * fuzzer would never reach it.
- */
-static unsigned short fh_rct_mem_nosr(unsigned int osr)
-{
-	unsigned int nosr = (DATA_SIZE_BITS + ENTROPY_SAFETY_FACTOR) * osr;
-
-	/* Round up to the nearest multiple of three. */
-	nosr = ((nosr + 2) / 3) * 3;
-
-	return (unsigned short)nosr;
-}
-
-/*
  * The configuration the stamps are judged under, drawn from the input: which
  * cutoff tables are in force, at which oversampling rate, whether the tests
  * report at all, and what the startup established as the common divisor of
@@ -202,6 +190,49 @@ struct fh_config {
 	unsigned int fips;
 	uint64_t gcd;
 };
+
+/*
+ * One input's run. Global, because the recovery stub below is reached from
+ * inside the health tests and has to draw from the same input.
+ *
+ * Collector 0 is fed deltas through jent_stuck() and draws the stamps, which
+ * are recorded; collector 1 is then fed the same stamps through
+ * jent_health_insert_timestamp(). A recovery entered while collector 0
+ * measures draws further stamps before collector 1 has seen the first, so
+ * the record is what lets both judge the same sequence.
+ */
+struct fh_run {
+	struct fh_state s;
+	struct fh_config cfg;
+	struct fh_collector c[2];
+
+	/* The clock model. */
+	uint64_t prev, step, rng;
+	unsigned int run_left, run_idx, run_period, run_phase, run_const;
+	unsigned int run_window;
+
+	/* Measurements drawn, against this input's budget. */
+	unsigned int n, budget;
+
+	/* Stamps collector 0 drew in this step, for collector 1 to replay. */
+	uint64_t rec[FH_MAX_STAMPS];
+	unsigned int rec_n, rec_pos;
+
+	/*
+	 * Recoveries entered; of those, the ones entered with no failure
+	 * reported - the others end before their first block - and the ones
+	 * that ran all their blocks. Windows opened, and of those the ones
+	 * after a completed recovery.
+	 */
+	unsigned int recoveries[2], live[2], completed[2];
+	unsigned int windows, resumed;
+};
+
+static struct fh_run fh_run;
+
+/* Across inputs, for the sweep to check what it reached. */
+static unsigned long fh_total_windows, fh_total_recoveries;
+static unsigned long fh_total_resumed, fh_total_rct_mem_failures;
 
 static struct fh_config fh_draw_config(struct fh_state *s)
 {
@@ -228,10 +259,12 @@ static struct fh_config fh_draw_config(struct fh_state *s)
 
 	/*
 	 * The divisor the startup found common to every delta. One is the
-	 * usual answer and zero is the one a collector assembled by hand can
-	 * carry, which jent_health_insert_timestamp() substitutes for rather
-	 * than dividing by; the rest are the coarse counters where it is a
-	 * power of two, and the values in between that no timer produces but
+	 * usual answer, and zero - the one a collector assembled by hand can
+	 * carry - is how it is drawn: jent_health_insert_timestamp()
+	 * substitutes one for it rather than dividing by it, so a pick of one
+	 * as well would only run that case twice. The rest are the coarse
+	 * counters where it is a power of two, a small odd one no shift
+	 * stands in for, and the values in between that no timer produces but
 	 * a caller can still set.
 	 */
 	switch (fh_u8(s) % 6) {
@@ -239,7 +272,7 @@ static struct fh_config fh_draw_config(struct fh_state *s)
 		cfg.gcd = 0;
 		break;
 	case 1:
-		cfg.gcd = 1;
+		cfg.gcd = 3;
 		break;
 	case 2:
 		cfg.gcd = 2;
@@ -272,8 +305,50 @@ static void fh_init(struct fh_collector *c, const struct fh_config *cfg)
 	if (cfg->fips)
 		c->ec.is_fips_enabled = 1;
 
+	/*
+	 * jent_health_init() establishes the window of the RCT with memory -
+	 * at this collector's own osr and FIPS setting, so the fuzzer drives
+	 * the window the runtime would use. It was recomputed here from a copy
+	 * of the formula while jent_health_init() left it at zero, which kept
+	 * the test out of its window entirely.
+	 */
 	jent_health_init(&c->ec, cfg->inittype);
-	c->ec.rct_mem_nosr = fh_rct_mem_nosr(cfg->osr);
+}
+
+/*
+ * Healthy noise: a delta no derivative of which is likely zero, in units of
+ * the divisor so that dividing by it leaves the delta as drawn.
+ */
+static uint64_t fh_noise(struct fh_run *r)
+{
+	r->rng ^= r->rng << 13;
+	r->rng ^= r->rng >> 7;
+	r->rng ^= r->rng << 17;
+
+	return (1 + (r->rng & 0xfff)) * (r->cfg.gcd ? r->cfg.gcd : 1);
+}
+
+/*
+ * A stall every period-th stamp of a run, a stuck measurement placed where the
+ * RCT with memory counts - or does not. Or every period-th position of the
+ * open window: a run index drifts against the window from block to block, and
+ * only this reaches the cutoff again inside a recovery block. Collector 0 is
+ * always the one drawing.
+ */
+static int fh_run_stalls(const struct fh_run *r, unsigned int idx)
+{
+	const struct rand_data *ec = &r->c[0].ec;
+	unsigned int pos = idx;
+
+	if (!r->run_period)
+		return 0;
+	if (r->run_window) {
+		if (ec->rct_mem_ctr >= ec->rct_mem_nosr)
+			return 0;
+		pos = ec->rct_mem_ctr;
+	}
+
+	return pos % r->run_period == r->run_phase % r->run_period;
 }
 
 /*
@@ -282,10 +357,37 @@ static void fh_init(struct fh_collector *c, const struct fh_config *cfg)
  * so it would leave every health test asleep. What is drawn instead is how the
  * clock behaves - stalled, ticking by a constant, cycling, jumping, running
  * backwards, wrapping - which is what the tests are written against.
+ *
+ * And runs of it, from a few bytes: a block is hundreds to thousands of
+ * non-stuck measurements, and a recovery ten of them, which one byte per
+ * stamp would not reach within any input libFuzzer grows by default.
  */
-static uint64_t fh_next_stamp(struct fh_state *s, uint64_t prev, uint64_t *step)
+static uint64_t fh_next_stamp(struct fh_run *r)
 {
-	uint8_t pick = fh_u8(s);
+	struct fh_state *s = &r->s;
+	uint64_t prev = r->prev;
+	uint8_t pick;
+
+	if (r->run_left) {
+		r->run_left--;
+		if (fh_run_stalls(r, r->run_idx++))
+			return prev;
+		return prev + (r->run_const ? r->step : fh_noise(r));
+	}
+
+	pick = fh_u8(s);
+	if (pick >= FH_RUN_PICK) {
+		uint8_t kind = fh_u8(s);
+
+		r->run_period = kind & 7;
+		r->run_const = (kind >> 3) & 1;
+		r->run_window = (kind >> 4) & 1;
+		r->run_phase = fh_u8(s);
+		r->run_left = ((unsigned int)fh_u8(s) << 8) | fh_u8(s);
+		r->run_idx = 0;
+		r->rng = 0x9e3779b97f4a7c15ULL ^ fh_u8(s);
+		return prev + fh_noise(r);
+	}
 
 	switch (pick % 8) {
 	case 0:
@@ -294,15 +396,18 @@ static uint64_t fh_next_stamp(struct fh_state *s, uint64_t prev, uint64_t *step)
 	case 1:
 		/* Constant steps: the deltas repeat, so the APT sees one
 		 * symbol and the third derivative is zero. */
-		return prev + *step;
+		return prev + r->step;
 	case 2:
 		/* A new constant, so a run of one shape gives way to another. */
-		*step = (uint64_t)fh_u8(s) + 1;
-		return prev + *step;
+		r->step = (uint64_t)fh_u8(s) + 1;
+		return prev + r->step;
 	case 3:
 		/* Small steps, where the deltas are drawn from a set small
-		 * enough for the lag predictor to learn. */
-		return prev + (pick % 4);
+		 * enough for the lag predictor to learn. A fresh draw: the
+		 * selector above is pick % 8, so pick % 4 is fixed at 3 in
+		 * this arm and the case was a constant step of 3 - case 1
+		 * over again, and this distribution was never generated. */
+		return prev + (fh_u8(s) % 4);
 	case 4:
 		/* Backwards, which no counter does and jent_delta() has to
 		 * answer for anyway. */
@@ -339,11 +444,11 @@ static void fh_check_invariants(const struct fh_collector *c,
 
 	fh_check_guards(c);
 
-	/* Nothing outside the documented bits, and nothing at all when the
-	 * tests are not reporting. */
-	assert((failure & ~(unsigned int)FH_FAILURE_MASK) == 0);
-	if (!cfg->fips)
-		assert(failure == 0);
+	/* Nothing outside the documented bits. The tests run either way and
+	 * record what they find; the report is what is gated: all of it in
+	 * FIPS mode, nothing at all outside it. */
+	assert((ec->health_failure & ~(unsigned int)FH_FAILURE_MASK) == 0);
+	assert(failure == (cfg->fips ? ec->health_failure : 0));
 
 	/* The APT counts recurrences of one symbol inside a window and starts
 	 * a new one when the window is full, so neither can outgrow it. */
@@ -354,6 +459,12 @@ static void fh_check_invariants(const struct fh_collector *c,
 	 * most one measurement per insertion. */
 	assert(ec->rct_mem_ctr <= ec->rct_mem_nosr);
 	assert(ec->rct_mem_count <= ec->rct_mem_nosr);
+
+	/* Outside a recovery the intermittent cutoff is never left standing:
+	 * reaching it enters the recovery, which restarts the count. */
+	assert(ec->in_recovery ||
+	       ec->rct_mem_count < ec->rct_mem_cutoff ||
+	       ec->rct_mem_count >= ec->rct_mem_cutoff_permanent);
 
 #ifdef JENT_HEALTH_LAG_PREDICTOR
 	/* The predictor's window, and the index into the history it keeps -
@@ -366,44 +477,251 @@ static void fh_check_invariants(const struct fh_collector *c,
 #endif
 }
 
+static unsigned int fh_which(const struct rand_data *ec)
+{
+	if (ec == &fh_run.c[0].ec)
+		return 0;
+	assert(ec == &fh_run.c[1].ec);
+	return 1;
+}
+
+/*
+ * One measurement into one collector, and what the RCT with memory must have
+ * done with it. Returns 0 once the input or the budget is spent.
+ */
+static int fh_measure(unsigned int which, unsigned int *stuck)
+{
+	struct fh_run *r = &fh_run;
+	struct rand_data *ec = &r->c[which].ec;
+	unsigned int ctr = ec->rct_mem_ctr, count = ec->rct_mem_count;
+	unsigned int primed = ec->rct_mem_primed;
+	unsigned int inrec = ec->in_recovery;
+	unsigned int recs = r->recoveries[which];
+	uint64_t stamp, delta;
+	unsigned int s;
+
+	if (!which) {
+		if (r->n >= r->budget || (fh_eof(&r->s) && !r->run_left))
+			return 0;
+		stamp = fh_next_stamp(r);
+		r->n++;
+		r->rec[r->rec_n++] = stamp;
+
+		/* Ahead of the insertion: a recovery it enters draws on. */
+		delta = fh_delta(r->prev, stamp, r->cfg.gcd);
+		r->prev = stamp;
+		s = jent_stuck(ec, delta);
+	} else {
+		if (r->rec_pos == r->rec_n)
+			return 0;
+		stamp = r->rec[r->rec_pos++];
+		s = jent_health_insert_timestamp(ec, stamp);
+	}
+
+	/* A verdict on one measurement, not a count. */
+	assert(s == 0 || s == 1);
+	assert(ec->in_recovery == inrec);
+
+	/*
+	 * The window advances by one while open, whatever happened inside -
+	 * a recovery included, which has to restore the position it left.
+	 */
+	assert(ec->rct_mem_ctr == ctr + (ctr < ec->rct_mem_nosr));
+
+	/* No carry across a window start but the one a duplicate primed. */
+	if (!ctr && !primed)
+		count = 0;
+	assert(ec->rct_mem_count <= count + s);
+	if (!ctr)
+		assert(!ec->rct_mem_primed);
+
+	/* A recovery entered here left a fresh count behind. */
+	if (r->recoveries[which] != recs) {
+		assert(!inrec);
+		assert(ec->rct_mem_count == 0);
+	}
+
+	fh_check_invariants(&r->c[which], &r->cfg, jent_health_failure(ec));
+
+	*stuck = s;
+	return 1;
+}
+
+/*
+ * The ->prev_time priming measurement: the next stamp only sets the reference,
+ * as jent_measure_jitter_one() primes with the health tests off.
+ */
+static int fh_prime(unsigned int which)
+{
+	struct fh_run *r = &fh_run;
+	struct rand_data *ec = &r->c[which].ec;
+	uint64_t stamp;
+
+	if (!which) {
+		if (r->n >= r->budget || (fh_eof(&r->s) && !r->run_left))
+			return 0;
+		stamp = fh_next_stamp(r);
+		r->n++;
+		r->rec[r->rec_n++] = stamp;
+		r->prev = stamp;
+	} else {
+		if (r->rec_pos == r->rec_n)
+			return 0;
+		stamp = r->rec[r->rec_pos++];
+	}
+	ec->prev_time = stamp;
+
+	return 1;
+}
+
+/*
+ * The framing of jent_random_data() in the completed state: the ->prev_time
+ * priming measurement, which the health tests do not judge, then
+ * jent_random_data_one() opens the window and ends after ->rct_mem_nosr
+ * non-stuck measurements or on a failure. The NTG.1 / FIPS startup blocks have
+ * no priming measurement and are not modelled.
+ */
+static int fh_block(unsigned int which)
+{
+	struct rand_data *ec = &fh_run.c[which].ec;
+	unsigned int block = 0, s;
+
+	assert(ec->rct_mem_ctr == ec->rct_mem_nosr);
+	if (!fh_prime(which))
+		return 0;
+	ec->rct_mem_ctr = 0;
+
+	while (!jent_health_failure(ec)) {
+		if (!fh_measure(which, &s))
+			return 0;
+		if (!s && ++block >= ec->rct_mem_nosr)
+			break;
+	}
+
+	return 1;
+}
+
+/*
+ * Referenced from the recovery loop of the RCT with memory. The real one
+ * generates fresh blocks; this one frames the next stamps of the input as
+ * those blocks, so the loop - its intermittent failure, and the window the
+ * caller saves around it - is fuzzed as the noise source runs it, and stays
+ * deterministic, which a fuzzing target has to be or its crashes do not
+ * reproduce.
+ */
+void jent_random_data_recovery(struct rand_data *ec, unsigned int loops)
+{
+	unsigned int which = fh_which(ec), i;
+
+	fh_run.recoveries[which]++;
+	/* A failure reported ahead of it ends it before the first block. */
+	if (!jent_health_failure(ec))
+		fh_run.live[which]++;
+
+	/* The caller closed the outer window and cleared the count. */
+	assert(ec->in_recovery);
+	assert(ec->rct_mem_ctr == ec->rct_mem_nosr);
+	assert(ec->rct_mem_count == 0);
+
+	for (i = 0; i < loops; i++) {
+		if (jent_health_failure(ec) || !fh_block(which))
+			break;
+	}
+	if (i == loops && !jent_health_failure(ec))
+		fh_run.completed[which]++;
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	struct fh_collector stamps, deltas;
-	struct fh_config cfg;
-	struct fh_state s;
-	uint64_t prev = 0, step = 1;
-	unsigned int seen = 0, n;
+	struct fh_run *r = &fh_run;
+	struct rand_data *d = &r->c[0].ec, *t = &r->c[1].ec;
+	unsigned int seen = 0, block = 0, nosr;
+	uint64_t budget;
+	int priming = 1, first = 1;
 
-	s.data = data;
-	s.len = size;
-	s.pos = 0;
+	/* Everything but the record itself, only read below rec_n. */
+	memset(r, 0, offsetof(struct fh_run, rec));
+	memset(&r->rec_n, 0, sizeof(*r) - offsetof(struct fh_run, rec_n));
+	r->step = 1;
 
-	cfg = fh_draw_config(&s);
+	r->s.data = data;
+	r->s.len = size;
+	r->s.pos = 0;
+
+	r->cfg = fh_draw_config(&r->s);
 
 	/*
 	 * Two collectors in the same configuration: one fed the stamps, one
 	 * fed the deltas those stamps form. They must not drift apart.
 	 */
-	fh_init(&stamps, &cfg);
-	fh_init(&deltas, &cfg);
+	fh_init(&r->c[0], &r->cfg);
+	fh_init(&r->c[1], &r->cfg);
 
-	for (n = 0; n < FH_MAX_STAMPS && !fh_eof(&s); n++) {
-		uint64_t stamp = fh_next_stamp(&s, prev, &step);
-		unsigned int stuck_stamp, stuck_delta, failure;
+	nosr = t->rct_mem_nosr;
+	budget = (uint64_t)size * nosr / FH_BYTES_PER_WINDOW;
+	r->budget = budget < (uint64_t)FH_WINDOWS * nosr ?
+		    (unsigned int)budget : FH_WINDOWS * nosr;
 
-		stuck_delta = jent_stuck(&deltas.ec,
-					 fh_delta(prev, stamp, cfg.gcd));
-		stuck_stamp = jent_health_insert_timestamp(&stamps.ec, stamp);
-		prev = stamp;
+	for (;;) {
+		unsigned int stuck_delta, stuck_stamp, failure;
 
-		/* A verdict on one measurement, not a count. */
-		assert(stuck_stamp == 0 || stuck_stamp == 1);
+		/*
+		 * The ->prev_time priming of the next jent_random_data() call
+		 * finds the window closed behind a completed block. After a
+		 * failure it is wherever that left it, or at zero behind a call
+		 * that measured nothing but its priming. The first is taken as
+		 * the allocation leaves the collector, with the window open at
+		 * zero.
+		 */
+		if (priming && !first && !jent_health_failure(t)) {
+			assert(d->rct_mem_ctr == d->rct_mem_nosr);
+			assert(t->rct_mem_ctr == t->rct_mem_nosr);
+		}
+
+		r->rec_n = r->rec_pos = 0;
+
+		/*
+		 * jent_random_data_one() opens the window whatever was
+		 * reported, and measures nothing once something is: the next
+		 * call primes again.
+		 */
+		if (priming) {
+			if (!fh_prime(0))
+				break;
+			/* Collector 1 replays what collector 0 drew. */
+			if (!fh_prime(1))
+				assert(0);
+			assert(r->rec_pos == r->rec_n);
+
+			d->rct_mem_ctr = 0;
+			t->rct_mem_ctr = 0;
+			first = 0;
+			if (!jent_health_failure(t)) {
+				priming = 0;
+				r->windows++;
+				if (r->completed[1])
+					r->resumed++;
+			}
+			continue;
+		}
+
+		if (!fh_measure(0, &stuck_delta))
+			break;
+		/* Collector 1 replays what collector 0 drew; it cannot run
+		 * dry first. */
+		if (!fh_measure(1, &stuck_stamp))
+			assert(0);
+		assert(r->rec_pos == r->rec_n);
+
 		assert(stuck_stamp == stuck_delta);
+		assert(r->recoveries[0] == r->recoveries[1]);
+		assert(r->live[0] == r->live[1]);
+		assert(r->completed[0] == r->completed[1]);
 
-		failure = jent_health_failure(&stamps.ec);
-		assert(failure == jent_health_failure(&deltas.ec));
+		failure = jent_health_failure(t);
+		assert(failure == jent_health_failure(d));
 
 		/*
 		 * A reported failure is never taken back. Checked across the
@@ -413,18 +731,27 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		assert((failure & seen) == seen);
 		seen = failure;
 
-		fh_check_invariants(&stamps, &cfg, failure);
-		fh_check_invariants(&deltas, &cfg,
-				    jent_health_failure(&deltas.ec));
+		/* A failure ends a block as it does. */
+		if (failure || (!stuck_stamp && ++block >= t->rct_mem_nosr)) {
+			block = 0;
+			priming = 1;
+		}
 	}
+
+	fh_total_windows += r->windows;
+	fh_total_recoveries += r->live[1];
+	fh_total_resumed += r->resumed;
+	if (jent_health_failure(t) & JENT_RCT_MEM_FAILURE)
+		fh_total_rct_mem_failures++;
 
 	/*
 	 * The stamp entry point is the delta entry point plus the delta: the
 	 * two collectors saw the same measurements, so nothing but the time
 	 * stamp they were derived from may differ.
 	 */
-	deltas.ec.prev_time = stamps.ec.prev_time;
-	assert(!memcmp(&stamps.ec, &deltas.ec, sizeof(stamps.ec)));
+	assert(t->prev_time == r->prev);
+	d->prev_time = t->prev_time;
+	assert(!memcmp(d, t, sizeof(*t)));
 
 	return 0;
 }
@@ -439,8 +766,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
  *
  * The sweep's inputs come from a counter through a mixing function rather than
  * from rand(): a regression case has to be the same on every machine and in
- * every run. The inputs are long, unlike fuzz-api's, because here a long one
- * costs nothing and the windows worth crossing are hundreds of stamps wide.
+ * every run. Each input is granted FH_SWEEP_LEN / FH_BYTES_PER_WINDOW windows.
  */
 
 static int fh_run_file(const char *path)
@@ -464,12 +790,33 @@ static int fh_run_file(const char *path)
 }
 
 #define FH_SWEEP_INPUTS		64
-#define FH_SWEEP_LEN		2048
+#define FH_SWEEP_LEN		256
+
+/*
+ * What the random sweep is unlikely to get to. Zero-padded to FH_SWEEP_LEN for
+ * the budget; the runs outlast it, so the padding is never read.
+ *
+ * osr 3, common tables, FIPS, divisor 1, then a run of noise stalled at every
+ * counted position of the window: the count reaches the intermittent cutoff at
+ * the end of the first window and again in the first recovery block, which
+ * raises the intermittent failure.
+ *
+ * osr 20, the same, but the stalled run ends on the stamp that reaches the
+ * cutoff (0x1912 = 6417 + 1, the last counted position of the 6420 wide
+ * window) and plain noise follows: the recovery completes all its blocks and
+ * the outer block runs on into the next window.
+ */
+static const unsigned char fh_seeds[][FH_SWEEP_LEN] = {
+	{ 0x00, 0x02, 0x01, FH_RUN_PICK, 0x13, 0x00, 0xff, 0xff, 0x01 },
+	{ 0x11, 0x02, 0x01, FH_RUN_PICK, 0x13, 0x00, 0x19, 0x12, 0x01,
+	  FH_RUN_PICK, 0x00, 0x00, 0xff, 0xff, 0x01,
+	  FH_RUN_PICK, 0x00, 0x00, 0xff, 0xff, 0x02 },
+};
 
 int main(int argc, char *argv[])
 {
 	static unsigned char input[FH_SWEEP_LEN];
-	unsigned int i, j;
+	unsigned int i, j, resumed;
 	int ret = 0;
 
 	if (argc > 1) {
@@ -492,7 +839,24 @@ int main(int argc, char *argv[])
 		LLVMFuzzerTestOneInput(input, sizeof(input));
 	}
 
-	printf("fuzz-health: %u inputs survived\n", FH_SWEEP_INPUTS);
+	LLVMFuzzerTestOneInput(fh_seeds[0], sizeof(fh_seeds[0]));
+	LLVMFuzzerTestOneInput(fh_seeds[1], sizeof(fh_seeds[1]));
+	/* The second seed's own: the sweep may resume only at a low osr. */
+	resumed = fh_run.resumed;
+
+	printf("fuzz-health: %u inputs survived: %lu window(s), %lu recovery "
+	       "loop(s), %lu resumed after one, %lu RCT-mem failure(s)\n",
+	       FH_SWEEP_INPUTS + 2, fh_total_windows, fh_total_recoveries,
+	       fh_total_resumed, fh_total_rct_mem_failures);
+
+	/* That the window reopens, the recovery is reached, and the outer
+	 * block runs on after one completed is what the framing is for; a
+	 * sweep that no longer gets there tests less. */
+	if (fh_total_windows < 2 || !fh_total_recoveries ||
+	    !fh_total_rct_mem_failures || !resumed) {
+		fprintf(stderr, "fuzz-health: framing not exercised\n");
+		return 1;
+	}
 
 	return 0;
 }

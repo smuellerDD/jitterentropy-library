@@ -12,6 +12,9 @@
  * Usage: jitterentropy-chardev-status [<device file>]
  */
 
+/* strnlen() is POSIX.1-2008, hidden by glibc under a strict -std=c11. */
+#define _POSIX_C_SOURCE 200809L
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>

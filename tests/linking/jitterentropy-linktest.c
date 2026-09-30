@@ -38,6 +38,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(__unix__) || defined(__APPLE__)
+# include <sys/resource.h>
+#endif
+
 /* Set by the callback registered with jent_set_fips_failure_callback(). */
 static unsigned int fips_failure_seen;
 
@@ -45,6 +49,57 @@ static void fips_failure(struct rand_data *ec, unsigned int health_failure)
 {
 	(void)ec;
 	fips_failure_seen = health_failure;
+}
+
+/*
+ * Whether this process can lock the few pages a collector needs where secure
+ * memory is forced. RLIMIT_MEMLOCK where there is one; elsewhere assumed.
+ */
+static int memlock_available(void)
+{
+#ifdef RLIMIT_MEMLOCK
+	struct rlimit rl;
+
+	if (getrlimit(RLIMIT_MEMLOCK, &rl))
+		return 1;
+	return rl.rlim_cur == RLIM_INFINITY || rl.rlim_cur >= 16384;
+#else
+	return 1;
+#endif
+}
+
+/*
+ * Whether @ret, a startup self test that did not pass, is this machine's
+ * verdict rather than the library's: a timer the startup rejects, or memory
+ * it cannot lock. Secure memory is forced by the system's FIPS mode, which a
+ * consumer has no call to ask the library about, so an EMEM is taken as the
+ * machine's where the process cannot lock memory at all - and fails where it
+ * can, as it is then a failed malloc(). EHASH and EGCD are the library's own
+ * self tests and fail. The same verdicts as JENT_UT_MACHINE_VERDICT in
+ * tests/unit/unit.h.
+ */
+static int machine_verdict(int ret)
+{
+	return ret == ENOTIME || ret == ECOARSETIME || ret == ENOMONOTONIC ||
+	       ret == EMINVARVAR || ret == ESTUCK || ret == EHEALTH ||
+	       ret == ERCT || (ret == EMEM && !memlock_available());
+}
+
+/*
+ * Whether @rc, a read that did not deliver, is a health test failure: the
+ * documented behaviour of FIPS mode on any machine, intermittently, and on a
+ * noise source that keeps failing them for good. Only where the collector is
+ * in FIPS mode - which implies JENT_FORCE_SECURE_MEM, and its flags say so;
+ * outside it a read reports none.
+ */
+static int health_verdict(struct rand_data *ec, ssize_t rc)
+{
+	if (!(jent_entropy_collector_flags(ec) & JENT_FORCE_SECURE_MEM))
+		return 0;
+	return rc == JENT_ERR_RCT || rc == JENT_ERR_APT ||
+	       rc == JENT_ERR_LAG || rc == JENT_ERR_RCT_MEM ||
+	       rc == JENT_ERR_RCT_PERMANENT || rc == JENT_ERR_APT_PERMANENT ||
+	       rc == JENT_ERR_LAG_PERMANENT || rc == JENT_ERR_RCT_MEM_PERMANENT;
 }
 
 #define FAIL(...)						\
@@ -63,7 +118,7 @@ int main(void)
 	char data[32];
 	unsigned int version;
 	ssize_t rc;
-	int ret;
+	int ret, no_startup;
 
 	version = jent_version();
 	printf("jent_version: %u\n", version);
@@ -105,17 +160,32 @@ int main(void)
 	if (ret)
 		FAIL("jent_set_fips_failure_callback: %d", ret);
 
-	/* Reports the memory backend of this build; both answers are valid. */
-	printf("jent_secure_memory_supported: %d\n",
-	       jent_secure_memory_supported());
+	/*
+	 * Secure memory is memory zeroized on free, which every backend
+	 * provides, so the only valid answer is 1 - whatever else (locking,
+	 * guard pages) the backend adds.
+	 */
+	ret = jent_secure_memory_supported();
+	printf("jent_secure_memory_supported: %d\n", ret);
+	if (ret != 1)
+		FAIL("jent_secure_memory_supported: %d, expected 1", ret);
 
+	/*
+	 * A startup the machine does not pass - its timer, or memory it cannot
+	 * lock - leaves nothing to allocate a collector from, which is not what
+	 * this program tests. Every call has linked by the time it runs, and
+	 * the ones that need no collector are still made below.
+	 */
 	ret = jent_entropy_init();
-	if (ret)
+	if (ret && !machine_verdict(ret))
 		FAIL("jent_entropy_init: %d", ret);
+	no_startup = ret;
 
 	ret = jent_entropy_init_ex(0, 0);
-	if (ret)
+	if (ret && !machine_verdict(ret))
 		FAIL("jent_entropy_init_ex: %d", ret);
+	if (!no_startup)
+		no_startup = ret;
 
 	/*
 	 * The known answer tests of the conditioning component. Asserted, not
@@ -139,21 +209,41 @@ int main(void)
 	if (!ret)
 		jent_notime_fini(notime_ctx);
 
+	/*
+	 * The allocation runs the same startup, so it is the machine's where
+	 * that is - asked again, as it may have come out differently on the
+	 * health tests this time.
+	 */
 	ec = jent_entropy_collector_alloc(0, 0);
-	if (!ec)
-		FAIL("jent_entropy_collector_alloc returned NULL");
+	if (!ec) {
+		ret = no_startup ? no_startup : jent_entropy_init_ex(0, 0);
+		if (!ret || !machine_verdict(ret))
+			FAIL("jent_entropy_collector_alloc returned NULL");
+		printf("skipped: the startup does not pass on this machine "
+		       "(%d), so there is no collector to call the rest "
+		       "with\n", ret);
+		return 0;
+	}
 
 	rc = jent_read_entropy(ec, data, sizeof(data));
-	if (rc != (ssize_t)sizeof(data))
+	if (rc != (ssize_t)sizeof(data) && !health_verdict(ec, rc))
 		FAIL("jent_read_entropy: %ld", (long)rc);
+	if (rc != (ssize_t)sizeof(data))
+		printf("jent_read_entropy: %ld, a FIPS mode health test "
+		       "failure\n", (long)rc);
 
 	/*
 	 * The safe variant reallocates the collector on a health failure, so
-	 * it takes the collector by pointer and may replace it.
+	 * it takes the collector by pointer and may replace it. A failure it
+	 * could not recover from leaves the collector it had, or none when
+	 * the replacement could not be built.
 	 */
 	rc = jent_read_entropy_safe(&ec, data, sizeof(data));
-	if (rc != (ssize_t)sizeof(data))
+	if (rc != (ssize_t)sizeof(data) && !(ec && health_verdict(ec, rc)))
 		FAIL("jent_read_entropy_safe: %ld", (long)rc);
+	if (rc != (ssize_t)sizeof(data))
+		printf("jent_read_entropy_safe: %ld, a FIPS mode health test "
+		       "failure\n", (long)rc);
 
 	if (jent_status(ec, status, sizeof(status)))
 		FAIL("jent_status");
@@ -179,6 +269,8 @@ int main(void)
 	       (unsigned long)jent_entropy_collector_memsize(ec));
 	printf("jent_entropy_collector_health_failure: 0x%x\n",
 	       jent_entropy_collector_health_failure(ec));
+	printf("jent_entropy_collector_reinitializations: %u\n",
+	       jent_entropy_collector_reinitializations(ec));
 	printf("jent_entropy_collector_read_invocations: %llu\n",
 	       (unsigned long long)jent_entropy_collector_read_invocations(ec));
 	printf("jent_entropy_collector_bytes_output: %llu\n",

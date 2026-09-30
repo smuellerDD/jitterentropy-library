@@ -28,9 +28,17 @@ EFI_ARCH	?= $(shell uname -m)
 # The cross toolchain prefix, empty for a native build. CC, LD and OBJCOPY may
 # also be set individually, which is what a toolchain that does not follow the
 # prefix convention needs.
+#
+# GNU make predefines CC and LD (as cc and ld), so "?=" never assigns them and
+# CROSS_COMPILE would reach only OBJCOPY. The prefix replaces make's built-in
+# default; a CC or LD from the command line or the environment still wins.
 CROSS_COMPILE	?=
-CC		?= $(CROSS_COMPILE)gcc
-LD		?= $(CROSS_COMPILE)ld
+ifeq ($(origin CC),default)
+CC		:= $(CROSS_COMPILE)gcc
+endif
+ifeq ($(origin LD),default)
+LD		:= $(CROSS_COMPILE)ld
+endif
 OBJCOPY		?= $(CROSS_COMPILE)objcopy
 
 GNUEFI		?= /usr
@@ -76,14 +84,13 @@ ARCH_CFLAGS	:=
 # page size of 64 kB would leave the sections misaligned against it.
 ARCH_LDFLAGS	:= -z common-page-size=4096 -z max-page-size=4096
 
-# No out-of-line atomics, and this one is not optional. GCC 10 and later
+# No out-of-line atomics, kept as a safeguard. GCC 10 and later
 # default to -moutline-atomics on aarch64, which turns an atomic access into a
-# call to a libgcc helper - __aarch64_swp4_acq_rel for the one read-modify-write
-# in arch/jitterentropy-arch-atomic.c - that picks the LSE or the LL/SC
+# call to a libgcc helper - __aarch64_swp4_acq_rel for the read-modify-write
+# arch/jitterentropy-arch-atomic.c once had - that picks the LSE or the LL/SC
 # implementation at run time from a libgcc ifunc. A -nostdlib link has no
 # libgcc, so the symbol stays undefined, its PLT slot points into nothing, and
-# the first jent_atomic_exchange_int() during the startup lands on an
-# undefined instruction. It cost a QEMU -d int trace to find, which is worth
+# the first such access lands on an undefined instruction. It cost a QEMU -d int trace to find, which is worth
 # recording: "Synchronous Exception" on the console, ESR 0x0/0x2000000 (EC 0,
 # unknown reason) at a link-time address, and one R_AARCH64_JUMP_SLOT against
 # an undefined __aarch64_swp4_acq_rel in the image.
@@ -116,17 +123,23 @@ endif
 # -O0 is mandatory rather than a preference: the entropy core refuses to
 # compile at any other level (see the #error in src/jitterentropy-base.c),
 # because the loops it times are what it measures.
-CFLAGS		+= -ffreestanding -fno-stack-protector -fno-strict-aliasing
-CFLAGS		+= -fpic -fshort-wchar $(ARCH_CFLAGS)
-CFLAGS		+= -DJENT_STATIC_LIB
-CFLAGS		+= -O0 -std=c11 -Wall -Wextra
-CFLAGS		+= -I$(EFIINC) -I$(EFIINC)/$(GNUEFI_ARCH) -I$(ROOT) -I$(ROOT)/src
+# "override" on every append, as the top level Makefile has: a plain += is
+# ignored for a variable set on the make command line, so "make CFLAGS=-g"
+# here used to drop -DJENT_STATIC_LIB, the internal timer define and every
+# -I, and the build failed on the first missing header. The root "check"
+# target already clears MAKEOVERRIDES before recursing, so this is the same
+# guarantee for anyone running make in this directory directly.
+override CFLAGS	+= -ffreestanding -fno-stack-protector -fno-strict-aliasing
+override CFLAGS	+= -fpic -fshort-wchar $(ARCH_CFLAGS)
+override CFLAGS	+= -DJENT_STATIC_LIB
+override CFLAGS	+= -O0 -std=c11 -Wall -Wextra
+override CFLAGS	+= -I$(EFIINC) -I$(EFIINC)/$(GNUEFI_ARCH) -I$(ROOT) -I$(ROOT)/src
 
 # -Bsymbolic and the gnu-efi script produce a relocatable ELF shared object;
 # the crt0 relocates the image itself at entry, which is why .rela and the
 # dynamic sections have to survive the conversion below.
-LDFLAGS		+= -nostdlib -znocombreloc -shared -Bsymbolic -L$(EFILIB)
-LDFLAGS		+= $(ARCH_LDFLAGS)
+override LDFLAGS	+= -nostdlib -znocombreloc -shared -Bsymbolic -L$(EFILIB)
+override LDFLAGS	+= $(ARCH_LDFLAGS)
 LDLIBS		:= -lefi -lgnuefi
 
 # .rodata is kept explicitly: gnu-efi's own recipe predates its linker script

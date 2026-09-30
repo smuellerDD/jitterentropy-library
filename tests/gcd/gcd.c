@@ -27,24 +27,18 @@
 
 #include "jitterentropy-gcd.h"
 
-// Currently not used
-// #define MAJVERSION 0   /* API / ABI incompatible changes,
-// 			* functional changes that require consumer
-// 			* to be updated (as long as this number is
-// 			* zero, the API is not considered stable
-// 			* and can change without a bump of the
-// 			* major version). */
-// #define MINVERSION 1   /* API compatible, ABI may change,
-// 			* functional enhancements only, consumer
-// 			* can be left unchanged if enhancements are
-// 			* not considered. */
-// #define PATCHLEVEL 0   /* API / ABI compatible, no functional
-// 			* changes, no enhancements, bug fixes
-// 			* only. */
-
 #define ELEM 1000
 #define EXP_GCD 50ULL
-int main(int argc, char *argv[])
+
+/*
+ * Runs the analysis over ELEM deltas, EXP_GCD times mult[i % nmult] - or times
+ * i without @mult -, on the given clock, and checks that it arrives at EXP_GCD. The clock keeps the
+ * first GCD stored on it, so each case takes one of its own. Returns 0, or
+ * the failed step (1: analysis, 2: nothing stored, 3: wrong GCD, 4: no
+ * memory) plus @base.
+ */
+static int gcd_case(const uint64_t *mult, unsigned int nmult,
+		    unsigned int clock, int base)
 {
 	uint64_t *gcd = jent_gcd_init(ELEM, 0);
 	uint64_t val;
@@ -55,27 +49,49 @@ int main(int argc, char *argv[])
 	 */
 	const size_t osr = JENT_MIN_OSR;
 
-	(void)argc;
-	(void)argv;
-
 	if (!gcd)
-		return 4;
+		return base + 4;
 
 	for (i = 0; i < ELEM; i++)
-		jent_gcd_add_value(gcd, i * EXP_GCD, i);
+		jent_gcd_add_value(gcd, (mult ? mult[i % nmult] : i) * EXP_GCD,
+				   i);
 
-	if (jent_gcd_analyze(gcd, ELEM, osr, JENT_GCD_CLOCK_PLATFORM)) {
+	if (jent_gcd_analyze(gcd, ELEM, osr, clock)) {
 		jent_gcd_fini(gcd, ELEM);
-		return 1;
+		return base + 1;
 	}
 
 	jent_gcd_fini(gcd, ELEM);
 
-	if (jent_gcd_get(&val, JENT_GCD_CLOCK_PLATFORM))
-		return 2;
+	if (jent_gcd_get(&val, clock))
+		return base + 2;
 
 	if (val != EXP_GCD)
-		return 3;
+		return base + 3;
 
 	return 0;
+}
+
+int main(int argc, char *argv[])
+{
+	/*
+	 * Neither the first delta (300), the smallest (300) nor the GCD of any
+	 * two of them (100, 150, 250) is EXP_GCD: only the GCD of all three is,
+	 * as 6, 10 and 15 have no common factor while each pair has one.
+	 */
+	static const uint64_t coprime_as_a_whole[] = { 6, 10, 15 };
+	int ret;
+
+	(void)argc;
+	(void)argv;
+
+	/*
+	 * 0, EXP_GCD, 2 * EXP_GCD, ...: arithmetic, so that "the first nonzero
+	 * delta" passes as well, hence the second case.
+	 */
+	ret = gcd_case(NULL, 0, JENT_GCD_CLOCK_PLATFORM, 0);
+	if (ret)
+		return ret;
+
+	return gcd_case(coprime_as_a_whole, 3, JENT_GCD_CLOCK_NOTIME, 4);
 }

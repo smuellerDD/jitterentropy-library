@@ -24,8 +24,9 @@
  * The API as a hostile caller uses it: null pointers where an object is
  * expected, lengths of zero and of SIZE_MAX, oversampling rates far outside
  * the range the library clamps, flag words with every undefined bit set,
- * collectors freed twice, entropy read from an instance that was never
- * initialized, calls in an order no documented sequence produces.
+ * a collector freed and then freed again as a null pointer, entropy read from
+ * an instance that was never initialized, calls in an order no documented
+ * sequence produces.
  *
  * The library is linked rather than absorbed - what is under test is the
  * surface jitterentropy.h declares, which is what an application reaches, and
@@ -73,15 +74,7 @@
  *     and the four an input may hold at once are past the RSS limit libFuzzer
  *     stops the run at. The size does not change how the pool is walked - the
  *     number of accesses is the same - so nothing but the footprint is given
- *     up here, and
- *   - JENT_FORCE_INTERNAL_TIMER is masked out of everything that could reach
- *     jent_entropy_init_ex(): forcing the internal timer is one-way
- *     process-wide state, so one input would put every later input in the
- *     fuzzer's process on the counting thread. The refusal paths of that flag
- *     are covered by unit-base-api and unit-notime, and the contradiction
- *     with JENT_DISABLE_INTERNAL_TIMER is still exercised through
- *     jent_entropy_collector_alloc(), which rejects it before anything is
- *     forced.
+ *     up here.
  */
 
 /*
@@ -92,6 +85,15 @@
  */
 #ifdef NDEBUG
 # undef NDEBUG
+#endif
+
+/*
+ * The Windows SDK declares BCryptGetFipsAlgorithmMode(), which fz_lock_forced()
+ * asks, from Windows Vista onwards; stated before every system header, with
+ * the value the sources under arch/ use.
+ */
+#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
+# define _WIN32_WINNT 0x0601
 #endif
 
 #include <assert.h>
@@ -110,20 +112,27 @@
 /* The largest documented return code of jent_entropy_init*(). */
 #define FZ_INIT_LAST	EGCD
 
-/* Collectors held at once, so that a run can free the wrong one, or one twice. */
+/* Collectors held at once, so that a run can free the wrong one. */
 #define FZ_SLOTS	4
 /* Calls per input: the noise source measures real time, so runs are not free. */
 #define FZ_MAX_OPS	8
 /* The largest buffer any call is given, and the guard on each side of it. */
-#define FZ_MAXLEN	1024
+#define FZ_MAXLEN	4096
+/*
+ * The largest length fz_len() draws. A read costs time per byte, so its
+ * lengths stay at this; the status document of a collector is longer, and
+ * fz_status_len() goes up to FZ_MAXLEN for it.
+ */
+#define FZ_LEN_MAX	1024
 #define FZ_GUARD	16
 #define FZ_FILL		0x5a
 
 /*
  * The memory size the flags may ask for. Higher fields are folded onto this
- * one rather than dropped, so the decoding of a too-large field is still
- * reached - jent_memsize() clamps it, and that clamp is what this leaves
- * exercised.
+ * one rather than dropped, so that the decoding of a large field is still
+ * reached. A field above JENT_MAX_MEMSIZE_MAX, which the library refuses
+ * before allocating anything, is left in place one input in sixteen - see
+ * fz_flags().
  */
 #define FZ_MAX_MEMSIZE_FIELD	13	/* JENT_MAX_MEMSIZE_4MB */
 
@@ -134,7 +143,26 @@
  * above the default rather than anywhere near the JENT_HASHLOOP_128 the field
  * can express. See the head of the file.
  */
-#define FZ_MAX_HASHLOOP_FIELD	1	/* JENT_HASHLOOP_2 */
+#define FZ_MAX_HASHLOOP_FIELD	2	/* JENT_HASHLOOP_2 */
+
+/*
+ * The flag bits jitterentropy.h reserves (9 to 22), and the four of them whose
+ * being set together makes fz_flags() leave the lot in place.
+ */
+#define FZ_RESERVED_FLAGS	0x007ffe00u
+#define FZ_RESERVED_KEEP	0x00780000u
+
+/*
+ * Four other reserved bits, whose being set together makes fz_flags() leave a
+ * memory size or hash loop field above what the library accepts in place.
+ * Reserved bits, so that the choice costs no input byte; the reserved bits
+ * are cleared afterwards unless FZ_RESERVED_KEEP holds.
+ */
+#define FZ_FIELDS_KEEP		0x00001e00u
+
+/* The largest field values the library accepts. */
+#define FZ_MEMSIZE_FIELD_MAX	JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX)
+#define FZ_HASHLOOP_FIELD_MAX	JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP)
 
 struct fz_state {
 	const uint8_t *data;
@@ -165,11 +193,11 @@ static uint32_t fz_u32(struct fz_state *s)
 }
 
 /*
- * The oversampling rate. JENT_MIN_OSR and JENT_MAX_OSR are build-time bounds
- * the library clamps to and does not publish, so what is drawn here is the
- * range around them: nothing, the smallest sensible value, values inside the
- * documented range, and the far end of unsigned int where a clamp that
- * computes rather than compares overflows.
+ * The oversampling rate. JENT_MIN_OSR and JENT_MAX_OSR are the bounds the
+ * library clamps to, so what is drawn here is the range around them: nothing,
+ * the smallest sensible value, values inside the documented range, and the far
+ * end of unsigned int where a clamp that computes rather than compares
+ * overflows.
  */
 static unsigned int fz_osr(struct fz_state *s)
 {
@@ -212,33 +240,54 @@ static unsigned int fz_flags(struct fz_state *s)
 	unsigned int memsize = (flags & JENT_MAX_MEMSIZE_MASK) >>
 			       JENT_FLAGS_TO_MEMSIZE_SHIFT;
 	unsigned int hashloop = JENT_FLAGS_TO_HASHLOOP(flags);
+	int keep = (flags & FZ_FIELDS_KEEP) == FZ_FIELDS_KEEP;
 
-	if (memsize > FZ_MAX_MEMSIZE_FIELD) {
+	/*
+	 * A field the library refuses costs nothing - the flags are checked
+	 * before anything is allocated or measured - so one input in sixteen
+	 * keeps it, which exercises that refusal and is what
+	 * fz_flags_invalid() asserts against. Every other large field is
+	 * folded, for the reasons at the head of the file.
+	 */
+	if (memsize > FZ_MAX_MEMSIZE_FIELD &&
+	    !(keep && memsize > FZ_MEMSIZE_FIELD_MAX)) {
 		memsize %= (FZ_MAX_MEMSIZE_FIELD + 1);
 		flags = (flags & ~(unsigned int)JENT_MAX_MEMSIZE_MASK) |
 			(memsize << JENT_FLAGS_TO_MEMSIZE_SHIFT);
 	}
 
-	if (hashloop > FZ_MAX_HASHLOOP_FIELD) {
+	if (hashloop > FZ_MAX_HASHLOOP_FIELD &&
+	    !(keep && hashloop > FZ_HASHLOOP_FIELD_MAX)) {
 		hashloop %= (FZ_MAX_HASHLOOP_FIELD + 1);
 		flags = (flags & ~(unsigned int)JENT_MAX_HASHLOOP_MASK) |
 			JENT_HASHLOOP_TO_FLAGS(hashloop);
 	}
 
+	/*
+	 * The reserved bits are refused outright (EPROGERR, a NULL
+	 * collector), so a random word - which almost always has one of the
+	 * fourteen set - would reach nothing past the flag check. Cleared
+	 * unless the top four of them are all set: one input in sixteen still
+	 * carries them, which keeps the refusal itself exercised and is what
+	 * fz_flags_invalid() asserts against.
+	 */
+	if ((flags & FZ_RESERVED_KEEP) != FZ_RESERVED_KEEP)
+		flags &= ~(unsigned int)FZ_RESERVED_FLAGS;
+
 	return flags;
 }
 
-/* The same, for the calls that must not force the internal timer. See above. */
-static unsigned int fz_flags_no_force(struct fz_state *s)
+/* Flags the library refuses: a reserved bit, or a field above its maximum. */
+static int fz_flags_invalid(unsigned int flags)
 {
-	return fz_flags(s) & ~(unsigned int)JENT_FORCE_INTERNAL_TIMER;
+	return (flags & FZ_RESERVED_FLAGS) != 0 ||
+	       JENT_FLAGS_TO_MAX_MEMSIZE(flags) > FZ_MEMSIZE_FIELD_MAX ||
+	       JENT_FLAGS_TO_HASHLOOP(flags) > FZ_HASHLOOP_FIELD_MAX;
 }
 
-/* A length, folded onto the boundaries of what the buffer below can hold. */
-static size_t fz_len(struct fz_state *s)
+/* A length, folded onto the boundaries of FZ_LEN_MAX. */
+static size_t fz_len_pick(uint8_t pick)
 {
-	uint8_t pick = fz_u8(s);
-
 	switch (pick % 8) {
 	case 0:
 		return 0;
@@ -251,11 +300,40 @@ static size_t fz_len(struct fz_state *s)
 	case 4:
 		return 65;
 	case 5:
-		return FZ_MAXLEN - 1;
+		return FZ_LEN_MAX - 1;
 	case 6:
+		return FZ_LEN_MAX;
+	default:
+		return (size_t)pick % (FZ_LEN_MAX + 1);
+	}
+}
+
+static size_t fz_len(struct fz_state *s)
+{
+	return fz_len_pick(fz_u8(s));
+}
+
+/*
+ * A buffer length for the status document of doclen bytes: the lengths
+ * fz_len() draws, and the boundaries of the document itself - one short of
+ * room for its terminator, exactly enough, one more - and the largest buffer
+ * there is.
+ */
+static size_t fz_status_len(struct fz_state *s, size_t doclen)
+{
+	uint8_t pick = fz_u8(s);
+
+	switch (pick % 16) {
+	case 8:
+		return doclen;
+	case 9:
+		return doclen + 1;
+	case 10:
+		return doclen + 2;
+	case 11:
 		return FZ_MAXLEN;
 	default:
-		return (size_t)pick % (FZ_MAXLEN + 1);
+		return fz_len_pick(pick);
 	}
 }
 
@@ -297,6 +375,11 @@ static void fz_check_string(size_t buflen, size_t len)
 	fz_check_buf(len + 1);
 }
 
+#ifdef JENT_FUZZ_STANDALONE
+/* Reads that returned output, for the sweep to show it reached a collector. */
+static unsigned int fz_output_reads;
+#endif
+
 static void fz_check_read(ssize_t ret, size_t len)
 {
 	/* The full length or a documented failure - never a partial read. */
@@ -306,6 +389,11 @@ static void fz_check_read(ssize_t ret, size_t len)
 		assert(ret >= FZ_ERR_LAST);
 
 	fz_check_buf(ret > 0 ? (size_t)ret : 0);
+
+#ifdef JENT_FUZZ_STANDALONE
+	if (ret > 0)
+		fz_output_reads++;
+#endif
 }
 
 /* The calls the interpreter below dispatches to. */
@@ -329,8 +417,15 @@ static void fz_op_alloc(struct fz_state *s, struct rand_data **slots)
 {
 	unsigned int slot = fz_u8(s) % FZ_SLOTS;
 	unsigned int osr = fz_osr(s);
-	unsigned int flags = fz_flags_no_force(s);
+	unsigned int flags = fz_flags(s);
 	struct rand_data *ec = jent_entropy_collector_alloc(osr, flags);
+
+	/*
+	 * A reserved bit or an out-of-range field is refused, whatever else
+	 * the flags say.
+	 */
+	if (fz_flags_invalid(flags))
+		assert(ec == NULL);
 
 	/*
 	 * Overwriting a slot that still holds a collector leaks it, so the old
@@ -416,12 +511,27 @@ static void fz_op_read_safe_null(struct fz_state *s, struct rand_data **slots)
 				      len ? len : SIZE_MAX) == JENT_ERR_EINVAL);
 }
 
+/* The whole status document, rendered for the call under test to match. */
+static char fz_status_full[FZ_MAXLEN];
+
 static void fz_op_status(struct fz_state *s, struct rand_data **slots)
 {
 	unsigned int slot = fz_u8(s) % FZ_SLOTS;
-	size_t buflen = fz_len(s);
-	char *buf = fz_buf();
+	size_t buflen, doclen;
+	char *buf;
 	int ret;
+
+	/*
+	 * Nothing between the two calls changes the collector, so both render
+	 * the same document; the largest buffer holds all of it.
+	 */
+	assert(jent_status(slots[slot], fz_status_full,
+			   sizeof(fz_status_full)) == 0);
+	doclen = strlen(fz_status_full);
+	assert(doclen + 2 <= FZ_MAXLEN);
+
+	buflen = fz_status_len(s, doclen);
+	buf = fz_buf();
 
 	assert(jent_status(slots[slot], NULL, buflen) == -1);
 	assert(jent_status(slots[slot], buf, 0) == -1);
@@ -439,6 +549,19 @@ static void fz_op_status(struct fz_state *s, struct rand_data **slots)
 		 * bytes behind it are the caller's.
 		 */
 		fz_check_string(buflen, strlen(buf));
+
+		/*
+		 * Complete exactly when the document and its terminator fit,
+		 * and truncated to the buffer, as a prefix of it, otherwise.
+		 */
+		if (doclen < buflen) {
+			assert(ret == 0);
+			assert(strcmp(buf, fz_status_full) == 0);
+		} else {
+			assert(ret == -1);
+			assert(strlen(buf) == buflen - 1);
+			assert(memcmp(buf, fz_status_full, buflen - 1) == 0);
+		}
 	}
 }
 
@@ -482,13 +605,15 @@ static void fz_op_selftest(struct fz_state *s, struct rand_data **slots)
 static void fz_op_init(struct fz_state *s, struct rand_data **slots)
 {
 	unsigned int osr = fz_osr(s);
-	unsigned int flags = fz_flags_no_force(s);
+	unsigned int flags = fz_flags(s);
 	int ret;
 
 	(void)slots;
 
 	ret = jent_entropy_init_ex(osr, flags);
 	assert(ret >= 0 && ret <= FZ_INIT_LAST);
+	if (fz_flags_invalid(flags))
+		assert(ret == EPROGERR);
 
 	if (fz_u8(s) & 1) {
 		ret = jent_entropy_init();
@@ -524,19 +649,17 @@ static void fz_op_misc(struct fz_state *s, struct rand_data **slots)
 	case 0:
 		assert(jent_version() == JENT_VERSION);
 		break;
-	case 1: {
-		int ret = jent_secure_memory_supported();
-
-		assert(ret == 0 || ret == 1);
+	case 1:
+		/* Zeroization on free, which every build provides. */
+		assert(jent_secure_memory_supported() == 1);
 		break;
-	}
 	case 2: {
 		/*
 		 * Registering nothing is how a caller unregisters. The switch
-		 * is refused with -EAGAIN once a collector in FIPS mode has
-		 * bound the callback it runs with, which an earlier operation
-		 * of this same input may have allocated - so both answers are
-		 * the contract, and anything else is not.
+		 * is refused with -EAGAIN once the library is initialized,
+		 * which fz_settle() has done before the first input - so here
+		 * it always is. 0 stays in the contract checked, as the answer
+		 * of a process that has not initialized yet.
 		 */
 		int ret = jent_set_fips_failure_callback(NULL);
 
@@ -549,13 +672,52 @@ static void fz_op_misc(struct fz_state *s, struct rand_data **slots)
 		 * A CPU index no machine has: advisory, so the answer is a
 		 * status and not a promise, and it must not be a stray value.
 		 */
-		assert(jent_entropy_set_notime_cpu((unsigned long)-1) != 1);
+		{
+			int ret = jent_entropy_set_notime_cpu(
+					(unsigned long)-1);
+
+			assert(ret == 0 || ret == -EAGAIN);
+		}
 
 		/* No implementation at all, which has to be refused. */
 		assert(jent_entropy_switch_notime_impl(NULL) != 0);
 #endif
 		break;
 	}
+}
+
+/*
+ * The library keeps state per process that no call takes back: the first
+ * jent_entropy_init*() closes the window for jent_set_fips_failure_callback(),
+ * jent_entropy_set_notime_cpu() and jent_entropy_switch_notime_impl(), and a
+ * passed startup stays passed. Left to the inputs, whichever of them first
+ * ran the startup would decide the paths of every later one, and a crash of a
+ * long run would not reproduce from its input alone. Run once before any
+ * input, it puts every input in the same state - the one a process that
+ * initialized the library first, as documented, is in.
+ */
+static void fz_settle(void)
+{
+	static int settled;
+
+	if (settled)
+		return;
+	settled = 1;
+
+	/* A startup that fails leaves the window just as closed. */
+	(void)jent_entropy_init();
+
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	/*
+	 * The startup is recorded per clock, and the one above settles only
+	 * the platform clock where that passes: without this, whether an
+	 * internal-timer collector runs its own startup would depend on
+	 * whether an earlier input happened to run one. A machine the
+	 * internal timer does not pass on fails it here and in every input
+	 * alike, which is just as reproducible.
+	 */
+	(void)jent_entropy_init_ex(0, JENT_FORCE_INTERNAL_TIMER);
+#endif
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
@@ -565,6 +727,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	struct rand_data *slots[FZ_SLOTS] = { NULL };
 	struct fz_state s;
 	unsigned int op;
+
+	fz_settle();
 
 	s.data = data;
 	s.len = size;
@@ -629,6 +793,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
  * The sweep's inputs come from a counter through a mixing function rather than
  * from rand(): the point of a regression case is that it is the same on every
  * machine and in every run.
+ *
+ * Mixed bytes alone almost never allocate a collector - an allocation needs
+ * its op byte and flags without a reserved bit - so every read, status and
+ * UUID call of theirs would take the argument checks on an empty slot. Each
+ * input therefore starts with a collector in slot 0, and one fixed program
+ * makes every call on it; the sweep fails unless some read returned output.
  */
 
 static int fz_run_file(const char *path)
@@ -654,9 +824,133 @@ static int fz_run_file(const char *path)
 #define FZ_SWEEP_INPUTS		32
 #define FZ_SWEEP_LEN		24
 
+/* FZ_OP_ALLOC of slot 0 at osr 3 (fz_osr() pick 2), without flags. */
+#define FZ_ALLOC_SLOT0		FZ_OP_ALLOC, 0, 2, 0, 0, 0, 0
+
+/*
+ * Every call on that collector; fz_len() pick 6 is FZ_LEN_MAX, 3 one block,
+ * and fz_status_len() pick 9 the status document with its terminator exactly.
+ */
+static const unsigned char fz_live[] = {
+	FZ_ALLOC_SLOT0,
+	FZ_OP_READ, 0, 6,
+	FZ_OP_READ_SAFE, 0, 3,
+	FZ_OP_STATUS, 0, 9,
+	FZ_OP_UUID, 0, 6,
+	FZ_OP_FREE, 0, 0,
+};
+
+static const unsigned char fz_alloc_slot0[] = { FZ_ALLOC_SLOT0 };
+
+/*
+ * Whether the startup had to lock its memory, so that a memlock limit below
+ * it is the machine's (see tests/jitterentropy-memlock.h). With no flags only
+ * the system's FIPS mode forces secure memory, on every backend
+ * (jent_update_secure_mem()); outside it the libgcrypt and OpenSSL backends
+ * fall back to ordinary memory when their arena has none, as the builtin ones
+ * do when the lock fails, and AWS-LC locks nothing either way.
+ *
+ * FIPS mode as the library sees it (arch/jitterentropy-arch-fips.c): the
+ * Linux indicator file, the Windows policy, or what the external libcrypto
+ * says. jent_fips_enabled() is internal and out of this harness' reach, so
+ * the question is asked again here, the way that source asks it.
+ */
+#if !defined(OPENSSL) && !defined(AWSLC) && !defined(JENT_BAREMETAL) && \
+    defined(__linux__)
+# define FZ_PROC_FIPS
+static int fz_proc_fips(void)
+{
+	FILE *f = fopen("/proc/sys/crypto/fips_enabled", "r");
+	int c;
+
+	if (!f)
+		return 0;
+	c = fgetc(f);
+	fclose(f);
+
+	return c == '1';
+}
+#endif
+
+#if defined(AWSLC)
+static int fz_lock_forced(void)
+{
+	return 0;
+}
+#elif defined(LIBGCRYPT)
+# include <gcrypt.h>
+# ifdef _WIN32
+#  include <io.h>
+#  define fz_exists(path) (!_access((path), 0))
+# else
+#  include <unistd.h>
+#  define fz_exists(path) (!access((path), F_OK))
+# endif
+/*
+ * A started libgcrypt knows; before that, the inputs it will decide on, as
+ * jent_fips_enabled() reads them.
+ */
+static int fz_lock_forced(void)
+{
+	if (gcry_control(GCRYCTL_ANY_INITIALIZATION_P))
+		return gcry_fips_mode_active();
+	if (getenv("LIBGCRYPT_FORCE_FIPS_MODE"))
+		return 1;
+# ifdef _WIN32
+	{
+		static const char tail[] = "\\GNU\\etc\\gcrypt\\fips_enabled";
+		const char *pd = getenv("ALLUSERSPROFILE");
+		char path[260];
+
+		if (pd && strlen(pd) + sizeof(tail) <= sizeof(path)) {
+			memcpy(path, pd, strlen(pd));
+			memcpy(path + strlen(pd), tail, sizeof(tail));
+			if (fz_exists(path))
+				return 1;
+		}
+	}
+# endif
+	if (fz_exists("/etc/gcrypt/fips_enabled"))
+		return 1;
+# ifdef FZ_PROC_FIPS
+	return fz_proc_fips();
+# else
+	return 0;
+# endif
+}
+#elif defined(OPENSSL)
+# include <openssl/evp.h>
+static int fz_lock_forced(void)
+{
+	return EVP_default_properties_is_fips_enabled(NULL);
+}
+#elif defined(FZ_PROC_FIPS)
+static int fz_lock_forced(void)
+{
+	return fz_proc_fips();
+}
+#elif !defined(JENT_BAREMETAL) && (defined(_MSC_VER) || defined(__MINGW32__))
+# include <windows.h>
+# include <bcrypt.h>
+static int fz_lock_forced(void)
+{
+	BOOLEAN enabled = FALSE;
+
+	if (!BCRYPT_SUCCESS(BCryptGetFipsAlgorithmMode(&enabled)))
+		return 0;
+
+	return enabled ? 1 : 0;
+}
+#else
+static int fz_lock_forced(void)
+{
+	return 0;
+}
+#endif
+
 int main(int argc, char *argv[])
 {
-	unsigned char input[FZ_SWEEP_LEN];
+	unsigned char input[sizeof(fz_alloc_slot0) + FZ_SWEEP_LEN];
 	unsigned int i, j;
 	int ret = 0;
 
@@ -667,6 +961,9 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
+	LLVMFuzzerTestOneInput(fz_live, sizeof(fz_live));
+
+	memcpy(input, fz_alloc_slot0, sizeof(fz_alloc_slot0));
 	for (i = 0; i < FZ_SWEEP_INPUTS; i++) {
 		uint64_t x = 0x9e3779b97f4a7c15ULL * (i + 1);
 
@@ -674,13 +971,75 @@ int main(int argc, char *argv[])
 			x ^= x >> 30;
 			x *= 0xbf58476d1ce4e5b9ULL;
 			x ^= x >> 27;
-			input[j] = (unsigned char)(x >> 24);
+			input[sizeof(fz_alloc_slot0) + j] =
+				(unsigned char)(x >> 24);
 		}
 
 		LLVMFuzzerTestOneInput(input, sizeof(input));
 	}
 
-	printf("fuzz-api: %u inputs survived\n", FZ_SWEEP_INPUTS);
+	/*
+	 * No output at all is a defect unless this machine can give none: a
+	 * timer the startup test rejects leaves every allocation to fail, which
+	 * says nothing about the contract checked above. Only that verdict of
+	 * the startup test is a skip (77). Everything else fails - a startup
+	 * test that passes, then the same collector fz_live allocates asked
+	 * directly, tells a sweep that reached no collector from a library that
+	 * gives no output at all, and neither may hide as the machine's fault.
+	 */
+	if (!fz_output_reads) {
+		int init = jent_entropy_init_ex(0, 0);
+		struct rand_data *ec;
+		unsigned char probe[32];
+		ssize_t got;
+
+		switch (init) {
+		case 0:
+			break;
+		case ENOTIME:
+		case ECOARSETIME:
+		case ENOMONOTONIC:
+		case EMINVARVAR:
+		case ESTUCK:
+		case EHEALTH:
+		case ERCT:
+			fprintf(stderr, "fuzz-api: the startup test rejects this machine's timer (%d) - the contract was checked, the reads were not\n",
+				init);
+			return 77;
+		/*
+		 * Memory the startup had to lock and could not is the
+		 * machine's (see fz_lock_forced()). Otherwise EMEM is a failed
+		 * malloc(), which is not.
+		 */
+		case EMEM:
+			if (!fz_lock_forced()) {
+				fprintf(stderr, "fuzz-api: no read returned output and the startup test runs out of memory it did not have to lock\n");
+				return 1;
+			}
+			fprintf(stderr, "fuzz-api: no memory can be locked for the collector - the contract was checked, the reads were not\n");
+			return 77;
+		default:
+			fprintf(stderr, "fuzz-api: no read returned output and the startup test fails with %d\n",
+				init);
+			return 1;
+		}
+
+		ec = jent_entropy_collector_alloc(3, 0);
+		got = ec ? jent_read_entropy(ec, (char *)probe, sizeof(probe)) :
+			   -1;
+		jent_entropy_collector_free(ec);
+		if (got != (ssize_t)sizeof(probe)) {
+			fprintf(stderr, "fuzz-api: the startup test passes but a collector gives no output (%ld)\n",
+				(long)got);
+			return 1;
+		}
+
+		fprintf(stderr, "fuzz-api: no read returned output - the sweep reached no collector\n");
+		return 1;
+	}
+
+	printf("fuzz-api: %u inputs survived, %u reads returned output\n",
+	       FZ_SWEEP_INPUTS + 1, fz_output_reads);
 
 	return 0;
 }

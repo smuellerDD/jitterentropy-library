@@ -5,8 +5,8 @@ add_executable(gcd
     gcd.c
     ../../src/jitterentropy-gcd.c
     ../../arch/jitterentropy-arch-memory.c
-    # The establish-once semantics of the common timer GCD go through the
-    # atomic accessors, which are a translation unit of their own.
+    # The common timer GCD goes through the atomic accessors, which are a
+    # translation unit of their own.
     ../../arch/jitterentropy-arch-atomic.c)
 target_compile_definitions(gcd PRIVATE JENT_STATIC_LIB)
 target_compile_options(gcd PRIVATE ${JITTER_C_FLAGS})
@@ -18,6 +18,10 @@ if(EXTERNAL_CRYPTO)
     target_include_directories(gcd PRIVATE ${LIBCRYPTO_INCLUDE_DIR})
     target_link_libraries(gcd PRIVATE ${LIBCRYPTO_LIBRARY})
 endif()
+# Built and installed as jitterentropy-gcd, prefixed as every other installed
+# tool is: a bare "gcd" in the bin directory of a distribution package is a
+# name some other package can ship as well. The target keeps its short name.
+set_target_properties(gcd PROPERTIES OUTPUT_NAME jitterentropy-gcd)
 # A tool as well as the gcd-self-test program: installed only for the former.
 if(ENABLE_TOOLS)
     install(TARGETS gcd)
