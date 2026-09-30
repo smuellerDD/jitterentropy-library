@@ -214,22 +214,14 @@ static inline unsigned int jent_update_hashloop(unsigned int flags,
 }
 
 /*
- * The compliance modes claim a protected entropy collector state, so they turn
- * secure memory from a best effort into a requirement: with them the
- * allocation fails rather than leaving the state in memory that may be swapped
- * out. Every other caller keeps the default, where memory the platform does
- * not protect is tolerated.
- *
- * This normalization belongs to the caller-provided flags and therefore not
- * into jent_entropy_collector_alloc_internal(): jent_time_entropy_init() ORs
- * JENT_FORCE_FIPS into its test instance to get the health tests run, which is
- * not a compliance statement, and deriving the requirement there would make
- * every default allocation demand secure memory. Same reasoning as the
- * JENT_DISABLE_MEMORY_ACCESS check in _jent_entropy_collector_alloc().
+ * The compliance modes require secure memory, and a collector runs in FIPS
+ * mode on a system in FIPS mode as it does with JENT_FORCE_FIPS. Caller flags
+ * only: the startup test instance sets JENT_FORCE_FIPS for the health tests
+ * alone.
  */
 static inline unsigned int jent_update_secure_mem(unsigned int flags)
 {
-	if (flags & (JENT_NTG1 | JENT_FORCE_FIPS))
+	if ((flags & (JENT_NTG1 | JENT_FORCE_FIPS)) || jent_fips_enabled())
 		flags |= JENT_FORCE_SECURE_MEM;
 
 	return flags;
@@ -1317,16 +1309,22 @@ static inline int jent_entropy_init_common_post(int ret)
 JENT_PRIVATE_STATIC
 int jent_entropy_init(void)
 {
-	int ret = jent_entropy_init_common_pre(0);
+	/*
+	 * As jent_entropy_init_ex(0, 0): a system in FIPS mode requires secure
+	 * memory of the startup as it does of every collector.
+	 */
+	unsigned int flags = jent_update_secure_mem(0);
+	int ret = jent_entropy_init_common_pre(flags);
 
 	if (ret)
 		return ret;
 
-	ret = jent_time_entropy_init(0, JENT_DISABLE_INTERNAL_TIMER);
+	ret = jent_time_entropy_init(0, flags | JENT_DISABLE_INTERNAL_TIMER);
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	if (ret)
-		ret = jent_time_entropy_init(0, JENT_FORCE_INTERNAL_TIMER);
+		ret = jent_time_entropy_init(0, flags |
+					     JENT_FORCE_INTERNAL_TIMER);
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	return jent_entropy_init_common_post(ret);
