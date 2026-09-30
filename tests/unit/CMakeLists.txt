@@ -59,6 +59,10 @@ jent_unit_test(unit-fault)
 jent_unit_test(unit-notime)
 jent_unit_test(unit-concurrency)
 jent_unit_test(unit-zeroize)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # libjitterentropy-kernel, whatever ENABLE_KERNEL_LIB says.
+    jent_unit_test(unit-kernel-lib)
+endif()
 
 # MOCK_TIMER is a library build option, off by default; these define it for
 # their own absorbed copy rather than for the whole build.
