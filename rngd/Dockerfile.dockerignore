@@ -1,0 +1,10 @@
+# Only what the build of the daemon reads.
+*
+!CMakeLists.txt
+!jitterentropy.h
+!version.lds
+!arch
+!cmake
+!rngd
+!src
+!tests/linking

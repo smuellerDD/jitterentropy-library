@@ -1,16 +1,21 @@
+# The build context is the root of the source tree:
+#	docker build -f rngd/Dockerfile .
 FROM alpine
 
-RUN apk add --no-cache gcc libc-dev linux-headers make
+RUN apk add --no-cache cmake gcc libc-dev linux-headers make
 
 WORKDIR /source
-COPY lib/ lib/
-COPY *.c *.h Makefile ./
+COPY . .
 
-RUN make
+# Static, so that the second stage needs nothing but the daemon.
+RUN cmake -S . -B /build -DENABLE_RNGD=ON -DBUILD_SHARED_LIBS=OFF \
+	-DBUILD_TESTING=OFF -DENABLE_TOOLS=OFF -DINSTALL_MAN=OFF && \
+    cmake --build /build --target jitterentropy-rngd
 
 FROM alpine
 
-COPY --from=0 /source/jitterentropy-rngd /usr/bin
+COPY --from=0 /build/rngd/jitterentropy-rngd /usr/bin
 
+# -F: the daemon is the container's main process and must not detach.
 ENTRYPOINT ["/usr/bin/jitterentropy-rngd"]
-CMD ["-v"]
+CMD ["-F", "-v"]
