@@ -354,16 +354,8 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		size_t tocopy;
 		unsigned int health_test_result;
 
-		/*
-		 * A conditioning self test bound to this instance failed. The
-		 * check does not go through jent_health_failure(): that path
-		 * only reports under FIPS, while the KAT verdict is about the
-		 * conditioning implementation, not the noise source, and must
-		 * stop the output in every mode. Checked per block so that a
-		 * self test failing on another thread stops a request already
-		 * in flight.
-		 */
-		if (ec->selftest_failed) {
+		/* A self test bound to this instance failed. */
+		if (jent_atomic_load_int(&ec->selftest_failed)) {
 			ret = JENT_ERR_SELFTEST;
 			goto err;
 		}
@@ -966,8 +958,13 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	 * passed: this one would let an instance generate from a clock no
 	 * startup measured.
 	 */
-	return _jent_entropy_collector_alloc(osr,
-					     flags & ~JENT_INT_MEASURE_CLOCK);
+	struct rand_data *ec =
+		_jent_entropy_collector_alloc(osr,
+					      flags & ~JENT_INT_MEASURE_CLOCK);
+
+	jent_stack_scrub();
+
+	return ec;
 }
 
 #ifdef LINUX_KERNEL
@@ -1204,29 +1201,25 @@ out:
 /**
  * jent_selftest() - Run the known answer tests of the conditioning component
  *
- * The SHA3-256 and XDRBG-256 tests that jent_entropy_init*() runs before
- * anything else, exposed separately for callers that have to repeat them over
- * the lifetime of a long-running process (the ESDM does so).
+ * @param[in] ec Entropy collector a failure permanently disables, or NULL.
  *
- * They run on stack-local state alone, touching nothing of the library, of a
- * collector or of the operating system, and are therefore reentrant: callable
- * at any time, from any thread, in parallel with entropy collection,
- * allocating nothing and never blocking. Only a failure writes to the bound
- * collector, and nothing but this function ever sets that word.
- *
- * @param[in] ec Entropy collector the verdict is bound to: a failure puts the
- *		 instance permanently out of service, jent_read_entropy*()
- *		 returning JENT_ERR_SELFTEST instead of output from then on.
- *		 May be NULL to obtain the verdict without binding it.
- *
- * @return 0 on success, EHASH if a known answer test failed.
+ * @return 0 on success, EHASH if a known answer test failed or @ec is already
+ *	   out of service after a failed self test.
  */
 JENT_PRIVATE_STATIC
 int jent_selftest(struct rand_data *ec)
 {
+	/*
+	 * A passing run does not bring back an instance a self test stopped -
+	 * this one bound earlier, or the GCD self test of a recovery - and
+	 * must not report it as sound.
+	 */
+	if (ec && jent_atomic_load_int(&ec->selftest_failed))
+		return EHASH;
+
 	if (jent_sha3_tester()) {
 		if (ec)
-			ec->selftest_failed = 1;
+			jent_atomic_store_int(&ec->selftest_failed, 1);
 		return EHASH;
 	}
 
@@ -1303,7 +1296,11 @@ int jent_entropy_init(void)
 					     JENT_FORCE_INTERNAL_TIMER);
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
-	return jent_entropy_init_common_post(ret);
+	ret = jent_entropy_init_common_post(ret);
+
+	jent_stack_scrub();
+
+	return ret;
 }
 
 JENT_PRIVATE_STATIC
@@ -1365,7 +1362,11 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 					     flags | JENT_FORCE_INTERNAL_TIMER);
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
-	return jent_entropy_init_common_post(ret);
+	ret = jent_entropy_init_common_post(ret);
+
+	jent_stack_scrub();
+
+	return ret;
 }
 
 JENT_PRIVATE_STATIC

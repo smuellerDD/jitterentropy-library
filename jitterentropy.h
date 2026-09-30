@@ -491,7 +491,9 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags);
  * stops producing output - jent_read_entropy and jent_read_entropy_safe
  * return JENT_ERR_SELFTEST from then on, in every mode, not only under FIPS.
  * ec may be NULL to obtain the verdict without binding it to an instance.
- * Returns 0, or EHASH on failure as jent_entropy_init* does.
+ * Returns 0, or EHASH on failure as jent_entropy_init* does - also, without
+ * running the tests, for an ec already out of service after a failed self
+ * test, bound earlier or of a recovery (JENT_ERR_SELFTEST).
  */
 JENT_PRIVATE_STATIC
 int jent_selftest(struct rand_data *ec);
