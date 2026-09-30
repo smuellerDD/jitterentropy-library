@@ -620,7 +620,7 @@ void jent_notime_fini(void *ctx);
 #define EVARVAR		5 /* UNUSED - Timer does not produce variations of
 			     variations (2nd derivation of time is zero) */
 #define EMINVARVAR	6 /* Timer variations of variations is too small */
-#define EPROGERR	7 /* UNUSED - Programming error */
+#define EPROGERR	7 /* Invalid argument, e.g. an osr above JENT_MAX_OSR */
 #define ESTUCK		8 /* Too many stuck results during init. */
 #define EHEALTH		9 /* Health test failed during initialization */
 #define ERCT		10 /* RCT failed during initialization */
