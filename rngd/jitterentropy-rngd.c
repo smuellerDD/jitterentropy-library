@@ -66,6 +66,8 @@
 
 static int Verbosity = 0;
 static int force_sp80090b = 0;
+/* ORed in after parsing, so --flags cannot drop them whatever the order */
+static unsigned int jent_flags_add = 0;
 static int status = 0;
 
 /*
@@ -289,6 +291,10 @@ static void usage(void)
 	fprintf(stderr, "\t\t\tany log output when the daemon detaches\n");
 	fprintf(stderr, "\t-p --pid\tWrite daemon PID to file\n");
 	fprintf(stderr, "\t-s --sp800-90b\tForce SP800-90B compliance\n");
+	fprintf(stderr, "\t   --fips\tForce FIPS mode, adds JENT_FORCE_FIPS to --flags\n");
+	fprintf(stderr, "\t-n --ntg1\tForce AIS 20/31 NTG.1 compliance, adds JENT_NTG1 to --flags\n");
+	fprintf(stderr, "\t-i --force-internal-timer\tAdds JENT_FORCE_INTERNAL_TIMER to --flags\n");
+	fprintf(stderr, "\t-I --disable-internal-timer\tAdds JENT_DISABLE_INTERNAL_TIMER to --flags\n");
 	fprintf(stderr, "\t-f --flags\tInteger with flags used to allocate Jitter RNG\n");
 	fprintf(stderr, "\t-o --osr\tInteger with OSR used to allocate Jitter RNG\n");
 	fprintf(stderr, "\t   --status\tStatus information of the Jitter RNG - invoke with\n");
@@ -338,9 +344,13 @@ static void parse_opts(int argc, char *argv[])
 			{"exit-on-error", 0, 0, 0},
 			{"syslog", 0, 0, 0},
 			{"foreground", 0, 0, 0},
+			{"ntg1", 0, 0, 0},
+			{"force-internal-timer", 0, 0, 0},
+			{"disable-internal-timer", 0, 0, 0},
+			{"fips", 0, 0, 0},
 			{0, 0, 0, 0}
 		};
-		c = getopt_long(argc, argv, "svp:hf:o:lF", opts, &opt_index);
+		c = getopt_long(argc, argv, "svp:hf:o:lFniI", opts, &opt_index);
 		if (-1 == c)
 			break;
 		switch (c) {
@@ -405,6 +415,26 @@ static void parse_opts(int argc, char *argv[])
 				foreground = 1;
 				break;
 
+			/* ntg1 */
+			case 11:
+				jent_flags_add |= JENT_NTG1;
+				break;
+
+			/* force-internal-timer */
+			case 12:
+				jent_flags_add |= JENT_FORCE_INTERNAL_TIMER;
+				break;
+
+			/* disable-internal-timer */
+			case 13:
+				jent_flags_add |= JENT_DISABLE_INTERNAL_TIMER;
+				break;
+
+			/* fips */
+			case 14:
+				jent_flags_add |= JENT_FORCE_FIPS;
+				break;
+
 			default:
 				usage();
 			}
@@ -427,6 +457,15 @@ static void parse_opts(int argc, char *argv[])
 		case 'F':
 			foreground = 1;
 			break;
+		case 'n':
+			jent_flags_add |= JENT_NTG1;
+			break;
+		case 'i':
+			jent_flags_add |= JENT_FORCE_INTERNAL_TIMER;
+			break;
+		case 'I':
+			jent_flags_add |= JENT_DISABLE_INTERNAL_TIMER;
+			break;
 		case 'f':
 			jent_flags = parse_uint(optarg);
 			break;
@@ -437,6 +476,8 @@ static void parse_opts(int argc, char *argv[])
 			usage();
 		}
 	}
+
+	jent_flags |= jent_flags_add;
 }
 
 /* ANSI SGR sequences used to colorize the log on a capable terminal */
