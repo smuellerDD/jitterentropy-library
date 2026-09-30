@@ -30,6 +30,7 @@ option(ENABLE_COVERAGE "Instrument the build for code coverage and add the 'cove
 option(ENABLE_FUZZING "Instrument the build for libFuzzer and build the fuzzing harness under tests/fuzz (Clang only, for development)" OFF)
 option(MOCK_TIMER "Allow the time source to be replaced by a caller-supplied callback (only for testing - a build with this on produces no entropy of its own)" OFF)
 option(ENABLE_RECORDING "Also build and install libjitterentropy-record: the library with the raw noise recording API of jitterentropy-record.h added, for recording where no tool can run; not for production" OFF)
+option(ENABLE_KERNEL_LIB "Also build and install libjitterentropy-kernel and the jitter_rng tool: user space access to the jitter_rng Linux kernel module (Linux only)" OFF)
 option(ENABLE_TOOLS "Build and install the recording and validation tools (jitterentropy-rng, getrawentropy, extractlsb, ...), which live under tests/" ON)
 option(ENABLE_RNGD "Also build and install jitterentropy-rngd, the daemon feeding the Jitter RNG into the Linux /dev/random, and its systemd unit (Linux only)" OFF)
 option(BUILD_TESTING "Build the test programs and register the CTest suite" ON)
@@ -657,6 +658,17 @@ endif()
 # enable_testing(), for its test.
 if(ENABLE_RECORDING)
     add_subdirectory(tests/raw-entropy/recording_library)
+endif()
+
+# libjitterentropy-kernel and the jitter_rng tool. After the rpath above,
+# which the tool takes; see linux_kernel/userspace/CMakeLists.txt.
+if(ENABLE_KERNEL_LIB)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "ENABLE_KERNEL_LIB needs Linux: it wraps the interfaces of the "
+            "Linux kernel module")
+    endif()
+    add_subdirectory(linux_kernel/userspace)
 endif()
 
 # jitterentropy-rngd and its systemd unit; see rngd/CMakeLists.txt.

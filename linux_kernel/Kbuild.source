@@ -6,21 +6,34 @@
 # The option JENT_CONF_ENABLE_INTERNAL_TIMER must not be set as there is no
 # in-kernel support for a timer thread
 #
-# Include paths are expressed relative to $(src) (the directory of this Kbuild,
-# i.e. linux_kernel/) so they resolve identically for an in-tree build and an
-# out-of-tree "make M=... modules" build, regardless of the kernel version's
-# handling of relative -I paths:
-#   $(src)        -> linux_kernel/       (kernel interface headers)
-#   $(src)/..     -> project root        (jitterentropy.h, arch/*.h)
-#   $(src)/../src -> src/                (library internal headers)
+# Include paths are expressed relative to $(jent_srcdir), the source directory
+# of this Kbuild (i.e. linux_kernel/), set in Kbuild:
+#   $(jent_srcdir)        -> linux_kernel/  (kernel interface headers)
+#   $(jent_srcdir)/..     -> project root   (jitterentropy.h, arch/*.h)
+#   $(jent_srcdir)/../src -> src/           (library internal headers)
 #
 # The kernel interfaces get no src/: they use the library through
 # jitterentropy.h alone, and the test interface the recording library's
 # jitterentropy-record.h.
 jitter_rng_c_args = -DLINUX_KERNEL					       \
-		    -I$(src) -I$(src)/..
-jitter_rng_lib_c_args = $(jitter_rng_c_args) -I$(src)/../src
+		    -I$(jent_srcdir) -I$(jent_srcdir)/..
+jitter_rng_lib_c_args = $(jitter_rng_c_args) -I$(jent_srcdir)/../src
 jent_recorddir = tests/raw-entropy/recording_library
+
+# Built in tree, crypto/Makefile enters this directory through
+# "obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy-library/linux_kernel/"
+# (see README.md, "Build in Tree"). With CONFIG_CRYPTO_JITTERENTROPY=m that
+# enters it only for modules, where an obj-y would build nothing, and with =y
+# an obj-m would leave vmlinux without the Jitter RNG the configuration asks
+# for there.
+# So the kernel configuration decides there and CONFIG_EXTERNAL_JITTERENTROPY
+# follows it, whatever Kbuild.config says. An external module build (M=,
+# DKMS; KBUILD_EXTMOD set) keeps the Kbuild.config value.
+ifeq ($(KBUILD_EXTMOD),)
+ifneq ($(filter y m,$(CONFIG_CRYPTO_JITTERENTROPY)),)
+CONFIG_EXTERNAL_JITTERENTROPY := $(CONFIG_CRYPTO_JITTERENTROPY)
+endif
+endif
 
 # The interface options are boolean: 'y' enables, anything else (unset, empty,
 # 'n') disables. This allows overriding the Kbuild.config defaults from the
@@ -29,7 +42,16 @@ ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE
 endif
 
-ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_KCAPI),y)
+# The crypto API interface only against a kernel with the RNG algorithm type
+# (crypto_register_rng() lives in crypto/rng.c, CONFIG_CRYPTO_RNG2), for the
+# reason and with the built-in rule of the hwrng interface below.
+ifeq ($(CONFIG_CRYPTO_RNG2),y)
+jent_kcapi := $(CONFIG_EXTERNAL_JITTERENTROPY_KCAPI)
+else ifeq ($(CONFIG_CRYPTO_RNG2)$(CONFIG_EXTERNAL_JITTERENTROPY),mm)
+jent_kcapi := $(CONFIG_EXTERNAL_JITTERENTROPY_KCAPI)
+endif
+
+ifeq ($(jent_kcapi),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_KCAPI
 endif
 
@@ -37,7 +59,16 @@ ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_CHARDEV
 endif
 
-ifeq ($(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG),y)
+# hwrng only against a kernel with hw_random: <linux/hw_random.h> has no stubs,
+# and a DKMS rebuild on such a kernel must not fail on the enabled default.
+# Built into vmlinux it needs hw_random built in too, not rng-core.ko.
+ifeq ($(CONFIG_HW_RANDOM),y)
+jent_hwrng := $(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG)
+else ifeq ($(CONFIG_HW_RANDOM)$(CONFIG_EXTERNAL_JITTERENTROPY),mm)
+jent_hwrng := $(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG)
+endif
+
+ifeq ($(jent_hwrng),y)
 jitter_rng_c_args += -DCONFIG_EXTERNAL_JITTERENTROPY_HWRNG
 endif
 
@@ -85,19 +116,11 @@ CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
 CFLAGS_../arch/jitterentropy-arch-atomic.o = $(jitter_rng_lib_c_args)
 CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_lib_c_args)
 # Deliberately not $(jitter_rng_c_args_zero), unlike the entropy core above.
-# This object is the one place <linux/timex.h> is included, and that header does
-# not compile at -O0 on current kernels: x86's random_get_entropy() reaches
-# _static_cpu_has(), whose asm goto needs a compile-time-constant feature
-# operand, and without optimization GCC cannot produce one ("impossible
-# constraint in 'asm'"). The -O0 requirement covers the measured loops in the
-# entropy core, not the counter read, so building just the timestamp accessor
-# with the kernel's normal flags costs a call per timestamp and nothing else.
-#
-# Only the architectures without a counter instruction of their own reach
-# <linux/timex.h> at all: x86, aarch64, s390x, powerpc, riscv, sparc64 and
-# loongarch64 read their counter with the instruction directly and would build
-# at -O0 as well. The flags are kept uniform for the object rather than made
-# conditional on the target architecture.
+# On architectures without a counter instruction this object reads the clock
+# through <linux/timex.h>, and kernel headers are only meant to build
+# optimized. The -O0 requirement covers the measured loops in the entropy
+# core, not the counter read, so this costs a call per timestamp and nothing
+# else.
 CFLAGS_../arch/jitterentropy-arch-timer.o = $(jitter_rng_lib_c_args)
 CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_lib_c_args)
 CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_lib_c_args)
@@ -112,7 +135,7 @@ CFLAGS_jitterentropy_status.o = $(jitter_rng_c_args)
 
 ################### Kernel Crypto API Interface Compilation ####################
 
-jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_KCAPI)			       \
+jitter_rng-$(jent_kcapi)						       \
 	+= jitterentropy_kcapi.o
 
 CFLAGS_jitterentropy_kcapi.o = $(jitter_rng_c_args)
@@ -126,7 +149,7 @@ CFLAGS_jitterentropy_chardev.o = $(jitter_rng_c_args)
 
 ############################# HW RNG Compilation ###############################
 
-jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_HWRNG)			       \
+jitter_rng-$(jent_hwrng)						       \
 	+= jitterentropy_hwrng.o
 
 CFLAGS_jitterentropy_hwrng.o = $(jitter_rng_c_args)
@@ -141,6 +164,6 @@ jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE)		       \
 	   ../$(jent_recorddir)/jitterentropy-record-session.o
 
 CFLAGS_jitterentropy_testing.o = $(jitter_rng_c_args)			       \
-				 -I$(src)/../$(jent_recorddir)
+				 -I$(jent_srcdir)/../$(jent_recorddir)
 CFLAGS_../$(jent_recorddir)/jitterentropy-record-session.o =		       \
 	$(jitter_rng_lib_c_args)

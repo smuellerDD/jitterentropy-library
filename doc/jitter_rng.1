@@ -1,0 +1,89 @@
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTER_RNG 1 2026-09-30 "jitterentropy x.y.z" "User Commands"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitter_rng \- query the jitter_rng kernel module and read random bytes from it
+.SH SYNOPSIS
+.B jitter_rng
+.RB [ \-d
+.IR device ]
+.RB [ \-i | \-s | \-t | \-r
+.I bytes
+.RB [ \-x ]]
+.SH DESCRIPTION
+.B jitter_rng
+shows what the
+.BR jitter_rng (4)
+kernel module runs with and reads random bytes from its character device,
+through
+.BR jitterentropy-kernel (3).
+Every invocation opens the device once and so works on an instance of its
+own.
+.SH OPTIONS
+.TP
+.BR \-i ", " \-\-info
+The default. Print the module's version, configuration and interfaces from
+.IR /proc/jitterentropy ,
+and the identifier, version, oversampling rate, flags, memory size, hash loop
+count, health test failures, reinitializations and output counters of the
+instance.
+.TP
+.BR \-s ", " \-\-status
+Print the JSON status document of the instance.
+.TP
+.BR \-r ", " \-\-random " \fIbytes\fR"
+Write
+.I bytes
+random bytes to standard output.
+.TP
+.BR \-x ", " \-\-hex
+With
+.BR \-r ,
+write them as hexadecimal digits followed by a newline.
+.TP
+.BR \-t ", " \-\-selftest
+Run the cryptographic self test on the instance. Needs
+.BR CAP_SYS_ADMIN .
+.TP
+.BR \-d ", " \-\-device " \fIdevice\fR"
+Open
+.I device
+instead of
+.IR /dev/jitterentropy .
+.TP
+.BR \-h ", " \-\-help
+Print the options.
+.SH EXIT STATUS
+0 on success, 1 when the device cannot be opened, an argument is invalid or
+the request fails.
+.SH EXAMPLES
+A 256 bit key as hexadecimal digits:
+.PP
+.EX
+jitter_rng \-r 32 \-x
+.EE
+.PP
+The health test state of an instance, with
+.BR jq (1):
+.PP
+.EX
+jitter_rng \-s | jq .healthFailure
+.EE
+.SH SEE ALSO
+.BR jitterentropy-kernel (3),
+.BR jitter_rng (4)

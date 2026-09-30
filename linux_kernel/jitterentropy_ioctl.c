@@ -20,6 +20,7 @@
 struct jent_ioctl_field {
 	union {
 		__u32 u32;
+		__u64 u64;
 		struct jent_uuid_ioctl uuid;
 		struct jent_output_ioctl output;
 	} value;
@@ -36,6 +37,8 @@ bool jent_ioctl_is_field(unsigned int cmd)
 	case JENT_IOCHEALTH:
 	case JENT_IOCOUTPUT:
 	case JENT_IOCREINIT:
+	case JENT_IOCMEMSIZE:
+	case JENT_IOCHASHLOOPS:
 		return true;
 	default:
 		return false;
@@ -96,6 +99,13 @@ static int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
 	case JENT_IOCREINIT:
 		return jent_ioctl_field_u32(out,
 				jent_entropy_collector_reinitializations(ec));
+	case JENT_IOCMEMSIZE:
+		out->value.u64 = jent_entropy_collector_memsize(ec);
+		out->size = sizeof(out->value.u64);
+		return 0;
+	case JENT_IOCHASHLOOPS:
+		return jent_ioctl_field_u32(out,
+					    jent_entropy_collector_hashloops(ec));
 	case JENT_IOCOUTPUT:
 		out->value.output.invocations =
 			jent_entropy_collector_read_invocations(ec);

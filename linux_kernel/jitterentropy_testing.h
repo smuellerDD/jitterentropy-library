@@ -3,6 +3,7 @@
  * Test interface for Jitter RNG.
  *
  * Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 #ifndef _JITTERENTROPY_TESTING_H
@@ -14,7 +15,8 @@
 /*
  * Create/remove the debugfs test interface. A creation failure is returned
  * as an error after removing anything already created; a kernel without
- * debugfs or with lockdown active skips the interface and succeeds.
+ * debugfs, booted with debugfs=off or with lockdown active skips the
+ * interface and succeeds.
  */
 int __init jent_testing_init(void);
 void jent_testing_exit(void);

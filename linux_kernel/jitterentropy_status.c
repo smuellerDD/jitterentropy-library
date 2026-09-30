@@ -26,8 +26,9 @@
  * bytes. Holds @lock so a concurrent read path can neither reallocate the
  * collector on health-test recovery nor mutate the state being serialized.
  *
- * Without a collector, jent_status() would emit a version-only JSON stub;
- * report an error instead.
+ * Without a collector - one whose reallocation on health-test recovery
+ * failed - jent_status() would emit a version-only JSON stub; report an error
+ * instead.
  */
 static int jent_status_render(struct mutex *lock, struct rand_data **ec,
 			      char *buf)
@@ -36,10 +37,7 @@ static int jent_status_render(struct mutex *lock, struct rand_data **ec,
 
 	if (mutex_lock_interruptible(lock))
 		return -ERESTARTSYS;
-	if (*ec)
-		ret = jent_status(*ec, buf, JENT_STATUS_MAX_LEN);
-	else
-		ret = -1;
+	ret = *ec ? jent_status(*ec, buf, JENT_STATUS_MAX_LEN) : -1;
 	mutex_unlock(lock);
 
 	return ret ? -EIO : 0;
@@ -56,7 +54,7 @@ long jent_status_to_user(struct mutex *lock, struct rand_data **ec,
 	if (copy_from_user(&status, arg, sizeof(status)))
 		return -EFAULT;
 
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL_ACCOUNT);
 	if (!buf)
 		return -ENOMEM;
 
@@ -101,7 +99,7 @@ int jent_status_seq_show(struct seq_file *m, struct mutex *lock,
 	char *buf;
 	int ret;
 
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL_ACCOUNT);
 	if (!buf)
 		return -ENOMEM;
 
@@ -119,7 +117,7 @@ int jent_status_to_log(struct mutex *lock, struct rand_data **ec)
 	char *buf;
 	int ret;
 
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
+	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL_ACCOUNT);
 	if (!buf)
 		return -ENOMEM;
 
@@ -131,10 +129,7 @@ int jent_status_to_log(struct mutex *lock, struct rand_data **ec)
 	if (lock)
 		mutex_lock(lock);
 	/* Without a collector there is nothing to log. */
-	if (*ec)
-		ret = jent_status(*ec, buf, JENT_STATUS_MAX_LEN);
-	else
-		ret = 0;
+	ret = *ec ? jent_status(*ec, buf, JENT_STATUS_MAX_LEN) : 0;
 	if (lock)
 		mutex_unlock(lock);
 
