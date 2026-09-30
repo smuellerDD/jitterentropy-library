@@ -27,8 +27,11 @@ extern "C"
 {
 #endif
 
+JENT_INTERNAL
 int jent_time_entropy_init(unsigned int osr, unsigned int flags);
+JENT_INTERNAL
 uint32_t jent_memsize(unsigned int flags);
+JENT_INTERNAL
 unsigned int jent_hashloop_cnt(unsigned int flags);
 
 #ifdef __cplusplus

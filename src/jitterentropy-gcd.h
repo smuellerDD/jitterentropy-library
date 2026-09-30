@@ -36,18 +36,17 @@ extern "C"
 #define JENT_GCD_CLOCK_NOTIME	1	/* the internal timer's counting thread */
 #define JENT_GCD_CLOCKS		2
 
-/* @param[in] notime The clock measured, as enable_notime records it. */
-JENT_PRIVATE_STATIC
+/* Internal: JENT_INTERNAL, not JENT_PRIVATE_STATIC, which would export them. */
+JENT_INTERNAL
 int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr,
 		     unsigned int notime);
 JENT_PRIVATE_STATIC
 uint64_t *jent_gcd_init(size_t nelem, unsigned int flags);
-JENT_PRIVATE_STATIC
+JENT_INTERNAL
 void jent_gcd_fini(uint64_t *delta_history, size_t nelem);
-/* @param[in] notime The clock whose divisor is wanted. */
-JENT_PRIVATE_STATIC
+JENT_INTERNAL
 int jent_gcd_get(uint64_t *value, unsigned int notime);
-JENT_PRIVATE_STATIC
+JENT_INTERNAL
 int jent_gcd_selftest(unsigned int flags);
 
 /* Watch for common adjacent GCD values */

@@ -61,6 +61,7 @@
  * least JENT_UUID_STRLEN bytes. Where the platform offers no CSPRNG the nil
  * UUID (all zeroes) is produced. Defined in src/jitterentropy-uuid.c.
  */
+JENT_INTERNAL
 void jent_uuid_generate(char *out);
 
 #endif /* _JITTERENTROPY_UUID_H */
