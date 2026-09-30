@@ -38,6 +38,7 @@
 #include "unit.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 
 /*
@@ -47,7 +48,22 @@
  */
 #include "jitterentropy-arch-atomic.c"
 
+/*
+ * The known answer test of the conditioning, interposed as unit-fault.c
+ * interposes the allocator: renamed while its source is absorbed, and supplied
+ * here under its own name, so that every absorbed caller reaches a version
+ * that can be made to fail. The shipped library carries no testing hook.
+ */
+#define jent_sha3_tester jent_sha3_tester_real
 #include "jitterentropy-sha3.c"
+#undef jent_sha3_tester
+
+static int ut_sha3_fail;
+
+int jent_sha3_tester(void)
+{
+	return ut_sha3_fail ? 1 : jent_sha3_tester_real();
+}
 #include "jitterentropy-gcd.c"
 #include "jitterentropy-health.c"
 #include "jitterentropy-noise.c"
@@ -98,7 +114,7 @@ static void test_error_mapping(void)
 			jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
 
 		if (!ec) {
-			JENT_UT_SKIP(failures[i].name, "no collector");
+			JENT_UT_NO_COLLECTOR(failures[i].name, JENT_FORCE_FIPS);
 			continue;
 		}
 
@@ -145,7 +161,7 @@ static void test_permanent_precedence(void)
 			jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
 
 		if (!ec) {
-			JENT_UT_SKIP(cases[i].name, "no collector");
+			JENT_UT_NO_COLLECTOR(cases[i].name, JENT_FORCE_FIPS);
 			continue;
 		}
 
@@ -166,7 +182,7 @@ static void test_no_report_without_fips(void)
 	jent_ut_group("health failures are only reported in FIPS mode");
 
 	if (!ec) {
-		JENT_UT_SKIP("non-FIPS mode", "no collector");
+		JENT_UT_NO_COLLECTOR("non-FIPS mode", 0);
 		return;
 	}
 
@@ -189,11 +205,42 @@ static struct rand_data *cb_ec;
 static unsigned int cb_failure;
 static unsigned int cb_calls;
 
+/*
+ * Fail a self test from inside the read: what a jent_selftest() bound to the
+ * collector does when it lands while the read is in flight.
+ */
+static int cb_fail_selftest;
+
+/*
+ * What the callback saw of the instance it was handed, copied while it ran: a
+ * collector in its startup is freed again when that startup fails.
+ */
+#define CB_LOG_MAX	8
+static struct {
+	unsigned int failure;
+	char uuid[JENT_UUID_STRLEN];
+	uint64_t bytes_output;
+	uint64_t read_invocations;
+} cb_log[CB_LOG_MAX];
+static unsigned int cb_log_len;
+
 static void failure_cb(struct rand_data *ec, unsigned int health_failure)
 {
 	cb_ec = ec;
 	cb_failure = health_failure;
 	cb_calls++;
+
+	if (cb_log_len < CB_LOG_MAX) {
+		cb_log[cb_log_len].failure = health_failure;
+		memcpy(cb_log[cb_log_len].uuid, ec->uuid,
+		       sizeof(cb_log[cb_log_len].uuid));
+		cb_log[cb_log_len].bytes_output = ec->bytes_output;
+		cb_log[cb_log_len].read_invocations = ec->read_invocations;
+		cb_log_len++;
+	}
+
+	if (cb_fail_selftest)
+		jent_atomic_store_int(&ec->selftest_failed, 1);
 }
 
 /*
@@ -220,7 +267,9 @@ static void test_failure_callback_register(void)
 static void test_failure_callback(void)
 {
 	struct rand_data *ec;
-	char buf[32];
+	/* Eight blocks: a request the generator checks the tests all through. */
+	char buf[8 * (DATA_SIZE_BITS / 8)];
+	unsigned int i;
 
 	jent_ut_group("the callback is invoked on a health failure");
 
@@ -232,7 +281,8 @@ static void test_failure_callback(void)
 
 	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
 	if (!ec) {
-		JENT_UT_SKIP("jent_set_fips_failure_callback", "no collector");
+		JENT_UT_NO_COLLECTOR("jent_set_fips_failure_callback",
+				     JENT_FORCE_FIPS);
 		return;
 	}
 
@@ -243,10 +293,41 @@ static void test_failure_callback(void)
 	ec->health_failure = JENT_APT_FAILURE_PERMANENT;
 	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)),
 		   JENT_ERR_APT_PERMANENT, "the failure is still returned");
-	JENT_UT_NE(cb_calls, 0, "the callback was invoked");
 	JENT_UT_TRUE(cb_ec == ec, "with the collector that failed");
 	JENT_UT_EQ(cb_failure, JENT_APT_FAILURE_PERMANENT,
 		   "and the failure bits that were raised");
+	/*
+	 * Once per failure, not once per check of it. The collection loop asks
+	 * jent_health_failure() before every measurement it takes and
+	 * jent_read_entropy() asks again for every block, so one raised
+	 * failure is seen over and over on the way out - a caller whose
+	 * callback logs, counts or trips an alarm would get all of them.
+	 */
+	JENT_UT_EQ(cb_calls, 1, "the callback was invoked exactly once");
+
+	/*
+	 * And directly, where the repetition actually lives: a failure that
+	 * stands is checked for as long as the instance is alive.
+	 */
+	cb_calls = 0;
+	ec->health_failure = 0;
+	ec->health_failure_reported = 0;
+
+	ec->health_failure = JENT_RCT_FAILURE;
+	for (i = 0; i < 1000; i++)
+		jent_health_failure(ec);
+	JENT_UT_EQ(cb_calls, 1,
+		   "a thousand checks of one failure are one notification");
+
+	/* A bit that was not reported yet is a new failure, and is. */
+	ec->health_failure |= JENT_RCT_FAILURE_PERMANENT;
+	for (i = 0; i < 1000; i++)
+		jent_health_failure(ec);
+	JENT_UT_EQ(cb_calls, 2,
+		   "and an escalation to the permanent cutoff is a second");
+	JENT_UT_EQ(cb_failure,
+		   JENT_RCT_FAILURE | JENT_RCT_FAILURE_PERMANENT,
+		   "reported with every bit standing, not just the new one");
 
 	jent_entropy_collector_free(ec);
 
@@ -270,18 +351,48 @@ static void test_safe_recovery(void)
 
 	jent_ut_group("jent_read_entropy_safe recovers only from intermittent failures");
 
+	/* The FIPS collectors allocate, but their replacements may not. */
+	if (!jent_ut_memlock_available()) {
+		JENT_UT_SKIP("the recovery",
+			     "this machine locks too little memory (RLIMIT_MEMLOCK)");
+		return;
+	}
+
 	for (i = 0; i < sizeof(failures) / sizeof(failures[0]); i++) {
 		struct rand_data *ec =
 			jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
-		unsigned int osr_before;
+		char uuid_before[JENT_UUID_STRLEN];
+		uint64_t bytes_before, reads_before;
+		unsigned int osr_before, reinits_before, flags_before;
 		ssize_t ret;
 
 		if (!ec) {
-			JENT_UT_SKIP(failures[i].name, "no collector");
+			JENT_UT_NO_COLLECTOR(failures[i].name, JENT_FORCE_FIPS);
 			continue;
 		}
 
+		/*
+		 * A history for the reallocation to carry: the instance's
+		 * UUID and its output accounting.
+		 */
+		if (jent_read_entropy_safe(&ec, buf, sizeof(buf)) !=
+		    (ssize_t)sizeof(buf)) {
+			JENT_UT_SKIP(failures[i].name,
+				     "the noise source did not converge on this machine");
+			jent_entropy_collector_free(ec);
+			continue;
+		}
+		memcpy(uuid_before, ec->uuid, sizeof(uuid_before));
+		bytes_before = ec->bytes_output;
+		reads_before = ec->read_invocations;
+
+		/*
+		 * Both from here: the initial allocation may already have
+		 * walked a step of the startup ladder on this machine.
+		 */
 		osr_before = ec->osr;
+		reinits_before = ec->reinit_count;
+		flags_before = jent_entropy_collector_flags(ec);
 		ec->health_failure = failures[i].bit;
 		ret = jent_read_entropy_safe(&ec, buf, sizeof(buf));
 
@@ -290,17 +401,105 @@ static void test_safe_recovery(void)
 				   "a permanent failure is returned");
 			JENT_UT_EQ(ec->osr, osr_before,
 				   "and no reallocation was attempted");
+			JENT_UT_EQ(ec->bytes_output, bytes_before,
+				   "a read that delivered nothing counts nothing");
 		} else {
 			JENT_UT_EQ(ret, (ssize_t)sizeof(buf),
 				   "an intermittent failure is recovered from");
 			JENT_UT_TRUE(ec->osr > osr_before,
 				     "by raising the oversampling rate");
-			JENT_UT_EQ(ec->reinit_count, 1u,
-				   "and the reinitialization is counted");
+			/*
+			 * One reallocation per rate: the recovery's own, and
+			 * any the replacement's startup ladder made.
+			 */
+			JENT_UT_EQ(ec->reinit_count - reinits_before,
+				   ec->osr - osr_before,
+				   "and every reallocation is counted");
+			JENT_UT_TRUE(ec->uuid[0] != '\0',
+				     "the replacement carries an identifier");
+			JENT_UT_TRUE(!memcmp(ec->uuid, uuid_before,
+					     sizeof(uuid_before)),
+				     "and it is the one the instance had");
+			JENT_UT_EQ(ec->bytes_output,
+				   bytes_before + sizeof(buf),
+				   "the output accounting spans the reallocation");
+			JENT_UT_EQ(ec->read_invocations, reads_before + 1,
+				   "as does the count of reads it answered");
+			JENT_UT_EQ(jent_entropy_collector_reinitializations(ec),
+				   ec->reinit_count,
+				   "the accessor reports the reallocations");
+			JENT_UT_EQ(jent_entropy_collector_flags(ec),
+				   flags_before,
+				   "and the flags stay the configured ones");
 		}
 
 		jent_entropy_collector_free(ec);
 	}
+}
+
+/*
+ * The reallocation replaces the instance, not its verdicts: a failed self test
+ * stays failed on the replacement, whether it was bound before the recovery or
+ * while the read that triggered it was in flight.
+ */
+static void test_selftest_verdict_survives_reset(void)
+{
+	struct rand_data *ec, *before;
+	char buf[32];
+
+	jent_ut_group("a failed self test survives the reallocation");
+
+	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	if (!ec) {
+		JENT_UT_NO_COLLECTOR("the carried verdict", JENT_FORCE_FIPS);
+		return;
+	}
+
+	before = ec;
+	jent_atomic_store_int(&ec->selftest_failed, 1);
+	if (jent_health_failure_reset(&ec, 0)) {
+		JENT_UT_SKIP("the carried verdict",
+			     "the reallocation did not succeed on this machine");
+		jent_entropy_collector_free(ec);
+		return;
+	}
+	JENT_UT_TRUE(ec != before, "the collector was replaced");
+	JENT_UT_EQ(jent_atomic_load_int(&ec->selftest_failed), 1,
+		   "and the replacement carries the failed verdict");
+	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)), JENT_ERR_SELFTEST,
+		   "so it delivers no output either");
+	{
+		char status[4096];
+
+		JENT_UT_EQ(jent_status(ec, status, sizeof(status)), 0,
+			   "its status is rendered");
+		JENT_UT_TRUE(strstr(status, "\"selftestFailed\": true") != NULL,
+			     "and reports the failed self test");
+	}
+	jent_entropy_collector_free(ec);
+
+	if (!cb_registered) {
+		JENT_UT_SKIP("a verdict set during the read",
+			     "the callback could not be registered");
+		return;
+	}
+
+	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	if (!ec) {
+		JENT_UT_NO_COLLECTOR("a verdict set during the read",
+				     JENT_FORCE_FIPS);
+		return;
+	}
+
+	before = ec;
+	ec->health_failure = JENT_RCT_FAILURE;
+	cb_fail_selftest = 1;
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, buf, sizeof(buf)),
+		   JENT_ERR_SELFTEST,
+		   "a verdict set while the recovery was due stops the output");
+	cb_fail_selftest = 0;
+	JENT_UT_TRUE(ec != before, "after the collector was replaced");
+	jent_entropy_collector_free(ec);
 }
 
 /*
@@ -352,6 +551,56 @@ static void test_recovery_gives_up(void)
 }
 
 /*
+ * A self test of the conditioning that fails during a recovery is no reason to
+ * raise the oversampling rate: no rate mends it. The recovery stops at once
+ * and reports it as what it is, and the instance stops for good, as after a
+ * failed bound jent_selftest().
+ */
+static void test_recovery_selftest_failure(void)
+{
+	struct rand_data *ec, *before;
+	unsigned int osr_before, reinits_before;
+	char buf[32];
+
+	jent_ut_group("a self test failing during recovery ends it");
+
+	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	if (!ec) {
+		JENT_UT_NO_COLLECTOR("the failed recovery", JENT_FORCE_FIPS);
+		return;
+	}
+
+	before = ec;
+	osr_before = ec->osr;
+	reinits_before = ec->reinit_count;
+	ec->health_failure = JENT_RCT_FAILURE;
+
+	ut_sha3_fail = 1;
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, buf, sizeof(buf)),
+		   JENT_ERR_SELFTEST,
+		   "the failed self test is returned, not a health failure");
+	ut_sha3_fail = 0;
+
+	JENT_UT_TRUE(ec == before, "the collector was left in place");
+	JENT_UT_EQ(ec->osr, osr_before,
+		   "at the oversampling rate it had");
+	JENT_UT_EQ(ec->reinit_count, reinits_before,
+		   "without a reallocation");
+	JENT_UT_EQ(jent_atomic_load_int(&ec->selftest_failed), 1,
+		   "and marked as failed its self test");
+	JENT_UT_EQ(ec->health_failure & JENT_PERMANENT_FAILURES, 0,
+		   "with no permanent health failure made up for it");
+
+	/* The verdict is final, with the self test passing again. */
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, buf, sizeof(buf)),
+		   JENT_ERR_SELFTEST, "later reads report it again");
+	JENT_UT_EQ(jent_selftest(ec), EHASH,
+		   "as does a self test run bound to the instance");
+
+	jent_entropy_collector_free(ec);
+}
+
+/*
  * The reallocation carries the health test state over, so that a failure that
  * keeps occurring escalates to the permanent cutoff instead of restarting from
  * zero at every recovery.
@@ -362,10 +611,11 @@ static void test_state_duplication(void)
 
 	jent_ut_group("the health test state survives a reallocation");
 
-	old_ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
-	new_ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	/* Different rates, so the two collectors' cutoffs can be told apart. */
+	old_ec = jent_entropy_collector_alloc(3, JENT_FORCE_FIPS);
+	new_ec = jent_entropy_collector_alloc(4, JENT_FORCE_FIPS);
 	if (!old_ec || !new_ec) {
-		JENT_UT_SKIP("state duplication", "no collector");
+		JENT_UT_NO_COLLECTOR("state duplication", JENT_FORCE_FIPS);
 		jent_entropy_collector_free(old_ec);
 		jent_entropy_collector_free(new_ec);
 		return;
@@ -402,11 +652,44 @@ static void test_state_duplication(void)
 	JENT_UT_EQ(new_ec->apt_base, 0xc0ffee, "with its base symbol");
 	JENT_UT_EQ(new_ec->apt_count, 27,
 		   "and the count of repetitions the window holds");
+	JENT_UT_TRUE(new_ec->apt_count <= new_ec->apt_observations,
+		     "which is no more than the window has observed");
 
-	/* RCT with memory: likewise primed at its intermittent cutoff. */
+	/*
+	 * RCT with memory: primed at the OLD collector's intermittent cutoff,
+	 * which the replacement's first window continues from. The window is
+	 * closed until a block opens it, so the ->prev_time priming
+	 * measurement ahead of the first block leaves the priming alone.
+	 */
+	JENT_UT_TRUE(old_ec->rct_mem_cutoff < new_ec->rct_mem_cutoff,
+		     "the replacement's RCT-with-memory cutoff is the higher");
+	new_ec->rct_mem_count = 0;
+	new_ec->rct_mem_ctr = 0;
 	jent_rct_mem_duplicate(new_ec, old_ec);
-	JENT_UT_EQ(new_ec->rct_mem_count, new_ec->rct_mem_cutoff,
-		   "the RCT with memory is primed at its intermittent cutoff");
+	JENT_UT_EQ(new_ec->rct_mem_count, old_ec->rct_mem_cutoff,
+		   "the RCT with memory is primed at the old cutoff");
+	JENT_UT_EQ(new_ec->rct_mem_ctr, new_ec->rct_mem_nosr,
+		   "with the window closed");
+
+	new_ec->health_failure = 0;
+	new_ec->health_failure_reported = 0;
+	jent_rct_mem_insert(new_ec, 1);
+	JENT_UT_EQ(new_ec->rct_mem_count, old_ec->rct_mem_cutoff,
+		   "a measurement before the first block counts nothing");
+
+	/* The first window continues from the priming. */
+	new_ec->rct_mem_ctr = 0;
+	jent_rct_mem_insert(new_ec, 1);
+	JENT_UT_EQ(new_ec->rct_mem_count, old_ec->rct_mem_cutoff + 1,
+		   "the first window of the replacement counts on from it");
+	JENT_UT_EQ(jent_health_failure(new_ec), 0,
+		   "below its own cutoff, so the priming raises nothing");
+
+	/* And only the first: the next one starts from zero. */
+	new_ec->rct_mem_ctr = 0;
+	jent_rct_mem_insert(new_ec, 1);
+	JENT_UT_EQ(new_ec->rct_mem_count, 1,
+		   "the window after it starts from zero again");
 
 #ifdef JENT_HEALTH_LAG_PREDICTOR
 	/* Lag: the whole predictor state, history and scoreboard included. */
@@ -453,7 +736,9 @@ static void test_state_duplication(void)
  * The same state when the reallocation changed the clock, which the recovery
  * does on its own: the startup re-run at the raised OSR may fall back to
  * forcing the internal timer. The state built from delta values must not
- * follow to a different source; the state built from counters must.
+ * follow to a different source; the state built from counters must. The stuck
+ * test primes its reference from the new source: unjudged, those deltas leave
+ * the RCT priming alone, where a zeroed reference would clear it.
  */
 static void test_state_duplication_clock_change(void)
 {
@@ -464,7 +749,7 @@ static void test_state_duplication_clock_change(void)
 	old_ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
 	new_ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
 	if (!old_ec || !new_ec) {
-		JENT_UT_SKIP("the clock change", "no collector");
+		JENT_UT_NO_COLLECTOR("the clock change", JENT_FORCE_FIPS);
 		jent_entropy_collector_free(old_ec);
 		jent_entropy_collector_free(new_ec);
 		return;
@@ -475,7 +760,8 @@ static void test_state_duplication_clock_change(void)
 	old_ec->apt_base_set = 1;
 #ifdef JENT_HEALTH_LAG_PREDICTOR
 	old_ec->lag_observations = 1234;
-	old_ec->lag_delta_history[0] = 0x1000;
+	JENT_LAG_HISTORY(old_ec, 0) = 0x1000;
+	JENT_LAG_HISTORY(old_ec, 1) = 0x2000;
 #else
 	old_ec->last_delta = 0x1000;
 	old_ec->last_delta2 = 0x2000;
@@ -494,7 +780,63 @@ static void test_state_duplication_clock_change(void)
 	JENT_UT_EQ(new_ec->rct_count, new_ec->rct_cutoff,
 		   "and the RCT primed at its intermittent cutoff");
 
-	/* On the other, the counters still are and the delta values are not. */
+	/*
+	 * On one clock, but in another startup stage - as every FIPS / NTG.1
+	 * replacement begins, with the memory access source alone, where the
+	 * collector it replaces sampled the full noise source: the APT and
+	 * lag state stays behind as it does across a clock change, and the
+	 * stuck test primes its reference anew.
+	 */
+	new_ec->apt_base = 0;
+	new_ec->apt_observations = 0;
+	new_ec->apt_base_set = 0;
+	new_ec->rct_count = 0;
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	new_ec->lag_observations = 0;
+	new_ec->lag_delta_history[0] = 0;
+#else
+	new_ec->last_delta = 0;
+	new_ec->last_delta2 = 0;
+#endif
+	new_ec->stuck_prime = 0;
+	old_ec->startup_state = jent_startup_completed;
+	new_ec->startup_state = jent_startup_memory;
+
+	jent_health_duplicate(new_ec, old_ec);
+
+	JENT_UT_EQ(new_ec->apt_base_set, 0,
+		   "a replacement in another startup stage takes no APT base");
+	JENT_UT_EQ(new_ec->apt_observations, 0,
+		   "nor the window position of the other source");
+	JENT_UT_EQ(new_ec->rct_count, new_ec->rct_cutoff,
+		   "while the RCT is primed as ever");
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+	JENT_UT_EQ(new_ec->lag_observations, 0,
+		   "and the lag predictor starts on its own source");
+#endif
+	JENT_UT_EQ(new_ec->stuck_prime, JENT_STUCK_PRIME,
+		   "as does the stuck test's reference");
+
+	/*
+	 * Which keeps the RCT priming: the priming deltas are not judged, and
+	 * a source repeating its delta after them is stuck and counts on from
+	 * the cutoff.
+	 */
+	jent_stuck(new_ec, 0x1000);
+	jent_stuck(new_ec, 0x1000);
+	JENT_UT_EQ(new_ec->rct_count, new_ec->rct_cutoff,
+		   "the priming deltas leave the RCT count alone");
+	jent_stuck(new_ec, 0x1000);
+	JENT_UT_EQ(new_ec->rct_count, new_ec->rct_cutoff + 1,
+		   "a repeated delta counts on from the priming");
+	new_ec->health_failure = 0;
+	new_ec->health_failure_reported = 0;
+	new_ec->startup_state = jent_startup_completed;
+
+	/*
+	 * On the other, the counters still are, and the APT and lag state and
+	 * the stuck test's reference are not.
+	 */
 	new_ec->apt_base = 0;
 	new_ec->apt_observations = 0;
 	new_ec->apt_base_set = 0;
@@ -507,6 +849,7 @@ static void test_state_duplication_clock_change(void)
 	new_ec->last_delta = 0;
 	new_ec->last_delta2 = 0;
 #endif
+	new_ec->stuck_prime = 0;
 	new_ec->enable_notime = 1;
 
 	jent_health_duplicate(new_ec, old_ec);
@@ -520,18 +863,14 @@ static void test_state_duplication_clock_change(void)
 	JENT_UT_EQ(new_ec->rct_count, new_ec->rct_cutoff,
 		   "while the RCT is primed as ever - the priming is a cutoff, "
 		   "not a measurement of the old clock");
-	JENT_UT_EQ(new_ec->rct_mem_count, new_ec->rct_mem_cutoff,
-		   "as is the RCT with memory");
+	JENT_UT_EQ(new_ec->rct_mem_count, old_ec->rct_mem_cutoff,
+		   "as is the RCT with memory, at the old collector's cutoff");
 #ifdef JENT_HEALTH_LAG_PREDICTOR
 	JENT_UT_EQ(new_ec->lag_observations, 0,
 		   "the lag predictor starts on its own source");
-	JENT_UT_EQ(new_ec->lag_delta_history[0], 0,
-		   "with none of the other one's history");
-#else
-	JENT_UT_EQ(new_ec->last_delta, 0,
-		   "the stuck test starts on its own source");
-	JENT_UT_EQ(new_ec->last_delta2, 0, "with none of the other one's");
 #endif
+	JENT_UT_EQ(new_ec->stuck_prime, JENT_STUCK_PRIME,
+		   "and the stuck test primes its reference from it");
 
 	/* Not left claiming a counting thread it never had. */
 	new_ec->enable_notime = 0;
@@ -680,7 +1019,7 @@ static void test_status_both_arms(void)
 	jent_ut_group("the status output renders both arms of every field");
 
 	if (!ec) {
-		JENT_UT_SKIP("jent_status", "no collector");
+		JENT_UT_NO_COLLECTOR("jent_status", 0);
 		return;
 	}
 
@@ -777,6 +1116,210 @@ static void test_recovery_keeps_caller_memsize(void)
 	jent_entropy_collector_free(ec);
 }
 
+/*
+ * The recovery of jent_read_entropy_safe() carries the old collector's state
+ * into the replacement before the replacement's startup runs, not after it:
+ * the startup's health tests continue from the old ones, and a failure they
+ * report during it is reported for the instance the caller holds.
+ *
+ * Made deterministic through the RCT with memory: an old intermittent cutoff
+ * above every cutoff of the replacement primes the replacement's first
+ * window past its permanent cutoff, so the first block of its startup fails
+ * permanently. Duplicated only after the startup, as the recovery used to,
+ * the startup ran on fresh tests and passed.
+ */
+static void test_safe_reset_carries_state_into_startup(void)
+{
+	struct rand_data *ec, *before;
+	char uuid_before[JENT_UUID_STRLEN];
+	uint64_t bytes_before, reads_before;
+	unsigned int osr_before, i;
+	int seen = 0;
+	char buf[32];
+	ssize_t ret;
+
+	jent_ut_group("the recovery carries the state into the replacement's startup");
+
+	if (!cb_registered) {
+		JENT_UT_SKIP("the carried state",
+			     "the callback could not be registered");
+		return;
+	}
+	if (!jent_ut_memlock_available()) {
+		JENT_UT_SKIP("the carried state",
+			     "this machine locks too little memory (RLIMIT_MEMLOCK)");
+		return;
+	}
+
+	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
+	if (!ec) {
+		JENT_UT_NO_COLLECTOR("the carried state", JENT_FORCE_FIPS);
+		return;
+	}
+
+	/* An identity and a history for the replacement to carry. */
+	if (jent_read_entropy_safe(&ec, buf, sizeof(buf)) !=
+	    (ssize_t)sizeof(buf)) {
+		JENT_UT_SKIP("the carried state",
+			     "the noise source did not converge on this machine");
+		jent_entropy_collector_free(ec);
+		return;
+	}
+	JENT_UT_TRUE(ec->uuid[0] != '\0', "the collector has an identifier");
+	memcpy(uuid_before, ec->uuid, sizeof(uuid_before));
+	bytes_before = ec->bytes_output;
+	reads_before = ec->read_invocations;
+	osr_before = ec->osr;
+	before = ec;
+
+	/*
+	 * Above every cutoff of the replacement, with room to count on: the
+	 * first measurement it judges may be stuck, and at USHRT_MAX the count
+	 * would wrap to zero instead of reaching the permanent cutoff.
+	 */
+	ec->rct_mem_cutoff = USHRT_MAX / 2;
+	ec->health_failure = JENT_APT_FAILURE;
+
+	cb_log_len = 0;
+	ret = jent_read_entropy_safe(&ec, buf, sizeof(buf));
+
+	/*
+	 * Findings of the replacement's startup: the callback saw it fail,
+	 * permanently, on an instance bearing the caller's identity and totals.
+	 */
+	for (i = 0; i < cb_log_len; i++) {
+		if (!(cb_log[i].failure & JENT_RCT_MEM_FAILURE_PERMANENT))
+			continue;
+		if (seen++)
+			continue;
+
+		JENT_UT_TRUE(!memcmp(cb_log[i].uuid, uuid_before,
+				     sizeof(uuid_before)),
+			     "the callback during the replacement's startup "
+			     "sees the caller's UUID");
+		JENT_UT_EQ(cb_log[i].bytes_output, bytes_before,
+			   "and the caller's output total");
+		JENT_UT_EQ(cb_log[i].read_invocations, reads_before,
+			   "and the caller's read count");
+	}
+	JENT_UT_TRUE(seen,
+		     "the primed RCT with memory failed the replacement's startup");
+	JENT_UT_EQ(seen, 1,
+		   "and the callback hears of it once, not again when the "
+		   "caller's collector takes the same failure over");
+
+	/*
+	 * A permanent failure ends that startup, and is what the caller is
+	 * told - not retried at the next rate, and not turned back into the
+	 * intermittent failure that asked for the recovery.
+	 */
+	JENT_UT_EQ(ret, JENT_ERR_RCT_MEM_PERMANENT,
+		   "the replacement's permanent failure is returned");
+	JENT_UT_TRUE(ec == before, "the caller keeps the collector it had");
+	JENT_UT_EQ(ec->osr, osr_before, "unchanged");
+	/*
+	 * Reported as that same failure from then on, as the API promises -
+	 * not as the permanent counterpart of its own intermittent failure,
+	 * which would tell the caller another story on every later call.
+	 */
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, buf, sizeof(buf)),
+		   JENT_ERR_RCT_MEM_PERMANENT,
+		   "and out of service for good, with the failure it returned");
+	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)),
+		   JENT_ERR_RCT_MEM_PERMANENT, "for a plain read as well");
+	JENT_UT_TRUE(ec == before, "without another recovery attempt");
+
+	jent_entropy_collector_free(ec);
+}
+
+/*
+ * The memory size derived from the cache. A cache too small to yield even the
+ * smallest size the field expresses is taken as unknown, and the reallocation
+ * ladder then grows from the default - it used to count up from zero, i.e.
+ * shrink the region to 1 kB, 2 kB, ...
+ */
+static void test_derived_memsize(void)
+{
+	unsigned int def = JENT_DEFAULT_MEMORY_BITS - JENT_MAX_MEMSIZE_OFFSET;
+	unsigned int inc;
+	static const uint64_t tiny[] = { 0, 1, 2, 64, 128 };
+	size_t i;
+
+	jent_ut_group("the memory size derived from the cache size");
+
+	for (i = 0; i < sizeof(tiny) / sizeof(tiny[0]); i++) {
+		JENT_UT_EQ(jent_derive_memsize(tiny[i], 0, 0), def,
+			   "a cache of 128 bytes or less is taken as unknown");
+		JENT_UT_EQ(jent_derive_memsize(tiny[i], 1, 0), def,
+			   "with JENT_CACHE_ALL as well");
+	}
+
+	for (inc = 1; inc <= 3; inc++) {
+		unsigned int expect = def + inc;
+
+		if (expect > JENT_MAX_AUTO_MEMSIZE)
+			expect = JENT_MAX_AUTO_MEMSIZE;
+		JENT_UT_EQ(jent_derive_memsize(128, 0, inc), expect,
+			   "and a reallocation grows from the default");
+	}
+
+	/* A real L1 is unchanged: 32 kB, four-fold, is 128 kB. */
+	JENT_UT_EQ(jent_derive_memsize(32768, 0, 0),
+		   JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_128kB) +
+			JENT_CACHE_SHIFT_BITS,
+		   "a 32 kB L1 still derives 128 kB");
+	JENT_UT_EQ(jent_derive_memsize(32768, 0, 1),
+		   JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_256kB) +
+			JENT_CACHE_SHIFT_BITS,
+		   "and grows by one step per reallocation");
+}
+
+/* Flag bits this version does not define are refused, not ignored. */
+static void test_reserved_flags(void)
+{
+	static const unsigned int valid =
+		JENT_DISABLE_STIR | JENT_DISABLE_UNBIAS |
+		JENT_DISABLE_MEMORY_ACCESS | JENT_FORCE_INTERNAL_TIMER |
+		JENT_DISABLE_INTERNAL_TIMER | JENT_FORCE_FIPS | JENT_NTG1 |
+		JENT_CACHE_ALL | JENT_FORCE_SECURE_MEM | JENT_MAX_HASHLOOP |
+		JENT_MAX_MEMSIZE_MAX;
+	unsigned int bit;
+
+	jent_ut_group("reserved flag bits");
+
+	JENT_UT_EQ(jent_flags_invalid(valid), 0,
+		   "every defined flag and the largest fields are accepted");
+	JENT_UT_EQ(jent_flags_invalid(0), 0, "as are no flags at all");
+
+	for (bit = 9; bit <= 22; bit++) {
+		if (!jent_flags_invalid(1U << bit)) {
+			JENT_UT_FAIL("reserved bit %u is accepted", bit);
+			return;
+		}
+	}
+	jent_ut_checks++;
+
+	JENT_UT_NE(jent_flags_invalid(JENT_MAX_MEMSIZE_TO_FLAGS(
+			JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX) + 1)), 0,
+		   "a memory size field above JENT_MAX_MEMSIZE_MAX is refused");
+	JENT_UT_NE(jent_flags_invalid(JENT_MAX_MEMSIZE_MASK), 0,
+		   "up to the top of the field");
+	JENT_UT_NE(jent_flags_invalid(JENT_HASHLOOP_TO_FLAGS(
+			JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP) + 1)), 0,
+		   "a hash loop field above JENT_MAX_HASHLOOP is refused");
+	JENT_UT_NE(jent_flags_invalid(JENT_MAX_HASHLOOP_MASK), 0,
+		   "up to the top of that field");
+
+	JENT_UT_EQ(jent_entropy_init_ex(0, 1U << 9), EPROGERR,
+		   "jent_entropy_init_ex refuses a reserved bit with EPROGERR");
+	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_MAX_MEMSIZE_MASK), EPROGERR,
+		   "and an out-of-range memory size");
+	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_MAX_HASHLOOP_MASK), EPROGERR,
+		   "and an out-of-range hash loop count");
+	JENT_UT_TRUE(jent_entropy_collector_alloc(0, 1U << 22) == NULL,
+		     "jent_entropy_collector_alloc refuses a reserved bit");
+}
+
 int main(void)
 {
 	jent_ut_setup();
@@ -788,12 +1331,17 @@ int main(void)
 	test_permanent_precedence();
 	test_no_report_without_fips();
 	test_safe_recovery();
+	test_safe_reset_carries_state_into_startup();
+	test_selftest_verdict_survives_reset();
 	test_recovery_gives_up();
+	test_recovery_selftest_failure();
 	test_recovery_keeps_caller_memsize();
 	test_state_duplication();
 	test_state_duplication_clock_change();
 	test_alloc_needs_a_measured_clock();
 	test_status_both_arms();
+	test_derived_memsize();
+	test_reserved_flags();
 	test_failure_callback();
 
 	/*

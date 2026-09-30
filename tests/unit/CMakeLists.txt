@@ -18,8 +18,8 @@ function(jent_unit_test name)
         ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
     # What the library's link interface would have supplied. See
-    # JITTER_THREAD_LIBRARIES in the top-level CMakeLists.txt.
-    target_link_libraries(${name} PRIVATE ${JITTER_THREAD_LIBRARIES})
+    # JITTER_SYSTEM_LIBRARIES in the top-level CMakeLists.txt.
+    target_link_libraries(${name} PRIVATE ${JITTER_SYSTEM_LIBRARIES})
     if(WIN32)
         # The UUID backend calls BCryptGenRandom().
         target_link_libraries(${name} PRIVATE bcrypt)
@@ -30,6 +30,12 @@ function(jent_unit_test name)
     endif()
 
     add_test(NAME ${name} COMMAND ${name})
+    # 77 is a skip, as the automake convention has it: a program that finds
+    # the machine unable to run it at all - unit-fault when the startup self
+    # test rejects this machine's timer or memlock limit - says so rather than
+    # fail. A startup that fails for any other reason still fails (see
+    # JENT_UT_MACHINE_VERDICT in unit.h).
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
 endfunction()
 
 jent_unit_test(unit-sha3)
@@ -54,7 +60,16 @@ jent_unit_test(unit-notime)
 jent_unit_test(unit-concurrency)
 jent_unit_test(unit-zeroize)
 
-# MOCK_TIMER is a library build option, off by default; this defines it for its
-# own absorbed copy rather than for the whole build.
+# MOCK_TIMER is a library build option, off by default; these define it for
+# their own absorbed copy rather than for the whole build.
 jent_unit_test(unit-mock)
 target_compile_definitions(unit-mock PRIVATE JENT_CONF_ENABLE_MOCK_TIMER)
+
+# The RCT-with-memory recovery loop generating real blocks, on a mocked clock.
+jent_unit_test(unit-health)
+target_compile_definitions(unit-health PRIVATE JENT_CONF_ENABLE_MOCK_TIMER)
+
+# Mocked timestamps carry a magic, so a find on the stack is attributable.
+jent_unit_test(unit-stack-residue)
+target_compile_definitions(unit-stack-residue
+                           PRIVATE JENT_CONF_ENABLE_MOCK_TIMER)

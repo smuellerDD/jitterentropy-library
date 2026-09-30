@@ -29,9 +29,8 @@
  *
  *   - the startup self test runs once per process and every thread reads its
  *     verdict, so every thread has to be given the same one,
- *   - the conditioning known answer tests, the common timer GCD and the
- *     internal timer's forced state are process-wide and are established by
- *     whichever thread arrives first,
+ *   - the conditioning known answer tests are process-wide and are
+ *     established by whichever thread arrives first,
  *   - the FIPS failure callback is a process-wide registration that is closed
  *     once a collector has bound it, and the closing is one-way,
  *   - the instance identifier and the entropy pool are per collector, so two
@@ -178,10 +177,13 @@ struct ut_worker {
 	void (*work)(struct ut_worker *w);
 
 	int init_ret;			/* the startup verdict it was given */
+	int init_seen;			/* ... other than a transient EMEM */
 	int init_differed;		/* a later round was told something else */
 	int selftest_ret;		/* the conditioning self test verdict */
 	int allocs;			/* collectors it built */
 	int reads;			/* generations that delivered */
+	int intermittent;		/* ... that failed a health test
+					   intermittently, in FIPS mode */
 	int read_err;			/* the first read that did not */
 	int status_err;			/* a status or UUID call that failed */
 	int misc_err;			/* a call that answered outside contract */
@@ -197,7 +199,7 @@ struct ut_worker {
 	int notime_crossed;		/* ... that were built for the other clock */
 	int ticked;			/* counting threads seen to have counted */
 	unsigned int osr_seen;		/* the OSR its last collector settled on */
-	uint64_t divisor;		/* the common timer divisor it was given */
+	uint64_t divisor;		/* the timer divisor it was given */
 
 	char uuid[JENT_UUID_STRLEN];	/* the identity of its last collector */
 	unsigned char block[UT_BLOCK];	/* the first block it generated */
@@ -210,6 +212,13 @@ struct ut_worker {
  * the one piece of state the test itself shares between threads, and a test
  * for data races may not introduce one.
  */
+/*
+ * The system's FIPS mode, and whether secure memory is forced (it, or a
+ * backend that forces nothing); main() asks before any thread runs.
+ */
+static int ut_fips_mode;
+static int ut_secure_mem_forced;
+
 static int ut_gate;
 static int ut_ready[UT_MAX_THREADS];
 
@@ -249,13 +258,11 @@ static void ut_gate_open(unsigned int started)
  */
 static void ut_check_stateless(struct ut_worker *w)
 {
-	int ret;
-
 	if (jent_version() != JENT_VERSION)
 		w->misc_err = 1;
 
-	ret = jent_secure_memory_supported();
-	if (ret != 0 && ret != 1)
+	/* Zeroization on free, which every build provides. */
+	if (jent_secure_memory_supported() != 1)
 		w->misc_err = 1;
 }
 
@@ -282,10 +289,19 @@ static void ut_work_lifecycle(struct ut_worker *w)
 		unsigned int i;
 		int ret;
 
+		/*
+		 * Where secure memory is forced, the startup's collector is
+		 * locked into RAM out of one quota the threads share, and an
+		 * EMEM says only that the others held it at that moment - the
+		 * verdict is whatever the other rounds are told.
+		 */
 		ret = jent_entropy_init_ex(0, 0);
-		if (!round)
+		if (ret == EMEM && ut_secure_mem_forced)
+			;
+		else if (!w->init_seen) {
 			w->init_ret = ret;
-		else if (ret != w->init_ret)
+			w->init_seen = 1;
+		} else if (ret != w->init_ret)
 			w->init_differed = 1;
 
 		ut_check_stateless(w);
@@ -334,6 +350,12 @@ static void ut_work_lifecycle(struct ut_worker *w)
 				 */
 				if (w->reads == 1)
 					memcpy(w->block, buf, sizeof(buf));
+			} else if (ut_fips_mode && JENT_UT_INTERMITTENT(rc)) {
+				/*
+				 * Documented behaviour of the FIPS mode health
+				 * tests on any machine.
+				 */
+				w->intermittent++;
 			} else if (!w->read_err) {
 				w->read_err = (int)rc;
 			}
@@ -361,6 +383,10 @@ static void ut_work_lifecycle(struct ut_worker *w)
 
 		jent_entropy_collector_free(ec);
 	}
+
+	/* EMEM on every round: that is what it was told, transient or not. */
+	if (!w->init_seen)
+		w->init_ret = EMEM;
 }
 
 /*
@@ -453,12 +479,9 @@ static void ut_work_registrations(struct ut_worker *w)
  * increments a counter, all of it per instance. One arm has several of those
  * running at once; the other reads the platform clock.
  *
- * The second arm cannot be arranged after the fact: asking any collector for
- * the internal timer forces it process-wide and one way, and every collector
- * built afterwards gets a counting thread whether it asked or not. So its
- * collectors are built before the run and only read from - which is also why
- * it uses jent_read_entropy() and not the safe variant, whose reallocation
- * would build the replacement after the forcing.
+ * The platform-clock collectors are built before the run and only read from,
+ * with jent_read_entropy(), so that asking for the internal timer elsewhere is
+ * seen not to move them.
  */
 
 /*
@@ -532,10 +555,13 @@ static void ut_notime_read(struct ut_worker *w, struct rand_data *ec)
 
 	/*
 	 * The read joined this instance's counting thread, so the counter is
-	 * safe to look at - and one that moved is the evidence that the clock
-	 * measured really was the thread.
+	 * safe to look at. Not notime_timer: a started thread moves that
+	 * whether or not anything reads it, so it said only that a thread ran.
+	 * notime_prev_timer is zeroed by every start and written only by
+	 * jent_get_nstime_internal() on the counting-thread path - a value in
+	 * it is the evidence that the clock measured really was the thread.
 	 */
-	if (ec->enable_notime && ec->notime_timer)
+	if (ec->enable_notime && ec->notime_prev_timer)
 		w->ticked++;
 }
 
@@ -676,6 +702,23 @@ static unsigned int ut_run(struct ut_worker *workers, unsigned int nthreads)
 }
 
 /*
+ * Whether a run raced anything. A short run still exercises the library, but
+ * one thread passes every check without overlapping anything, so it is a
+ * skip. Two suffices; arms needing more check for it themselves.
+ */
+static int ut_raced(unsigned int started, const char *what)
+{
+	if (started >= 2)
+		return 1;
+
+	JENT_UT_SKIP(what, started ?
+			   "only one thread could be created, so nothing ran "
+			   "concurrently" :
+			   "no thread could be created");
+	return 0;
+}
+
+/*
  * One configuration per thread, so that the collectors being built at the same
  * time differ in the state the library derives per instance - memory size and
  * hash loop count - rather than all taking the same path through the
@@ -683,6 +726,11 @@ static unsigned int ut_run(struct ut_worker *workers, unsigned int nthreads)
  */
 static unsigned int ut_flags(unsigned int idx)
 {
+	/*
+	 * FIPS mode refuses a collector without its memory access noise
+	 * source, by design; there that slot is an ordinary one.
+	 */
+	unsigned int drop = ut_fips_mode ? JENT_DISABLE_MEMORY_ACCESS : 0;
 	static const unsigned int flags[] = {
 		0,
 		JENT_DISABLE_MEMORY_ACCESS,
@@ -699,7 +747,7 @@ static unsigned int ut_flags(unsigned int idx)
 		JENT_MAX_MEMSIZE_64kB,
 	};
 
-	return flags[idx % JENT_ARRAY_SIZE(flags)];
+	return flags[idx % JENT_ARRAY_SIZE(flags)] & ~drop;
 }
 
 static void ut_init_workers(struct ut_worker *workers, unsigned int nthreads,
@@ -720,7 +768,8 @@ static void test_concurrent_lifecycle(void)
 {
 	struct ut_worker workers[UT_MAX_THREADS];
 	unsigned int nthreads = ut_threads();
-	unsigned int started, i, j, allocs = 0, reads = 0;
+	unsigned int started, i, j, ref, allocs = 0, reads = 0;
+	unsigned int intermittent = 0;
 	unsigned int read_errs = 0, status_errs = 0, init_differed = 0;
 	unsigned int misc_errs = 0;
 
@@ -729,11 +778,8 @@ static void test_concurrent_lifecycle(void)
 	ut_init_workers(workers, nthreads, ut_work_lifecycle, ut_flags);
 
 	started = ut_run(workers, nthreads);
-	if (!started) {
-		JENT_UT_SKIP("the concurrent life cycle",
-			     "no thread could be created");
+	if (!ut_raced(started, "the concurrent life cycle"))
 		return;
-	}
 	printf("  note: %u threads, %u rounds each\n", started, UT_ROUNDS);
 
 	/*
@@ -742,14 +788,26 @@ static void test_concurrent_lifecycle(void)
 	 * first - the second thread must not be told the timer is broken
 	 * because the first one is still measuring it.
 	 */
-	for (i = 1; i < started; i++) {
-		JENT_UT_EQ(workers[i].init_ret, workers[0].init_ret,
+	/*
+	 * Against the first thread told something other than a transient EMEM
+	 * (see ut_work_lifecycle()); one told nothing else has no verdict to
+	 * compare.
+	 */
+	for (ref = 0; ref < started && !workers[ref].init_seen; ref++)
+		;
+	if (ref == started)
+		ref = 0;
+	for (i = 0; i < started; i++) {
+		if (i == ref || !workers[i].init_seen)
+			continue;
+		JENT_UT_EQ(workers[i].init_ret, workers[ref].init_ret,
 			   "every thread is given the same startup verdict");
 	}
 
 	for (i = 0; i < started; i++) {
 		allocs += (unsigned int)workers[i].allocs;
 		reads += (unsigned int)workers[i].reads;
+		intermittent += (unsigned int)workers[i].intermittent;
 		read_errs += workers[i].read_err ? 1 : 0;
 		status_errs += workers[i].status_err ? 1u : 0u;
 		init_differed += workers[i].init_differed ? 1u : 0u;
@@ -768,22 +826,40 @@ static void test_concurrent_lifecycle(void)
 	JENT_UT_EQ(misc_errs, 0u,
 		   "the process-wide queries answer the same on every thread");
 
-	if (workers[0].init_ret) {
+	if (workers[ref].init_ret) {
 		/*
 		 * A machine whose startup does not pass builds no collector,
 		 * which is not what this test is about. The threads still ran,
-		 * and that they agreed on the verdict is checked above.
+		 * and that they agreed on the verdict is checked above. A
+		 * verdict that is not the machine's fails.
 		 */
 		printf("  note: the startup gives %d here\n",
-		       workers[0].init_ret);
-		JENT_UT_SKIP("the concurrent generation",
-			     "the startup does not pass on this machine");
+		       workers[ref].init_ret);
+		JENT_UT_NO_STARTUP("the concurrent generation",
+				   workers[ref].init_ret);
 		return;
 	}
 
-	JENT_UT_EQ(allocs, started * UT_ROUNDS,
-		   "every thread built a collector in every round");
-	JENT_UT_EQ(reads, allocs * 2, "and every generation delivered");
+	/*
+	 * Where secure memory is forced every collector is locked out of the
+	 * one quota the threads share, and a machine whose quota does not
+	 * hold them all at once refuses some - as it may refuse a compliance
+	 * mode startup whose health tests do not pass.
+	 */
+	if (allocs != started * UT_ROUNDS && ut_secure_mem_forced) {
+		printf("  note: %u of %u collectors were built\n", allocs,
+		       started * UT_ROUNDS);
+		JENT_UT_SKIP("every thread building a collector in every "
+			     "round", "secure memory is forced");
+	} else {
+		JENT_UT_EQ(allocs, started * UT_ROUNDS,
+			   "every thread built a collector in every round");
+	}
+	if (intermittent)
+		printf("  note: %u generations failed a health test "
+		       "intermittently\n", intermittent);
+	JENT_UT_EQ(reads + intermittent, allocs * 2,
+		   "and every generation delivered");
 
 	/*
 	 * The conditioning is one implementation shared by every instance, so
@@ -803,12 +879,18 @@ static void test_concurrent_lifecycle(void)
 	 */
 	for (i = 0; i < started; i++) {
 		for (j = i + 1; j < started; j++) {
-			JENT_UT_TRUE(memcmp(workers[i].block, workers[j].block,
-					    UT_BLOCK) != 0,
-				     "two threads generate different blocks");
-			JENT_UT_TRUE(strcmp(workers[i].uuid,
-					    workers[j].uuid) != 0,
-				     "two collectors carry different UUIDs");
+			/* Only between threads that have one each. */
+			if (workers[i].reads && workers[j].reads)
+				JENT_UT_TRUE(memcmp(workers[i].block,
+						    workers[j].block,
+						    UT_BLOCK) != 0,
+					     "two threads generate different "
+					     "blocks");
+			if (workers[i].uuid[0] && workers[j].uuid[0])
+				JENT_UT_TRUE(strcmp(workers[i].uuid,
+						    workers[j].uuid) != 0,
+					     "two collectors carry different "
+					     "UUIDs");
 		}
 	}
 }
@@ -838,11 +920,8 @@ static void test_concurrent_registrations(void)
 			ut_fips_flags);
 
 	started = ut_run(workers, nthreads);
-	if (!started) {
-		JENT_UT_SKIP("the concurrent registration",
-			     "no thread could be created");
+	if (!ut_raced(started, "the concurrent registration"))
 		return;
-	}
 
 	for (i = 0; i < started; i++) {
 		allocs += (unsigned int)workers[i].allocs;
@@ -881,6 +960,22 @@ static void test_concurrent_registrations(void)
 
 	JENT_UT_TRUE(registrations > 0,
 		     "the registering threads ran alongside them");
+
+	/*
+	 * And the precondition the assertion above needs, which the race
+	 * cannot supply: every registering thread may finish its attempts
+	 * before the first compliance-mode allocation closes the gate, and
+	 * then nothing was ever refused and "no registration is accepted
+	 * after one was refused" held over an empty set - blocked is printed
+	 * in the note above and was asserted nowhere.
+	 *
+	 * A collector asking for a compliance mode has certainly been built by
+	 * now, so this attempt is not a race: it must be refused.
+	 */
+	JENT_UT_EQ(jent_set_fips_failure_callback(NULL), -EAGAIN,
+		   "a registration after the collectors were built is refused");
+	JENT_UT_EQ(jent_set_fips_failure_callback(ut_fips_failure), -EAGAIN,
+		   "and so is one that would install a callback");
 }
 
 
@@ -890,23 +985,6 @@ static void test_concurrent_registrations(void)
 static unsigned int ut_notime_flags(unsigned int idx)
 {
 	return ut_notime_arm(idx) ? JENT_FORCE_INTERNAL_TIMER : 0;
-}
-
-/*
- * Whether a run raced anything. A short run still exercises the library, but
- * one thread passes every check without overlapping anything, so it is a
- * skip. Two suffices; arms needing more check for it themselves.
- */
-static int ut_raced(unsigned int started, const char *what)
-{
-	if (started >= 2)
-		return 1;
-
-	JENT_UT_SKIP(what, started ?
-			   "only one thread could be created, so nothing ran "
-			   "concurrently" :
-			   "no thread could be created");
-	return 0;
 }
 
 static void test_concurrent_notime(void)
@@ -1097,6 +1175,9 @@ int main(void)
 {
 	jent_ut_setup();
 
+	ut_fips_mode = jent_fips_enabled();
+	ut_secure_mem_forced = JENT_UT_SECURE_MEM_FORCED(0);
+
 	/*
 	 * The registrations first, and the order is the test rather than a
 	 * matter of taste: every jent_entropy_init_ex() closes the callback
@@ -1108,12 +1189,6 @@ int main(void)
 	test_concurrent_registrations();
 	test_concurrent_lifecycle();
 
-	/*
-	 * And the internal timer last, for the same kind of reason: the first
-	 * collector that asks for it forces it for the life of the process,
-	 * and every collector the tests above build would then drive a
-	 * counting thread instead of reading the platform clock.
-	 */
 	test_concurrent_notime();
 
 	return jent_ut_report("unit-concurrency");

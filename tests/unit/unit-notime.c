@@ -135,10 +135,12 @@ static JENT_UT_MAYBE_UNUSED int fi_mlock(const void *addr, size_t len)
 
 /*
  * Compile the real allocator under a private name, with its kernel calls
- * redirected. The header it includes declares jent_zalloc(), which is renamed
- * with it, so the declaration and the definition still agree.
+ * redirected. The header it includes declares jent_zalloc() and
+ * jent_zalloc_unlocked(), which are renamed with them, so the declarations and
+ * the definitions still agree.
  */
 #define jent_zalloc jent_fi_real_zalloc
+#define jent_zalloc_unlocked jent_fi_real_zalloc_unlocked
 #ifdef FI_WINDOWS
 # define VirtualAlloc fi_VirtualAlloc
 # define VirtualProtect fi_VirtualProtect
@@ -165,25 +167,40 @@ static JENT_UT_MAYBE_UNUSED int fi_mlock(const void *addr, size_t len)
 # undef mprotect
 # undef mmap
 #endif
+#undef jent_zalloc_unlocked
 #undef jent_zalloc
 
 /*
  * Fail the n-th allocation from now on, counting from 1. Zero disables the
  * injection. Only one allocation is failed per arming, so that the collector
  * is built up to a chosen point and only then denied its next allocation -
- * which is what walks the cleanup paths one stage at a time.
+ * which is what walks the cleanup paths one stage at a time. Both allocators
+ * count, the memory access region being one of the stages.
  */
 static unsigned int fi_fail_alloc;
 static unsigned int fi_alloc_count;
 
-void *jent_zalloc(size_t len, unsigned int flags)
+static int fi_deny_alloc(void)
 {
 	fi_alloc_count++;
 
-	if (fi_fail_alloc && fi_alloc_count == fi_fail_alloc)
+	return fi_fail_alloc && fi_alloc_count == fi_fail_alloc;
+}
+
+void *jent_zalloc(size_t len, unsigned int flags)
+{
+	if (fi_deny_alloc())
 		return NULL;
 
 	return jent_fi_real_zalloc(len, flags);
+}
+
+void *jent_zalloc_unlocked(size_t len)
+{
+	if (fi_deny_alloc())
+		return NULL;
+
+	return jent_fi_real_zalloc_unlocked(len);
 }
 
 /*
@@ -400,6 +417,9 @@ static int fi_pthread_attr_init(pthread_attr_t *a)
 	return fi_pthread_attr_init_real(a);
 }
 
+/* libcs may define these as macros themselves (NetBSD does). */
+#undef pthread_create
+#undef pthread_attr_init
 #define pthread_create fi_pthread_create
 #define pthread_attr_init fi_pthread_attr_init
 #define jent_notime_thread_create jent_fi_real_thread_create
@@ -521,26 +541,84 @@ int jent_notime_thread_create(struct jent_notime_ctx *ctx,
 static unsigned int fi_custom_init_calls;
 static unsigned int fi_custom_fini_calls;
 
+/*
+ * A context of the handler's own, smaller than the built-in one: the library
+ * must not read it as the built-in layout (ASan catches it if it does).
+ */
+struct fi_custom_ctx {
+	void *builtin;
+};
+
+static unsigned int fi_custom_starts, fi_custom_stops;
+
+/*
+ * An init that fails after having stored a context it then released - legal
+ * for a handler, as the library may make nothing of what a failed init left
+ * behind. Its fini is never to see that pointer.
+ */
+static int fi_custom_init_fail;
+static void *fi_custom_failed_ctx;
+static unsigned int fi_custom_fini_failed_calls;
+
 static int fi_custom_init(void **ctx)
 {
+	struct fi_custom_ctx *c = malloc(sizeof(*c));
+
 	fi_custom_init_calls++;
-	return jent_notime_thread_builtin.jent_notime_init(ctx);
+	if (!c)
+		return -1;
+	if (fi_custom_init_fail) {
+		*ctx = c;
+		fi_custom_failed_ctx = c;
+		free(c);
+		return -1;
+	}
+	if (jent_notime_thread_builtin.jent_notime_init(&c->builtin)) {
+		free(c);
+		return -1;
+	}
+	*ctx = c;
+	return 0;
 }
+
+static unsigned int fi_custom_fini_null_calls;
 
 static void fi_custom_fini(void *ctx)
 {
+	struct fi_custom_ctx *c = ctx;
+
 	fi_custom_fini_calls++;
-	jent_notime_thread_builtin.jent_notime_fini(ctx);
+	/* A handler is only ever handed back the context its init stored. */
+	if (!c) {
+		fi_custom_fini_null_calls++;
+		return;
+	}
+	/* Compared only, never dereferenced: it has been freed. */
+	if (fi_custom_failed_ctx && c == fi_custom_failed_ctx) {
+		fi_custom_fini_failed_calls++;
+		return;
+	}
+	jent_notime_thread_builtin.jent_notime_fini(c->builtin);
+	free(c);
 }
 
 static int fi_custom_start(void *ctx, jent_notime_start_routine r, void *arg)
 {
-	return jent_notime_thread_builtin.jent_notime_start(ctx, r, arg);
+	struct fi_custom_ctx *c = ctx;
+	int ret = jent_notime_thread_builtin.jent_notime_start(c->builtin, r,
+								arg);
+
+	if (!ret)
+		fi_custom_starts++;
+	return ret;
 }
 
 static void fi_custom_stop(void *ctx)
 {
-	jent_notime_thread_builtin.jent_notime_stop(ctx);
+	struct fi_custom_ctx *c = ctx;
+
+	fi_custom_stops++;
+	jent_notime_thread_builtin.jent_notime_stop(c->builtin);
 }
 
 static struct jent_notime_thread fi_custom_thread = {
@@ -579,13 +657,30 @@ static void test_notime_impl_switch(void)
 	JENT_UT_EQ(jent_entropy_switch_notime_impl(&partial), -EINVAL,
 		   "one with no stop is refused");
 
-	/* A complete one is taken, and is what the collector then uses. */
-	JENT_UT_EQ(jent_entropy_switch_notime_impl(&fi_custom_thread), 0,
+	/*
+	 * A complete one is taken, and is what the collector then uses. From a
+	 * struct wiped right after the call: the library keeps a copy, so
+	 * every use below goes through the callbacks registered here.
+	 */
+	partial = fi_custom_thread;
+	JENT_UT_EQ(jent_entropy_switch_notime_impl(&partial), 0,
 		   "a complete implementation is accepted");
+	memset(&partial, 0, sizeof(partial));
 
 	/* Pinning the counting thread, configured before initialization. */
 	JENT_UT_EQ(jent_entropy_set_notime_cpu(1), 0,
 		   "the counting thread CPU can be configured beforehand");
+
+	/*
+	 * First a collector that never enables the internal timer - before
+	 * the one below forces it for the process. Its release, and that of
+	 * the startup's own collectors, has no context to tear down.
+	 */
+	ec = jent_entropy_collector_alloc(0, JENT_DISABLE_INTERNAL_TIMER);
+	jent_entropy_collector_free(ec);
+	JENT_UT_EQ(fi_custom_fini_calls, 0,
+		   "a collector without the internal timer is not torn down "
+		   "through the handler");
 
 	ec = jent_entropy_collector_alloc(0, JENT_FORCE_INTERNAL_TIMER);
 	if (ec) {
@@ -597,9 +692,34 @@ static void test_notime_impl_switch(void)
 		jent_entropy_collector_free(ec);
 		JENT_UT_NE(fi_custom_fini_calls, 0,
 			   "and is torn down with the collector");
+		JENT_UT_EQ(fi_custom_stops, fi_custom_starts,
+			   "stopping each thread it started exactly once");
 	} else {
-		JENT_UT_SKIP("the registered implementation",
-			     "the internal timer does not start here");
+		JENT_UT_NO_COLLECTOR("the registered implementation",
+				     JENT_FORCE_INTERNAL_TIMER);
+	}
+
+	/*
+	 * An init that fails having stored a pointer it already freed. The
+	 * collector is declined, and its teardown must not hand that pointer
+	 * to fini - a handler freeing on failure would see a double free.
+	 * The fini call count is compared over the allocation alone: a later
+	 * allocation may well be handed the same address again.
+	 */
+	{
+		unsigned int fini_before = fi_custom_fini_calls;
+
+		fi_custom_init_fail = 1;
+		ec = jent_entropy_collector_alloc(0, JENT_FORCE_INTERNAL_TIMER);
+		fi_custom_init_fail = 0;
+		JENT_UT_TRUE(ec == NULL,
+			     "a collector whose timer init fails is declined");
+		jent_entropy_collector_free(ec);
+		JENT_UT_EQ(fi_custom_fini_failed_calls, 0,
+			   "the context a failed init stored is not torn down");
+		JENT_UT_EQ(fi_custom_fini_calls, fini_before,
+			   "nor is fini called at all without a context");
+		fi_custom_failed_ctx = NULL;
 	}
 
 	/*
@@ -607,6 +727,9 @@ static void test_notime_impl_switch(void)
 	 * initialized the library, which is the point at which a caller must
 	 * not be able to pull its timer out from under it.
 	 */
+	JENT_UT_EQ(fi_custom_fini_null_calls, 0,
+		   "the handler's fini is never called without a context");
+
 	JENT_UT_EQ(jent_entropy_switch_notime_impl(&jent_notime_thread_builtin),
 		   -EAGAIN, "switching afterwards is denied");
 	JENT_UT_EQ(jent_entropy_set_notime_cpu(0), -EAGAIN,
@@ -645,14 +768,38 @@ static void test_notime_failures(void)
 		   "an undiscoverable CPU count is passed through");
 	fi_ncpu = 0;
 
-	/* The context allocation. */
+	/*
+	 * The context allocation, on two CPUs whatever this machine has: the
+	 * CPU count is asked first, and one declines before any allocation.
+	 */
+	fi_ncpu = 2;
 	fi_arm(1);
 	JENT_UT_EQ(jent_notime_init(&ctx), -ENOMEM,
 		   "a denied context allocation is reported");
 	fi_disarm();
+	fi_ncpu = 0;
 
-	/* And a collector that asks for the timer when no thread starts. */
+	/*
+	 * And a collector that asks for the timer when no thread starts. The
+	 * thread is started per read, not per collector - but the allocation
+	 * runs the startup, which is a read of its own, so it is declined.
+	 */
 	fi_fail_thread_create = 1;
+	{
+		struct rand_data *ec =
+			jent_entropy_collector_alloc(0,
+						     JENT_FORCE_INTERNAL_TIMER);
+
+		JENT_UT_TRUE(ec == NULL,
+			     "a collector with no timer thread is declined");
+		jent_entropy_collector_free(ec);
+	}
+	fi_fail_thread_create = 0;
+
+	/*
+	 * A collector allocated while the thread still started, read once it
+	 * no longer does: the read must fail rather than measure nothing.
+	 */
 	{
 		struct rand_data *ec =
 			jent_entropy_collector_alloc(0,
@@ -660,30 +807,29 @@ static void test_notime_failures(void)
 		char buf[32];
 
 		if (ec) {
-			/*
-			 * Allocation may still succeed - the thread is started
-			 * per read, not per collector - but a read that cannot
-			 * start its timer must fail rather than measure
-			 * nothing.
-			 */
+			fi_fail_thread_create = 1;
 			JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)),
 				   JENT_ERR_NOTIME,
 				   "a read with no timer thread is reported");
+			fi_fail_thread_create = 0;
 			jent_entropy_collector_free(ec);
 		} else {
-			JENT_UT_TRUE(1, "the collector is declined outright");
+			JENT_UT_NO_COLLECTOR("a read with no timer thread",
+					     JENT_FORCE_INTERNAL_TIMER);
 		}
 	}
-	fi_fail_thread_create = 0;
 
 	/* Working again once nothing is forced. */
 	ctx = NULL;
 	if (!jent_notime_init(&ctx)) {
 		JENT_UT_TRUE(ctx != NULL, "the timer initializes again");
 		jent_notime_fini(ctx);
-	} else {
+	} else if (!jent_ut_strict() && jent_notime_cpus_missing()) {
 		JENT_UT_SKIP("the internal timer",
-			     "it does not initialize on this machine");
+			     "this machine has no CPU for the counting thread");
+	} else {
+		JENT_UT_FAIL("%s: the timer does not initialize once nothing "
+			     "is forced", "the internal timer");
 	}
 #else
 	jent_ut_group("the internal timer where it cannot run");
@@ -714,18 +860,24 @@ static void test_thread_create_failures(void)
 	ret = jent_fi_real_thread_create(ctx, jent_notime_sample_timer, NULL);
 	fi_fail_pthread_attr = 0;
 	JENT_UT_NE(ret, 0, "refused thread attributes are reported");
+	JENT_UT_EQ(((struct jent_notime_ctx *)ctx)->notime_thread_started, 0,
+		   "and leave no thread marked as started");
 
 	fi_fail_pthread_create = 1;
 	ret = jent_fi_real_thread_create(ctx, jent_notime_sample_timer, NULL);
 	fi_fail_pthread_create = 0;
 	JENT_UT_NE(ret, 0, "a refused thread is reported");
+	JENT_UT_EQ(((struct jent_notime_ctx *)ctx)->notime_thread_started, 0,
+		   "and leaves no thread marked as started");
 
 	/*
 	 * The teardown after a refusal must be safe - this is the join that
-	 * would otherwise be handed a thread ID that was never set.
+	 * would otherwise be handed a thread ID that was never set. Beyond not
+	 * crashing, it is to leave the context as it found it.
 	 */
 	jent_notime_thread_join(ctx);
-	JENT_UT_TRUE(1, "the teardown after a refusal is safe");
+	JENT_UT_EQ(((struct jent_notime_ctx *)ctx)->notime_thread_started, 0,
+		   "the teardown after a refusal skips the join");
 
 	jent_notime_fini(ctx);
 #elif defined(JENT_CONF_ENABLE_INTERNAL_TIMER) && defined(JENT_WIN_THREADS)
@@ -748,13 +900,17 @@ static void test_thread_create_failures(void)
 	ret = jent_fi_real_thread_create(ctx, jent_notime_sample_timer, NULL);
 	fi_fail_thread_start = 0;
 	JENT_UT_NE(ret, 0, "a refused thread is reported");
+	JENT_UT_EQ(((struct jent_notime_ctx *)ctx)->notime_thread_started, 0,
+		   "and leaves no thread marked as started");
 
 	/*
 	 * The teardown after a refusal must be safe - this is the join that
-	 * would otherwise be handed a handle that was never opened.
+	 * would otherwise be handed a handle that was never opened. Beyond not
+	 * crashing, it is to leave the context as it found it.
 	 */
 	jent_notime_thread_join(ctx);
-	JENT_UT_TRUE(1, "the teardown after a refusal is safe");
+	JENT_UT_EQ(((struct jent_notime_ctx *)ctx)->notime_thread_started, 0,
+		   "the teardown after a refusal skips the join");
 
 	jent_notime_fini(ctx);
 #else
@@ -781,15 +937,22 @@ static void test_notime_entry_guards(void)
 			   NULL, jent_notime_sample_timer, NULL), -EINVAL,
 		   "starting with no context is refused");
 
-	/* Stopping one is a no-op rather than a fault. */
+	/*
+	 * Stopping one is a no-op rather than a fault. There is no state to
+	 * inspect - with no context there is nothing it could have changed -
+	 * so not crashing is the whole of the check.
+	 */
 	jent_notime_thread_builtin.jent_notime_stop(NULL);
 	JENT_UT_TRUE(1, "stopping with no context is a no-op");
 
 	/* The counting routine with no context still has to prime its counter. */
 	memset(&ec, 0, sizeof(ec));
 	ec.notime_interrupt = 1;
+	ec.notime_timer = 0x5a5a;
 	jent_notime_sample_timer(&ec);
-	JENT_UT_TRUE(1, "the counting routine returns when interrupted");
+	JENT_UT_EQ(ec.notime_timer, 0,
+		   "the counting routine primes its counter and returns when "
+		   "interrupted");
 
 	/*
 	 * Ticking a collector that does not use the internal timer. Both calls
@@ -800,8 +963,19 @@ static void test_notime_entry_guards(void)
 	ec.enable_notime = 0;
 	JENT_UT_EQ(jent_notime_settick(&ec), 0,
 		   "ticking a collector without the timer is a no-op");
-	jent_notime_unsettick(&ec);
-	JENT_UT_TRUE(1, "and so is unticking it");
+	JENT_UT_EQ(ec.notime_running, 0,
+		   "and starts no thread");
+	{
+		unsigned int stops = fi_custom_stops;
+
+		/* Marked running, so only the timer check keeps it out. */
+		ec.notime_running = 1;
+		jent_notime_unsettick(&ec);
+		JENT_UT_EQ(ec.notime_interrupt, 0,
+			   "and so is unticking it");
+		JENT_UT_EQ(fi_custom_stops, stops,
+			   "which stops no thread");
+	}
 
 	/* And the context lifecycle on its own. */
 	if (!jent_notime_init(&ctx)) {
@@ -818,8 +992,134 @@ static void test_notime_entry_guards(void)
 #endif
 }
 
+/*
+ * The CPU the counting thread picks when none was configured. It is the
+ * highest one of the affinity the thread starts with - that of the reader that
+ * starts it - and not of the thread that allocated the collector: pinned by
+ * the latter, the counter would land on a CPU the reader is kept off, as
+ * sched_setaffinity() does not stop at the mask the thread inherited.
+ *
+ * Played out on this thread: the context is made with the full mask, the
+ * thread is then narrowed to its two lowest CPUs, and the counting routine is
+ * run on it. It has to end up on the higher of the two.
+ *
+ * Before the switch test below, which takes the builtin handler away: only
+ * that one's context is pinned from.
+ */
+#if defined(JENT_CONF_ENABLE_INTERNAL_TIMER) && \
+    (defined(__linux__) || defined(FI_WINDOWS))
+static void test_notime_pin_default(void)
+{
+	struct rand_data ec;
+	void *ctx = NULL;
+	long lo = -1, hi = -1, pinned = -1;
+	unsigned int n = 0;
+#ifdef FI_WINDOWS
+	GROUP_AFFINITY orig, narrow, now;
+	unsigned int b;
+#else
+	cpu_set_t orig, narrow, now;
+	int b;
+#endif
+
+	jent_ut_group("the default CPU of the counting thread");
+
+#ifdef FI_WINDOWS
+	if (!GetThreadGroupAffinity(GetCurrentThread(), &orig)) {
+		JENT_UT_SKIP("the default CPU", "the affinity is not readable");
+		return;
+	}
+	narrow = orig;
+	narrow.Mask = 0;
+	for (b = 0; b < sizeof(KAFFINITY) * 8 && n < 2; b++) {
+		if ((orig.Mask >> b) & (KAFFINITY)1) {
+			narrow.Mask |= (KAFFINITY)1 << b;
+			n++;
+		}
+	}
+#else
+	if (sched_getaffinity(0, sizeof(orig), &orig)) {
+		JENT_UT_SKIP("the default CPU", "the affinity is not readable");
+		return;
+	}
+	CPU_ZERO(&narrow);
+	for (b = 0; b < CPU_SETSIZE && n < 2; b++) {
+		if (CPU_ISSET((size_t)b, &orig)) {
+			CPU_SET((size_t)b, &narrow);
+			n++;
+		}
+	}
+#endif
+	if (n < 2 || jent_notime_init(&ctx)) {
+		JENT_UT_SKIP("the default CPU",
+			     "the internal timer does not initialize here");
+		return;
+	}
+
+	/* The reader's view: the highest of its two CPUs, flat-numbered. */
+#ifdef FI_WINDOWS
+	if (!SetThreadGroupAffinity(GetCurrentThread(), &narrow, NULL)) {
+#else
+	if (sched_setaffinity(0, sizeof(narrow), &narrow)) {
+#endif
+		jent_notime_fini(ctx);
+		JENT_UT_SKIP("the default CPU", "the affinity is not settable");
+		return;
+	}
+	hi = jent_cpu_highest();
+
+	memset(&ec, 0, sizeof(ec));
+	ec.notime_thread_ctx = ctx;
+	ec.notime_interrupt = 1;
+	jent_notime_sample_timer(&ec);
+
+#ifdef FI_WINDOWS
+	if (GetThreadGroupAffinity(GetCurrentThread(), &now) &&
+	    now.Group == narrow.Group && now.Mask &&
+	    !(now.Mask & (now.Mask - 1)))
+		pinned = jent_cpu_highest();
+	for (b = 0; b < sizeof(KAFFINITY) * 8; b++) {
+		if ((narrow.Mask >> b) & (KAFFINITY)1) {
+			narrow.Mask = (KAFFINITY)1 << b;
+			break;
+		}
+	}
+	/* The lower of the two, alone. */
+	if (SetThreadGroupAffinity(GetCurrentThread(), &narrow, NULL))
+		lo = jent_cpu_highest();
+	SetThreadGroupAffinity(GetCurrentThread(), &orig, NULL);
+#else
+	if (!sched_getaffinity(0, sizeof(now), &now) && CPU_COUNT(&now) == 1)
+		pinned = jent_cpu_highest();
+	for (b = 0; b < CPU_SETSIZE; b++) {
+		if (CPU_ISSET((size_t)b, &narrow)) {
+			lo = b;
+			break;
+		}
+	}
+	sched_setaffinity(0, sizeof(orig), &orig);
+#endif
+	jent_notime_fini(ctx);
+
+	JENT_UT_TRUE(hi >= 0, "the narrowed thread has a highest CPU");
+	JENT_UT_EQ(pinned, hi,
+		   "the counting thread pins to the highest CPU of the thread "
+		   "running it");
+	JENT_UT_TRUE(lo >= 0 && lo != pinned,
+		     "and not to the lower one it could also run on");
+}
+#else
+static void test_notime_pin_default(void)
+{
+	jent_ut_group("the default CPU of the counting thread");
+	JENT_UT_SKIP("the default CPU", "no affinity to narrow here");
+}
+#endif
+
 int main(void)
 {
+	test_notime_pin_default();
+
 	/* First of all: initializing the library blocks the switch. */
 	test_notime_impl_switch();
 	test_notime_failures();

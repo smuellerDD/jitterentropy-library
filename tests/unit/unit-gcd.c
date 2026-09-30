@@ -20,6 +20,15 @@
  * DAMAGE.
  */
 
+/*
+ * jitterentropy-arch-memory.c is absorbed below, after the atomic accessors
+ * have pulled in the system headers: its own feature macros come too late for
+ * MAP_ANON on glibc 2.17 under -std=c11. Stated once up front.
+ */
+#ifdef __linux__
+#define _GNU_SOURCE
+#endif
+
 #include "unit.h"
 
 /*
@@ -62,7 +71,7 @@ static void test_analyze(void)
 	jent_ut_group("jent_gcd_analyze");
 
 	if (!deltas) {
-		JENT_UT_SKIP("jent_gcd_analyze", "allocation failed");
+		JENT_UT_FAIL("%s: allocation failed", "jent_gcd_analyze");
 		return;
 	}
 
@@ -159,7 +168,7 @@ static void test_gcd_establish(void)
 	jent_ut_group("jent_gcd_analyze establishes the common GCD");
 
 	if (!deltas) {
-		JENT_UT_SKIP("jent_gcd_establish", "allocation failed");
+		JENT_UT_FAIL("%s: allocation failed", "jent_gcd_establish");
 		return;
 	}
 
@@ -189,7 +198,7 @@ static void test_gcd_sticky(void)
 	jent_ut_group("the established GCD is not replaced by a later analysis");
 
 	if (!deltas) {
-		JENT_UT_SKIP("jent_gcd_sticky", "allocation failed");
+		JENT_UT_FAIL("%s: allocation failed", "jent_gcd_sticky");
 		return;
 	}
 
@@ -219,7 +228,7 @@ static void test_gcd_per_clock(void)
 	jent_ut_group("each clock keeps a divisor of its own");
 
 	if (!deltas) {
-		JENT_UT_SKIP("jent_gcd_per_clock", "allocation failed");
+		JENT_UT_FAIL("%s: allocation failed", "jent_gcd_per_clock");
 		return;
 	}
 
@@ -243,6 +252,65 @@ static void test_gcd_per_clock(void)
 	JENT_UT_EQ(value, 50, "and it is unchanged");
 
 	jent_gcd_fini(deltas, ELEM);
+}
+
+/*
+ * The variation requirement counts in units of the history's GCD. A startup
+ * on a clock whose divisor is already stored hands in divided deltas, so the
+ * raw history and the divided one must get the same verdict - or a clock's
+ * verdict would depend on whether its startup ran first. jent_gcd_verdict()
+ * stores nothing, so this can run in any order.
+ */
+static void test_verdict_normalized(void)
+{
+	uint64_t *raw = jent_gcd_init(ELEM, 0);
+	uint64_t *div = jent_gcd_init(ELEM, 0);
+	uint64_t gcd = 0;
+	unsigned int i, d;
+	static const unsigned int divisors[] = { 100, 50, 1 };
+
+	jent_ut_group("the variation check is independent of a stored divisor");
+
+	if (!raw || !div) {
+		JENT_UT_FAIL("%s: allocation failed", "jent_gcd_verdict");
+		goto out;
+	}
+
+	for (d = 0; d < JENT_ARRAY_SIZE(divisors); d++) {
+		/*
+		 * A clock stepping by 100 whose deltas vary by one step every
+		 * other sample: ELEM - 1 steps, one short of what osr 1
+		 * requires. Raw, the old check saw 100 times that and passed.
+		 */
+		for (i = 0; i < ELEM; i++) {
+			raw[i] = 100 * (1000 + (i & 1));
+			div[i] = raw[i] / divisors[d];
+		}
+		JENT_UT_EQ(jent_gcd_verdict(raw, ELEM, 1, &gcd), EMINVARVAR,
+			   "a flat history is rejected raw");
+		JENT_UT_EQ(jent_gcd_verdict(div, ELEM, 1, &gcd), EMINVARVAR,
+			   "and divided by a stored divisor");
+
+		/* Three steps every other sample: enough, either way. */
+		for (i = 0; i < ELEM; i++) {
+			raw[i] = 100 * (1000 + 3 * (i & 1));
+			div[i] = raw[i] / divisors[d];
+		}
+		JENT_UT_EQ(jent_gcd_verdict(raw, ELEM, 1, &gcd), 0,
+			   "a varying history passes raw");
+		JENT_UT_EQ(gcd, 100, "with the clock's step as its GCD");
+		JENT_UT_EQ(jent_gcd_verdict(div, ELEM, 1, &gcd), 0,
+			   "and divided by a stored divisor");
+		JENT_UT_EQ(gcd, 100 / divisors[d], "with what is left of it");
+	}
+
+	JENT_UT_EQ(jent_gcd_get(&gcd, JENT_GCD_CLOCK_PLATFORM) &&
+		   jent_gcd_get(&gcd, JENT_GCD_CLOCK_NOTIME), 1,
+		   "a verdict alone establishes no divisor");
+
+out:
+	jent_gcd_fini(raw, ELEM);
+	jent_gcd_fini(div, ELEM);
 }
 
 /* The self test the library runs at startup. */
@@ -289,6 +357,8 @@ static void test_selftest(void)
 int main(void)
 {
 	test_gcd64();
+	/* Before anything establishes a divisor, which it checks for. */
+	test_verdict_normalized();
 	test_gcd_get_unset();
 	test_gcd_establish();
 	test_gcd_sticky();

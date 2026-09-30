@@ -100,6 +100,13 @@ struct fi_replay {
 	 * caller can be made to fail its health tests and then recover.
 	 */
 	size_t bad_until;
+	/*
+	 * What the steps of the ticker past the end and of FI_SHAPE_STEADY
+	 * are multiplied by: the common timer divisor, where the recording
+	 * was built in multiples of it - see fi_plausible_clock(). One
+	 * otherwise.
+	 */
+	uint64_t scale;
 
 	/*
 	 * Shapes that need every reading controlled, not just a recording
@@ -109,6 +116,7 @@ struct fi_replay {
 		FI_SHAPE_NONE = 0,
 		FI_SHAPE_DESCEND,	/* every reading below the last */
 		FI_SHAPE_MOSTLY_STUCK,	/* long constant runs, briefly broken */
+		FI_SHAPE_STEADY,	/* a fixed step: every delta the same */
 	} shape;
 };
 
@@ -149,6 +157,10 @@ static void fi_replay_cb(void *arg, uint64_t *out)
 			r->tail += 1 + (r->step % 251);
 		*out = r->tail;
 		return;
+	case FI_SHAPE_STEADY:
+		r->tail += 1000 * r->scale;
+		*out = r->tail;
+		return;
 	case FI_SHAPE_NONE:
 	default:
 		break;
@@ -168,7 +180,7 @@ static void fi_replay_cb(void *arg, uint64_t *out)
 	}
 
 	r->step = (r->step * 1103515245u + 12345u);
-	r->tail += 500 + (r->step >> 22);
+	r->tail += (500 + (r->step >> 22)) * r->scale;
 	*out = r->tail;
 }
 
@@ -184,8 +196,67 @@ static void fi_replay_init(struct fi_replay *r, const uint64_t *stamps,
 	r->step = 7;
 	r->hold = 0;
 	r->bad_until = 0;
+	r->scale = 1;
 	r->shape = FI_SHAPE_NONE;
 }
+
+/*
+ * A plausible clock: monotonic with varying steps, recorded into @seq in
+ * multiples of the divisor the collectors built on it will use. Returns that
+ * divisor, for fi_replay.scale.
+ *
+ * The collectors these recordings are replayed into are allocated after a
+ * startup has run on the machine's own clock, and the divisor that startup
+ * measured is kept for the process (jent_gcd_store()): every collector divides
+ * its deltas by it, whatever clock it then reads. Steps of 500 to 1500 on a
+ * coarse clock - the emulated arm64 counter under qemu advances by 1000 -
+ * divide down to 0 and 1, and the recording becomes a run of stuck
+ * measurements that the health tests rightly refuse. test_timestamp_replay()
+ * scales its stamps for the same reason.
+ */
+static uint64_t fi_platform_divisor(void)
+{
+	uint64_t gcd;
+
+	/* Not established yet: the startup then measures this very clock. */
+	if (jent_gcd_get(&gcd, 0) || !gcd)
+		return 1;
+	return gcd;
+}
+
+static uint64_t fi_plausible_clock(uint64_t *seq, size_t n)
+{
+	unsigned int step = 7;
+	uint64_t gcd = fi_platform_divisor(), t = 1;
+	size_t i;
+
+	for (i = 0; i < n; i++) {
+		step = (step * 1103515245u + 12345u);
+		t += (500 + (step >> 22)) * gcd;
+		seq[i] = t;
+	}
+
+	return gcd;
+}
+
+/*
+ * A collector allocated with @flags on a constructed clock - fi_plausible_clock()
+ * or the ticker past a recording's end - that did not come. Nothing about that
+ * clock is the machine's: its stamps are in the units of the divisor, so the
+ * deltas the startup sees are the same everywhere, and a startup that rejects
+ * them is a defect. What is left of the machine is memory to lock, where the
+ * flags or the system's FIPS mode force it.
+ */
+#define FI_NO_CONSTRUCTED_COLLECTOR(what, flags)			       \
+	do {								       \
+		if (!jent_ut_strict() && JENT_UT_SECURE_MEM_FORCED(flags) &&   \
+		    !jent_ut_memlock_available())			       \
+			JENT_UT_SKIP(what, "no memory can be locked on this "  \
+				     "machine");			       \
+		else							       \
+			JENT_UT_FAIL("%s: no collector on the constructed "    \
+				     "clock", what);			       \
+	} while (0)
 
 /* The registration itself, and what the status output says about it. */
 static void test_registration(void)
@@ -193,6 +264,7 @@ static void test_registration(void)
 	struct fi_replay r;
 	char buf[8192];
 	struct rand_data *ec;
+	int ret;
 
 	jent_ut_group("registering a mocked time source");
 
@@ -235,13 +307,14 @@ static void test_registration(void)
 	 * The build carries the mock, which the status output has to say
 	 * whether or not one is registered at the moment it is taken.
 	 */
-	if (jent_entropy_init()) {
-		JENT_UT_SKIP("the status report", "the library does not initialize");
+	ret = jent_entropy_init();
+	if (ret) {
+		JENT_UT_NO_STARTUP("the status report", ret);
 		return;
 	}
 	ec = jent_entropy_collector_alloc(0, 0);
 	if (!ec) {
-		JENT_UT_SKIP("the status report", "no collector");
+		JENT_UT_NO_COLLECTOR("the status report", 0);
 		return;
 	}
 	JENT_UT_EQ(jent_status(ec, buf, sizeof(buf)), 0, "the status renders");
@@ -250,6 +323,25 @@ static void test_registration(void)
 	JENT_UT_TRUE(strstr(buf, "\"mockedTimerActive\": false") != NULL,
 		     "and that none is registered right now");
 	jent_entropy_collector_free(ec);
+}
+
+/*
+ * Whether the startup rejects this machine's own clock when it may not fall
+ * back to the internal timer - a clock too coarse for it, say. That is the
+ * machine's verdict, and a case that needs the platform clock to pass skips
+ * (it says so) rather than fail. A startup that fails for another reason is
+ * not the machine's and does not excuse the case. Asked with no mock
+ * installed.
+ */
+static int platform_clock_rejected(const char *what)
+{
+	int ret = jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER);
+
+	if (ret && JENT_UT_MACHINE_VERDICT(ret)) {
+		JENT_UT_SKIP(what, "the startup rejects the platform clock");
+		return 1;
+	}
+	return 0;
 }
 
 /*
@@ -317,31 +409,57 @@ static void test_startup_on_mocked_clocks(void)
 	JENT_UT_NE(ret, 0, "a mostly-stuck clock is rejected");
 
 	/* And the real one still passes once the mock is out of the way. */
+	if (platform_clock_rejected("the platform clock passing again"))
+		return;
 	JENT_UT_EQ(jent_time_entropy_init(JENT_MIN_OSR,
 					  JENT_DISABLE_INTERNAL_TIMER), 0,
 		   "the platform clock passes again");
 }
 
-/* A collector for replaying stamps into: FIPS mode, so the tests report. */
 /*
- * Whether the startup rejects this machine's own clock when it may not fall
- * back to the internal timer - a clock too coarse for it, say. That is the
- * machine's verdict, and a case that needs the platform clock to pass skips
- * (it says so) rather than fail. A startup that fails for another reason is
- * not the machine's and does not excuse the case. Asked with no mock
- * installed.
+ * The startup measures with a collector of its own, in FIPS mode for the
+ * health tests alone. The FIPS failure callback is the caller's, about the
+ * caller's instances, and is not invoked for that one - in no mode.
  */
-static int platform_clock_rejected(const char *what)
-{
-	int ret = jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER);
+static unsigned int startup_cb_calls;
+static int startup_cb_registered;
 
-	if (ret && JENT_UT_MACHINE_VERDICT(ret)) {
-		JENT_UT_SKIP(what, "the startup rejects the platform clock");
-		return 1;
-	}
-	return 0;
+static void startup_cb(struct rand_data *ec, unsigned int health_failure)
+{
+	(void)ec;
+	(void)health_failure;
+	startup_cb_calls++;
 }
 
+static void test_startup_failure_no_callback(void)
+{
+	struct fi_replay r;
+	int ret;
+
+	jent_ut_group("a startup health failure does not invoke the callback");
+
+	if (!startup_cb_registered) {
+		JENT_UT_SKIP("the startup callback", "not registered");
+		return;
+	}
+
+	/* Every delta the same: stuck throughout, so the RCT trips. */
+	fi_replay_init(&r, NULL, 0);
+	r.shape = FI_SHAPE_STEADY;
+	/*
+	 * A step the stored divisor leaves whole: divided down to zero it
+	 * would be a clock that does not move, which fails differently.
+	 */
+	r.scale = fi_platform_divisor();
+	startup_cb_calls = 0;
+	jent_set_mock_timer(fi_replay_cb, &r);
+	ret = jent_time_entropy_init(JENT_MIN_OSR, JENT_DISABLE_INTERNAL_TIMER);
+	jent_set_mock_timer(NULL, NULL);
+	JENT_UT_EQ(ret, ERCT, "a clock with a fixed step fails the RCT");
+	JENT_UT_EQ(startup_cb_calls, 0, "and the callback is not invoked");
+}
+
+/* A collector for replaying stamps into: FIPS mode, so the tests report. */
 /*
  * A startup that fails under NTG.1 must leave later NTG.1 initializations
  * usable: the tighter NTG.1 cutoffs make an occasional startup health failure
@@ -467,8 +585,8 @@ static struct rand_data *replay_collector(uint64_t first)
 	ec->rct_mem_ctr = 0;
 	ec->rct_mem_count = 0;
 #ifdef JENT_HEALTH_LAG_PREDICTOR
-	/* Clears the delta history the stuck test reads through it, too. */
 	jent_lag_reset(ec);
+	memset(ec->lag_delta_history, 0, sizeof(ec->lag_delta_history));
 #else
 	ec->last_delta = 0;
 	ec->last_delta2 = 0;
@@ -488,6 +606,7 @@ static void test_timestamp_replay(void)
 {
 	struct rand_data *ec;
 	unsigned int i, stuck = 0;
+	uint64_t gcd;
 
 	jent_ut_group("replaying time stamps through the health tests");
 
@@ -498,11 +617,25 @@ static void test_timestamp_replay(void)
 	 */
 	ec = replay_collector(0);
 	if (!ec) {
-		JENT_UT_SKIP("the replay", "no collector");
+		JENT_UT_NO_COLLECTOR("the replay", JENT_FORCE_FIPS);
 		return;
 	}
+
+	/*
+	 * The replay normalizes each delta by the common timer divisor the
+	 * startup measured on this machine's clock, as the noise source does.
+	 * The stamps below are multiples of it, so that the deltas they imply
+	 * are the ones written here on every clock: under qemu the emulated
+	 * arm64 counter advances in steps of 1000, the divisor is 1000, and a
+	 * stamp 100 on would otherwise be a delta of 0.
+	 */
+	gcd = ec->jent_common_timer_gcd ? ec->jent_common_timer_gcd : 1;
+	printf("  note: the common timer divisor is %llu\n",
+	       (unsigned long long)gcd);
+
 	for (i = 0; i < 4096; i++)
-		stuck += jent_health_insert_timestamp(ec, (uint64_t)i * 100);
+		stuck += jent_health_insert_timestamp(ec,
+						      (uint64_t)i * 100 * gcd);
 
 	JENT_UT_NE(stuck, 0, "a constant delta produces stuck measurements");
 	JENT_UT_TRUE((jent_health_failure(ec) & JENT_RCT_FAILURE) != 0,
@@ -519,6 +652,8 @@ static void test_timestamp_replay(void)
 		JENT_UT_EQ(jent_health_insert_timestamp(ec, 12345), 1,
 			   "a stamp equal to the primed reference is stuck");
 		jent_entropy_collector_free(ec);
+	} else {
+		JENT_UT_NO_COLLECTOR("the primed reference", JENT_FORCE_FIPS);
 	}
 
 	/*
@@ -534,7 +669,7 @@ static void test_timestamp_replay(void)
 		stuck = 0;
 		for (i = 0; i < 4096; i++) {
 			step = (step * 1103515245u + 12345u);
-			t += 1000 + (step >> 20);
+			t += (1000 + (step >> 20)) * gcd;
 			stuck += jent_health_insert_timestamp(ec, t);
 		}
 
@@ -542,6 +677,9 @@ static void test_timestamp_replay(void)
 			   "a varying sequence raises no health test");
 		printf("  note: %u of 4096 varying stamps were stuck\n", stuck);
 		jent_entropy_collector_free(ec);
+	} else {
+		/* The negative control: without it the replay proves little. */
+		JENT_UT_NO_COLLECTOR("a varying sequence", JENT_FORCE_FIPS);
 	}
 
 	/*
@@ -557,12 +695,15 @@ static void test_timestamp_replay(void)
 		if (a && b) {
 			for (i = 0; i < 512; i++) {
 				jent_health_insert_timestamp(a,
-							     (uint64_t)i * 100);
+					(uint64_t)i * 100 * gcd);
 				/* The delta those stamps imply, primed at 0. */
 				jent_stuck(b, i ? 100 : 0);
 			}
 			JENT_UT_EQ(jent_health_failure(a), jent_health_failure(b),
 				   "stamps and the deltas they imply agree");
+		} else {
+			JENT_UT_NO_COLLECTOR("stamps against deltas",
+					     JENT_FORCE_FIPS);
 		}
 		jent_entropy_collector_free(a);
 		jent_entropy_collector_free(b);
@@ -592,78 +733,97 @@ static void test_timestamp_replay(void)
  */
 static void test_generation_on_mocked_clock(void)
 {
-	static uint64_t seq[4096];
+	/*
+	 * Long enough that the whole run comes out of the recording. At 4096
+	 * it was not: the library asked for some 26000 stamps and 84% of them
+	 * came from the fallback ticker behind the replay, so "a block is
+	 * produced from the supplied stamps" was mostly about stamps nobody
+	 * supplied. r.past_end below is what says so.
+	 */
+	static uint64_t seq[65536];
 	struct fi_replay r;
 	struct rand_data *ec;
 	char buf[32];
-	unsigned int i;
+	uint64_t scale;
 	ssize_t ret;
+	int made;
 
 	jent_ut_group("generating on a mocked clock");
 
-	/* A plausible clock: monotonic with varying steps. */
-	{
-		unsigned int step = 7;
-		uint64_t t = 1;
-
-		for (i = 0; i < JENT_ARRAY_SIZE(seq); i++) {
-			step = (step * 1103515245u + 12345u);
-			t += 500 + (step >> 22);
-			seq[i] = t;
-		}
-	}
-
+	scale = fi_plausible_clock(seq, JENT_ARRAY_SIZE(seq));
 	fi_replay_init(&r, seq, JENT_ARRAY_SIZE(seq));
+	r.scale = scale;
 
 	jent_set_mock_timer(fi_replay_cb, &r);
 	ec = jent_entropy_collector_alloc(0, JENT_DISABLE_INTERNAL_TIMER);
+	made = ec != NULL;
 	if (ec) {
 		ret = jent_read_entropy(ec, buf, sizeof(buf));
 		JENT_UT_EQ(ret, (ssize_t)sizeof(buf),
 			   "a block is produced from the supplied stamps");
 		jent_entropy_collector_free(ec);
-	} else {
-		JENT_UT_SKIP("generating on a mocked clock",
-			     "the constructed clock does not pass the startup test");
 	}
 	jent_set_mock_timer(NULL, NULL);
 
-	JENT_UT_NE(r.served, 0, "the callback was what the library read");
-	printf("  note: the library asked for %zu stamps, %zu past the recording\n",
-	       r.served, r.past_end);
+	/*
+	 * What the library read is only worth judging behind a collector: one
+	 * the startup refused may have read nothing from the recording.
+	 */
+	if (made) {
+		JENT_UT_NE(r.served, 0,
+			   "the callback was what the library read");
+		printf("  note: the library asked for %zu stamps, %zu past the "
+		       "recording\n", r.served, r.past_end);
+		JENT_UT_EQ(r.past_end, 0,
+			   "and every one of them came out of the recording");
+	} else {
+		FI_NO_CONSTRUCTED_COLLECTOR("generating on a mocked clock",
+					    JENT_DISABLE_INTERNAL_TIMER);
+	}
 
 	/*
-	 * The output is a function of the stamps alone, which is what makes a
-	 * replay reproducible: the same sequence twice gives the same bytes.
+	 * The same recording replayed twice gives the same bytes: the output
+	 * is a function of the stamps alone, which is what makes a replay
+	 * reproducible and a recording worth keeping beside a verdict.
+	 *
+	 * This is what the group was named for and what it did not check. It
+	 * asserted JENT_UT_TRUE(1, ...) instead, on the grounds that the
+	 * collector mixes its own address and a per-instance UUID into the
+	 * pool - it does not reach the output, as the comparison below shows -
+	 * and it did so nested inside "if (a && read ok)", so a replay that
+	 * produced nothing skipped the check rather than failing it.
 	 */
 	{
 		char first[32], second[32];
 		struct rand_data *a, *b;
+		ssize_t ra = -1, rb = -1;
 
 		r.pos = 0;
 		jent_set_mock_timer(fi_replay_cb, &r);
 		a = jent_entropy_collector_alloc(0, JENT_DISABLE_INTERNAL_TIMER);
-		if (a && jent_read_entropy(a, first, sizeof(first)) ==
-			 (ssize_t)sizeof(first)) {
-			r.pos = 0;
-			b = jent_entropy_collector_alloc(0,
-							 JENT_DISABLE_INTERNAL_TIMER);
-			if (b && jent_read_entropy(b, second, sizeof(second)) ==
-				 (ssize_t)sizeof(second)) {
-				/*
-				 * Not asserted as equal: the collector mixes
-				 * its own address and a per-instance UUID into
-				 * the pool, so two instances differ even on
-				 * identical stamps. What is checked is that
-				 * both produced a block at all.
-				 */
-				JENT_UT_TRUE(1,
-					     "two replays of one sequence both produce a block");
-			}
-			jent_entropy_collector_free(b);
-		}
-		jent_entropy_collector_free(a);
+		if (a)
+			ra = jent_read_entropy(a, first, sizeof(first));
+
+		r.pos = 0;
+		b = jent_entropy_collector_alloc(0, JENT_DISABLE_INTERNAL_TIMER);
+		if (b)
+			rb = jent_read_entropy(b, second, sizeof(second));
 		jent_set_mock_timer(NULL, NULL);
+
+		if (!a || !b) {
+			FI_NO_CONSTRUCTED_COLLECTOR("two replays of one sequence",
+						    JENT_DISABLE_INTERNAL_TIMER);
+		} else {
+			JENT_UT_EQ(ra, (ssize_t)sizeof(first),
+				   "the first replay of the sequence produces a block");
+			JENT_UT_EQ(rb, (ssize_t)sizeof(second),
+				   "and so does the second");
+			JENT_UT_MEM_EQ(first, second, sizeof(first),
+				       "the two replays produce the same block");
+		}
+
+		jent_entropy_collector_free(a);
+		jent_entropy_collector_free(b);
 	}
 }
 
@@ -672,10 +832,74 @@ static void test_generation_on_mocked_clock(void)
  * test. Only reachable when the measurements taken during startup are bad, so
  * only reachable with a clock that can be made to produce bad ones.
  */
+/*
+ * The clock is chosen per collector: one whose platform clock does not pass
+ * falls back to the internal timer on its own, and that choice is not carried
+ * over to the next collector.
+ */
+static void test_fallback_per_collector(void)
+{
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	static uint64_t constant[] = { 0x4242424242424242ULL };
+	struct fi_replay r;
+	struct rand_data *ec;
+	int ret;
+
+	jent_ut_group("the internal timer fallback is per collector");
+
+	ret = jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER);
+	if (ret) {
+		JENT_UT_NO_STARTUP("the fallback", ret);
+		return;
+	}
+
+	/*
+	 * The verdicts are per clock and an allocation only falls back where
+	 * none passed on the platform clock: both are cleared, so the
+	 * allocations below run the startups.
+	 */
+	jent_atomic_store_int(&jent_selftest_run[JENT_CLOCK_PLATFORM], 0);
+	jent_atomic_store_int(&jent_selftest_run[JENT_CLOCK_NOTIME], 0);
+
+	/* A clock that does not move. */
+	fi_replay_init(&r, constant, 1);
+	r.hold = 1;
+	jent_set_mock_timer(fi_replay_cb, &r);
+
+	ec = jent_entropy_collector_alloc(0, JENT_DISABLE_INTERNAL_TIMER);
+	JENT_UT_TRUE(ec == NULL,
+		     "a collector pinned to a failing platform clock is refused");
+	jent_entropy_collector_free(ec);
+
+	ec = jent_entropy_collector_alloc(0, 0);
+	jent_set_mock_timer(NULL, NULL);
+	if (!ec) {
+		JENT_UT_NO_COLLECTOR("the fallback", JENT_FORCE_INTERNAL_TIMER);
+		return;
+	}
+	JENT_UT_EQ(ec->enable_notime, 1,
+		   "an unpinned one falls back to the internal timer");
+	JENT_UT_EQ(jent_startup_passed(JENT_CLOCK_NOTIME), 1,
+		   "after a startup passed on the internal timer");
+	jent_entropy_collector_free(ec);
+
+	ec = jent_entropy_collector_alloc(0, 0);
+	JENT_UT_TRUE(ec != NULL, "a collector is built on the real clock");
+	if (ec)
+		JENT_UT_EQ(ec->enable_notime, 0,
+			   "on the platform clock: the fallback is forgotten");
+	jent_entropy_collector_free(ec);
+#else
+	jent_ut_group("the internal timer fallback is per collector");
+	JENT_UT_SKIP("the fallback", "the internal timer is not compiled in");
+#endif
+}
+
 static void test_realloc_during_startup(void)
 {
 	struct fi_replay r;
 	struct rand_data *ec;
+	int ret;
 
 	jent_ut_group("reallocation while the collector is starting up");
 
@@ -689,17 +913,17 @@ static void test_realloc_during_startup(void)
 	 * and never calls the time source, so the mock would not be in the
 	 * path.
 	 */
-	if (jent_entropy_init()) {
-		JENT_UT_SKIP("reallocation", "the library does not initialize");
+	ret = jent_entropy_init();
+	if (ret) {
+		JENT_UT_NO_STARTUP("reallocation", ret);
 		return;
 	}
 
 	/*
 	 * A clock that never moves, for good. Every measurement is stuck, the
-	 * startup sequence trips the repetition count test, the reallocation
-	 * re-runs the startup self test - which the same clock also fails -
-	 * and the oversampling rate climbs until it passes JENT_MAX_OSR. The
-	 * allocation then has to give up rather than loop.
+	 * startup sequence trips the repetition count test and the oversampling
+	 * rate climbs until it passes JENT_MAX_OSR. The allocation then has to
+	 * give up rather than loop.
 	 */
 	fi_replay_init(&r, NULL, 0);
 	r.bad_until = (size_t)-1;
@@ -727,14 +951,16 @@ static void test_realloc_during_startup(void)
 	 * it against the constructed clock and never reaches the startup
 	 * sequence this case is about.
 	 */
-	if (jent_entropy_init()) {
-		JENT_UT_SKIP("a recovered startup",
-			     "the library does not initialize");
+	ret = jent_entropy_init();
+	if (ret) {
+		JENT_UT_NO_STARTUP("a recovered startup", ret);
 		return;
 	}
 
 	fi_replay_init(&r, NULL, 0);
 	r.bad_until = 400;
+	/* The recovery is the ticker's, in the divisor's units as well. */
+	r.scale = fi_platform_divisor();
 	jent_set_mock_timer(fi_replay_cb, &r);
 	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS |
 					     JENT_DISABLE_INTERNAL_TIMER);
@@ -748,8 +974,9 @@ static void test_realloc_during_startup(void)
 		       ec->osr, ec->reinit_count);
 		jent_entropy_collector_free(ec);
 	} else {
-		JENT_UT_SKIP("a recovered startup",
-			     "the constructed clock did not recover in time");
+		FI_NO_CONSTRUCTED_COLLECTOR("a recovered startup",
+					    JENT_FORCE_FIPS |
+					    JENT_DISABLE_INTERNAL_TIMER);
 	}
 }
 
@@ -820,7 +1047,11 @@ static void test_status_truncation(void)
 
 	jent_ut_group("the status output of a mocked build truncates safely");
 
-	if (!ec || jent_status(ec, area.buf, sizeof(area.buf))) {
+	if (!ec) {
+		JENT_UT_NO_COLLECTOR("the status sweep", 0);
+		return;
+	}
+	if (jent_status(ec, area.buf, sizeof(area.buf))) {
 		JENT_UT_SKIP("the status sweep", "no status to sweep");
 		jent_entropy_collector_free(ec);
 		return;
@@ -831,8 +1062,18 @@ static void test_status_truncation(void)
 		size_t i;
 
 		memset(&area, 0x5a, sizeof(area));
-		if (!jent_status(ec, area.buf, len) && strlen(area.buf) != full)
-			misreported++;
+		/*
+		 * The terminator looked for within the length given, not with
+		 * strlen(): a success reported for a document left without one
+		 * is the very failure counted here, and strlen() would run on
+		 * through the fill pattern and past the guard to find a zero.
+		 */
+		if (!jent_status(ec, area.buf, len)) {
+			const char *nul = memchr(area.buf, '\0', len);
+
+			if (!nul || (size_t)(nul - area.buf) != full)
+				misreported++;
+		}
 
 		for (i = 0; i < sizeof(area.guard); i++) {
 			if (area.guard[i] != 0x5a) {
@@ -851,23 +1092,101 @@ static void test_status_truncation(void)
 	JENT_UT_EQ(overflows, 0, "no length writes outside the buffer");
 	JENT_UT_EQ(misreported, 0,
 		   "success is never reported for a truncated document");
+
+	/* Nor failure for a complete one: the exact fit is the edge case. */
+	memset(&area, 0x5a, sizeof(area));
+	JENT_UT_EQ(jent_status(ec, area.buf, full + 1), 0,
+		   "a buffer that holds the document exactly is no error");
+	JENT_UT_TRUE(memchr(area.buf, '\0', full + 1) == area.buf + full,
+		     "and receives all of it, terminated");
+
 	printf("  note: swept %zu buffer lengths\n", full + 1);
 
 	jent_entropy_collector_free(ec);
+}
+
+/*
+ * A request of several blocks that fails on a later one. The failure is a self
+ * test verdict bound while the first block is generated - what a concurrent
+ * jent_selftest() does - so that the first block is copied out and the second
+ * is refused. The failed request must not leave that first block behind.
+ */
+static struct fi_replay *fi_late_replay;
+static struct rand_data *fi_late_victim;
+
+static void fi_late_failure_cb(void *arg, uint64_t *out)
+{
+	(void)arg;
+
+	if (fi_late_victim) {
+		jent_atomic_store_int(&fi_late_victim->selftest_failed, 1);
+		fi_late_victim = NULL;
+	}
+	fi_replay_cb(fi_late_replay, out);
+}
+
+static void test_failure_after_output_wipes_it(void)
+{
+	static uint64_t seq[4096];
+	struct fi_replay r;
+	struct rand_data *ec;
+	unsigned char buf[3 * 32];
+	unsigned int i;
+	uint64_t scale;
+	size_t nonzero = 0;
+
+	jent_ut_group("a request failing after its first block delivers nothing");
+
+	scale = fi_plausible_clock(seq, JENT_ARRAY_SIZE(seq));
+	fi_replay_init(&r, seq, JENT_ARRAY_SIZE(seq));
+	r.scale = scale;
+	fi_late_replay = &r;
+
+	jent_set_mock_timer(fi_late_failure_cb, NULL);
+	ec = jent_entropy_collector_alloc(0, JENT_DISABLE_INTERNAL_TIMER);
+	if (!ec) {
+		jent_set_mock_timer(NULL, NULL);
+		FI_NO_CONSTRUCTED_COLLECTOR("a late failure",
+					    JENT_DISABLE_INTERNAL_TIMER);
+		return;
+	}
+
+	memset(buf, 0, sizeof(buf));
+	fi_late_victim = ec;
+
+	JENT_UT_EQ(jent_read_entropy(ec, (char *)buf, sizeof(buf)),
+		   JENT_ERR_SELFTEST,
+		   "the verdict bound during the first block stops the second");
+	JENT_UT_TRUE(fi_late_victim == NULL,
+		     "and it was bound while the first block was generated");
+
+	for (i = 0; i < sizeof(buf); i++)
+		nonzero += buf[i] != 0;
+	JENT_UT_EQ(nonzero, 0, "the block already copied out is wiped again");
+	JENT_UT_EQ(ec->bytes_output, 0, "and nothing is counted as delivered");
+
+	jent_entropy_collector_free(ec);
+	jent_set_mock_timer(NULL, NULL);
 }
 
 int main(void)
 {
 	jent_ut_setup();
 
+	/* Before anything initializes, which closes the window. */
+	startup_cb_registered = !jent_set_fips_failure_callback(startup_cb);
+
 	test_registration();
+	test_startup_failure_no_callback();
 	test_status_truncation();
 	test_startup_on_mocked_clocks();
 	test_ntg1_failure_does_not_force_notime();
 	test_timestamp_replay();
 	test_generation_on_mocked_clock();
+	test_fallback_per_collector();
 	test_realloc_during_startup();
 	test_realloc_on_read_gives_up();
+	test_failure_after_output_wipes_it();
 
 	return jent_ut_report("unit-mock");
 }

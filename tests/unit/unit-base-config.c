@@ -119,9 +119,8 @@ static void test_memsize(void)
 
 	/*
 	 * A size field larger than the table can reach: clamped rather than
-	 * shifted out of the uint32_t it is computed in. This is reachable
-	 * from jent_status() on a collector allocated with
-	 * JENT_DISABLE_MEMORY_ACCESS, whose flags are never normalized.
+	 * shifted out of the uint32_t it is computed in. Reachable with any
+	 * caller-provided flags, which the allocation normalizes only later.
 	 */
 	JENT_UT_EQ(jent_memsize(JENT_MAX_MEMSIZE_MASK),
 		   jent_memsize(JENT_MAX_MEMSIZE_MAX),
@@ -150,14 +149,74 @@ static void test_hashloop(void)
 
 	jent_ut_group("jent_hashloop_cnt decodes every JENT_HASHLOOP_* flag");
 
+	/*
+	 * No flag is the default - one loop unless the build raises it - and
+	 * a different thing from JENT_HASHLOOP_1, which is one loop always.
+	 */
+	JENT_UT_EQ(jent_hashloop_cnt(0), JENT_HASH_LOOP_DEFAULT,
+		   "no JENT_HASHLOOP_* flag is the compile-time default");
+	JENT_UT_NE(JENT_HASHLOOP_1, 0,
+		   "and JENT_HASHLOOP_1 is not the same as no flag");
+	JENT_UT_EQ(jent_hashloop_cnt(JENT_MAX_HASHLOOP_MASK),
+		   jent_hashloop_cnt(JENT_MAX_HASHLOOP),
+		   "a field above the maximum decodes to the maximum");
+	JENT_UT_TRUE(jent_flags_invalid(JENT_HASHLOOP_TO_FLAGS(
+		JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP) + 1)),
+		     "and is refused as a flag");
+	JENT_UT_TRUE(!jent_flags_invalid(JENT_MAX_HASHLOOP),
+		     "while the maximum is not");
+
 	for (i = 0; i < sizeof(loops) / sizeof(loops[0]); i++) {
-		snprintf(what, sizeof(what), "JENT_HASHLOOP_%u", loops[i].cnt);
+		snprintf(what, sizeof(what), "JENT_HASHLOOP_%u", 1u << i);
 		JENT_UT_EQ(jent_hashloop_cnt(loops[i].flag), loops[i].cnt, what);
 		JENT_UT_EQ(jent_hashloop_cnt(loops[i].flag | JENT_NTG1 |
 					     JENT_MAX_MEMSIZE_1MB),
 			   loops[i].cnt,
 			   "the count is independent of the other flags");
 	}
+}
+
+/*
+ * The count the reallocation ladder steps through: up from the default, never
+ * below it - also in a build that raises JENT_HASH_LOOP_DEFAULT, where the
+ * ladder used to step from field value 0 to 2 loops.
+ */
+static void test_hashloop_ladder(void)
+{
+	unsigned int max = jent_hashloop_cnt(JENT_MAX_HASHLOOP);
+	unsigned int inc, prev, cnt;
+
+	jent_ut_group("the reallocation ladder raises the hash loop count");
+
+	prev = jent_hashloop_cnt(jent_update_hashloop(0, 0));
+	JENT_UT_EQ(prev, JENT_HASH_LOOP_DEFAULT,
+		   "no reallocation keeps the compile-time default");
+
+	/*
+	 * Never lower, not even from a default above the maximum the field
+	 * names, and higher at every step until that maximum is reached.
+	 */
+	for (inc = 1; inc <= 8; inc++) {
+		cnt = jent_hashloop_cnt(jent_update_hashloop(0, inc));
+		if (cnt < prev || cnt < JENT_HASH_LOOP_DEFAULT) {
+			JENT_UT_FAIL("step %u lowers the count from %u to %u",
+				     inc, prev, cnt);
+			break;
+		}
+		if (cnt == prev && prev < max) {
+			JENT_UT_FAIL("step %u does not raise the count %u",
+				     inc, prev);
+			break;
+		}
+		prev = cnt;
+	}
+	jent_ut_checks++;
+
+	JENT_UT_EQ(jent_hashloop_cnt(jent_update_hashloop(0, 8)),
+		   JENT_HASH_LOOP_DEFAULT > max ? JENT_HASH_LOOP_DEFAULT : max,
+		   "and stops at the maximum, or at a default above it");
+	JENT_UT_EQ(jent_hashloop_cnt(jent_update_hashloop(JENT_HASHLOOP_8, 1)),
+		   16, "a count the caller set doubles");
 }
 
 /* The oversampling rate is clamped into [JENT_MIN_OSR, JENT_MAX_OSR]. */
@@ -186,6 +245,7 @@ int main(void)
 {
 	test_memsize();
 	test_hashloop();
+	test_hashloop_ladder();
 	test_osr();
 	test_version();
 
