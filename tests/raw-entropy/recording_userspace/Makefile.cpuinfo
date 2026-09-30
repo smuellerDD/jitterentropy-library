@@ -3,12 +3,17 @@
 # The tool only queries the operating system about the CPUs; it does not use
 # any Jitter RNG code and therefore needs neither the library nor its headers.
 
-CC ?= gcc
-CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
+CC ?= cc
+# "override" on every append, as the top level Makefile has: a plain += is
+# ignored for a variable set on the make command line, so "make CFLAGS=-g"
+# used to drop the include paths, -O0, the defines and the hardening. And once
+# a variable has an override, make ignores every later assignment to it that
+# lacks one, so all of them carry it.
+override CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
 #Hardening
-CFLAGS +=-fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
+override CFLAGS +=-fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
 ifneq (Darwin,$(shell uname))
-LDFLAGS +=-Wl,-z,relro,-z,now
+override LDFLAGS +=-Wl,-z,relro,-z,now
 endif
 
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
@@ -19,9 +24,9 @@ else
 endif
 
 ifeq "$(GCC_GTEQ_490)" "1"
-  CFLAGS += -fstack-protector-strong
+  override CFLAGS += -fstack-protector-strong
 else
-  CFLAGS += -fstack-protector-all
+  override CFLAGS += -fstack-protector-all
 endif
 
 program_NAME := jitterentropy-cpuinfo

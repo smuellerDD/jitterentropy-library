@@ -73,6 +73,9 @@
 #endif
 
 #define JENT_MAX_CPUS		1024
+
+/* Sanity ceiling for a parsed CPU list; see parse_cpu_list(). */
+#define JENT_CPU_LIST_MAX	(1UL << 16)
 #define JENT_IDENT_LEN		160
 #define JENT_TYPE_LEN		16
 
@@ -665,6 +668,15 @@ static long parse_cpu_list(const char *str, unsigned long *cpus, size_t max)
 		} else {
 			end = start;
 		}
+
+		/*
+		 * A range up to ULONG_MAX parses without errno; walking it would
+		 * spin and overflow the count. Same ceiling as
+		 * jent_ncpu_parse_online(), above JENT_MAX_CPUS so a larger
+		 * machine is reported as truncated rather than rejected.
+		 */
+		if (end >= JENT_CPU_LIST_MAX)
+			return -EINVAL;
 
 		for (i = start; i <= end; i++, count++) {
 			if (cpus && (size_t)count < max)
