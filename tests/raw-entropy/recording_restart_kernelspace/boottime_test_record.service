@@ -3,10 +3,14 @@
 [Unit]
 Description=Boot time test for Kernel Jitter RNG
 DefaultDependencies=no
-After=local-fs.target
+# The debugfs file, and the out-of-tree module systemd-modules-load loads
+Wants=sys-kernel-debug.mount
+After=local-fs.target sys-kernel-debug.mount systemd-modules-load.service
 Before=sysinit.target
 
 [Service]
+# Settings of boottime_test_record.sh, e.g. for the out-of-tree module
+EnvironmentFile=-/etc/default/boottime_test_record
 ExecStart=/usr/local/sbin/boottime_test_record.sh
 
 [Install]
