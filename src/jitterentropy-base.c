@@ -235,6 +235,13 @@ static inline unsigned int jent_update_secure_mem(unsigned int flags)
 	return flags;
 }
 
+/* The FIPS / NTG.1 startup needs the memory access noise source. */
+static inline int jent_memaccess_contradicts(unsigned int flags)
+{
+	return (flags & JENT_DISABLE_MEMORY_ACCESS) &&
+	       ((flags & (JENT_NTG1 | JENT_FORCE_FIPS)) || jent_fips_enabled());
+}
+
 /***************************************************************************
  * Stack Scrubbing
  ***************************************************************************/
@@ -899,23 +906,7 @@ static struct rand_data *_jent_entropy_collector_alloc(unsigned int osr,
 {
 	struct rand_data *ec;
 
-	/*
-	 * The FIPS / NTG.1 startup samples the memory-access noise source as
-	 * an independent stage (startup_state jent_startup_memory). Without
-	 * the memory region every startup sample is stuck, so the allocation
-	 * could only fail after burning through the entire health-test reset
-	 * ladder below. Reject the contradictory combination immediately.
-	 *
-	 * This check must not live in jent_entropy_collector_alloc_internal():
-	 * the test-only collectors (jent_time_entropy_init(), the kernel raw
-	 * test interface, the raw-entropy recording tools) are allocated there
-	 * directly and never run the startup ladder, and jent_time_entropy_init()
-	 * always ORs in JENT_FORCE_FIPS for its test instance - rejecting the
-	 * combination there would make jent_entropy_init_ex() fail for every
-	 * caller using JENT_DISABLE_MEMORY_ACCESS.
-	 */
-	if ((flags & JENT_DISABLE_MEMORY_ACCESS) &&
-	    ((flags & (JENT_NTG1 | JENT_FORCE_FIPS)) || jent_fips_enabled()))
+	if (jent_memaccess_contradicts(flags))
 		return NULL;
 
 	flags = jent_update_secure_mem(flags);
@@ -1354,19 +1345,22 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 	 */
 	flags = jent_update_secure_mem(flags);
 
+	/* The configuration window closes on the first attempt. */
+	jent_notime_block_switch();
+	jent_health_cb_block_switch();
+
+	/* Arguments every allocation refuses. */
+	if (osr > JENT_MAX_OSR || jent_memaccess_contradicts(flags))
+		return EPROGERR;
+
+	/* NTG.1 forbids the internal timer. */
+	if ((flags & JENT_NTG1) && (flags & JENT_FORCE_INTERNAL_TIMER))
+		return ENOTIME;
+
 	ret = jent_entropy_init_common_pre(flags);
 
 	if (ret)
 		return ret;
-
-	/*
-	 * NTG.1 forbids the internal timer, and the collector allocation
-	 * enforces that by adding JENT_DISABLE_INTERNAL_TIMER for it. Asking
-	 * for both is therefore a contradiction, and one that used to be
-	 * answered with EMEM after the allocation had already refused it.
-	 */
-	if ((flags & JENT_NTG1) && (flags & JENT_FORCE_INTERNAL_TIMER))
-		return jent_entropy_init_common_post(ENOTIME);
 
 	ret = ENOTIME;
 
