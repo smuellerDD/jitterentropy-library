@@ -499,7 +499,10 @@ struct rand_data
 	unsigned int flags;		/* Flags used to initialize */
 	unsigned int osr;		/* Oversampling rate */
 
-	/* RFC 4122 version 4 identifier, stable for the collector's lifetime. */
+	/*
+	 * RFC 9562 version 4 identifier, or version 8 without a CSPRNG, stable
+	 * for the collector's lifetime.
+	 */
 	char uuid[JENT_UUID_STRLEN];
 
 	/*

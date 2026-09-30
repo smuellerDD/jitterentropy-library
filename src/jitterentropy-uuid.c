@@ -2,15 +2,6 @@
 /*
  * The per-instance UUID.
  *
- * Definition of jent_uuid_generate() (declared in src/jitterentropy-uuid.h).
- * The 16 underlying bytes come from the platform's CSPRNG through
- * jent_os_random_bytes(); the RFC 4122 version and variant bits and the
- * formatting are decided here.
- *
- * Nothing in this file is architecture-specific, which is why it does not
- * live in arch/ beside the CSPRNG it calls: it is byte layout and hex
- * digits, the same on every target.
- *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
  * Copyright Markus Theil <theil.markus@gmail.com>, 2026
  *
@@ -51,9 +42,10 @@
  */
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
+#include "jitterentropy-sha3.h"
 
 #ifdef LINUX_KERNEL
-#include <linux/string.h>	/* memset() */
+#include <linux/string.h>	/* memcpy() */
 #include <linux/types.h>
 #elif defined(_KERNEL) && defined(__FreeBSD__)
 #include <sys/param.h>
@@ -70,6 +62,8 @@ static void jent_uuid_format(const uint8_t b[16], char *out)
 	static const char hex[] = "0123456789abcdef";
 	int i, j = 0;
 
+	JENT_BUILD_BUG_ON(JENT_UUID_STRLEN != 16 * 2 + 4 + 1);
+
 	for (i = 0; i < 16; i++) {
 		if (i == 4 || i == 6 || i == 8 || i == 10)
 			out[j++] = '-';
@@ -79,17 +73,47 @@ static void jent_uuid_format(const uint8_t b[16], char *out)
 	out[j] = '\0';
 }
 
+/* Process-wide, so that no two instances derive the same identifier. */
+static uint32_t jent_uuid_counter = 0;
+
+/* Without a CSPRNG: SHA3-256 of the counter and the time as a version 8 UUID. */
+static void jent_uuid_from_counter(uint8_t b[16])
+{
+	HASH_CTX_ON_STACK(ctx);
+	uint8_t digest[JENT_SHA3_256_SIZE_DIGEST], in[12];
+	uint32_t val = jent_atomic_inc_u32(&jent_uuid_counter);
+	uint64_t now = 0;
+	unsigned int i;
+
+	jent_get_nstime(&now);
+
+	for (i = 0; i < 4; i++)
+		in[i] = (uint8_t)(val >> (8 * i));
+	for (i = 0; i < 8; i++)
+		in[4 + i] = (uint8_t)(now >> (8 * i));
+
+	jent_sha3_256_init(&ctx);
+	jent_sha3_update(&ctx, in, sizeof(in));
+	jent_sha3_final(&ctx, digest);
+	memcpy(b, digest, 16);
+
+	b[6] = (uint8_t)((b[6] & 0x0f) | 0x80);
+
+	jent_memset_secure(&ctx, JENT_SHA_MAX_CTX_SIZE);
+	jent_memset_secure(digest, sizeof(digest));
+}
+
 void jent_uuid_generate(char *out)
 {
 	uint8_t b[16];
 
-	if (jent_os_random_bytes(b, sizeof(b))) {
-		memset(b, 0, sizeof(b));
-	} else {
-		/* Force the version (4) and variant (10xx) bits. */
+	if (jent_os_random_bytes(b, sizeof(b)))
+		jent_uuid_from_counter(b);
+	else
 		b[6] = (uint8_t)((b[6] & 0x0f) | 0x40);
-		b[8] = (uint8_t)((b[8] & 0x3f) | 0x80);
-	}
+
+	/* Force the variant (10xx) bits. */
+	b[8] = (uint8_t)((b[8] & 0x3f) | 0x80);
 
 	jent_uuid_format(b, out);
 }
