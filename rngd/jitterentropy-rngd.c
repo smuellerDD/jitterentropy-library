@@ -698,8 +698,8 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	}
 
 	 /* value is in bits */
-	rng->rpi->entropy_count = (entropy_bytes * 8);
-	rng->rpi->buf_size = len;
+	rng->rpi->entropy_count = (int)(entropy_bytes * 8);
+	rng->rpi->buf_size = (int)len;
 	memcpy(rng->rpi->buf, buf, len);
 
 	ret = ioctl(rng->fd, RNDADDENTROPY, rng->rpi);
@@ -711,7 +711,7 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	} else {
 		dolog(JENT_LOG_DEBUG, "Injected %zu bytes with an entropy count of %zu bytes of entropy",
 		      len, entropy_bytes);
-		written = len;
+		written = (ssize_t)len;
 	}
 
 	rng->rpi->entropy_count = 0;
@@ -779,7 +779,7 @@ static ssize_t gather_entropy(struct kernel_rng *rng)
  */
 #define ENTBLOCKS	(4 + 2 + 1)
 	char buf[(RNDADDENTROPY_BUFSIZE * ENTBLOCKS)];
-	ssize_t buflen = RNDADDENTROPY_BUFSIZE;
+	const size_t buflen = RNDADDENTROPY_BUFSIZE;
 	ssize_t ret = 0;
 
 	sigemptyset(&previous_set);
@@ -797,7 +797,7 @@ static ssize_t gather_entropy(struct kernel_rng *rng)
 		if (ret < 0)
 			goto out;
 
-		dolog(JENT_LOG_DEBUG, "LRNG: Inject %zd bits of data with %zd bits of entropy into BLAKE2s state",
+		dolog(JENT_LOG_DEBUG, "LRNG: Inject %zu bits of data with %zd bits of entropy into BLAKE2s state",
 		      buflen << 3, ret << 3);
 
 		/*
@@ -805,7 +805,7 @@ static ssize_t gather_entropy(struct kernel_rng *rng)
 		 * provides full entropy so, we tell the Linux RNG the amount of
 		 * entropy.
 		 */
-		ret = write_random(rng, buf, buflen, ret, 0);
+		ret = write_random(rng, buf, buflen, (size_t)ret, 0);
 	} else {
 		if (!kernver_ge(5, 18, 0)) {
 			static int reported = 0;
@@ -823,18 +823,18 @@ static ssize_t gather_entropy(struct kernel_rng *rng)
 		if (ret < 0)
 			goto out;
 
-		dolog(JENT_LOG_DEBUG, "Linux kernel >= 5.18: Inject %zd bits of data with %zd bits of entropy into BLAKE2s state",
+		dolog(JENT_LOG_DEBUG, "Linux kernel >= 5.18: Inject %zu bits of data with %zd bits of entropy into BLAKE2s state",
 		      buflen << 3, ret << 3);
 
 		/*
 		 * Write the entropy and trigger reseed - the Jitter RNG provides
 		 * full entropy so, we tell the Linux RNG the amount of entropy.
 		 */
-		ret = write_random(rng, buf, buflen, ret, 1);
+		ret = write_random(rng, buf, buflen, (size_t)ret, 1);
 	}
 
-	if (ret >= 0 && buflen != ret) {
-		dolog(JENT_LOG_WARN, "Injected %zd bytes into %s, expected %zd",
+	if (ret >= 0 && buflen != (size_t)ret) {
+		dolog(JENT_LOG_WARN, "Injected %zd bytes into %s, expected %zu",
 		      ret, rng->dev, buflen);
 		ret = 0;
 	}
@@ -845,7 +845,7 @@ out:
 	if (exit_on_error && ret < 0) {
 		/* We now exit as requested by caller */
 		dealloc();
-		exit(-ret);
+		exit((int)-ret);
 	}
 
 	sigprocmask(SIG_SETMASK, &previous_set, NULL);
@@ -1172,7 +1172,7 @@ static void install_term(void)
 		 * replaces the signal(SIGxxx, SIG_DFL) calls that the former
 		 * handler performed on itself.
 		 */
-		if (install_handler(term_sigs[i], sig_term, SA_RESETHAND))
+		if (install_handler(term_sigs[i], sig_term, (int)SA_RESETHAND))
 			dolog(JENT_LOG_ERR,
 			      "Cannot install termination handler: %s",
 			      strerror(errno));
