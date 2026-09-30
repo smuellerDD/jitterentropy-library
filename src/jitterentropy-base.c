@@ -968,8 +968,9 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 {
 	struct rand_data *ec = NULL;
-	uint64_t *delta_history;
+	uint64_t *delta_history, gcd;
 	int i, time_backwards = 0, count_stuck = 0, ret = 0;
+	size_t nelem = 0;
 	unsigned int health_test_result;
 
 	delta_history = jent_gcd_init(JENT_POWERUP_TESTLOOPCOUNT, flags);
@@ -1083,11 +1084,14 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 			count_stuck++;
 
 		/* test whether we have an increasing timer */
-		if (!(end_time > start_time))
+		if (!(end_time > start_time)) {
 			time_backwards++;
+			/* A wrapped delta would collapse the GCD analysis. */
+			continue;
+		}
 
 		/* Watch for common adjacent GCD values */
-		jent_gcd_add_value(delta_history, delta, i);
+		jent_gcd_add_value(delta_history, delta, nelem++);
 	}
 
 	/*
@@ -1116,9 +1120,7 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 		goto out;
 	}
 
-	/* ec->enable_notime rather than the flags: it did the measuring. */
-	ret = jent_gcd_analyze(delta_history, JENT_POWERUP_TESTLOOPCOUNT,
-			       ec->osr, ec->enable_notime);
+	ret = jent_gcd_verdict(delta_history, nelem, ec->osr, &gcd);
 	if (ret)
 		goto out;
 
@@ -1126,8 +1128,13 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	 * If we have more than 90% stuck results, then this Jitter RNG is
 	 * likely to not work well.
 	 */
-	if (JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT) < count_stuck)
+	if (JENT_STUCK_INIT_THRES(JENT_POWERUP_TESTLOOPCOUNT) < count_stuck) {
 		ret = ESTUCK;
+		goto out;
+	}
+
+	/* Only a passed startup establishes the divisor of its clock. */
+	jent_gcd_store(gcd, ec->enable_notime);
 
 out:
 	jent_gcd_fini(delta_history, JENT_POWERUP_TESTLOOPCOUNT);

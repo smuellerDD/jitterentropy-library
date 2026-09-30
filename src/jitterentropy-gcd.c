@@ -27,9 +27,9 @@
  * process. The granularities are unrelated (a platform clock may step by 1000,
  * the counting thread counts by one), and dividing by the other clock's is a
  * lost measurement: too large truncates the jitter away, too small leaves the
- * deltas un-normalized for the minimum-variation check below.
+ * deltas un-normalized.
  *
- * 32 bits (see the bound in jent_gcd_analyze()) for atomic access, zero is not
+ * 32 bits (see the bound in jent_gcd_verdict()) for atomic access, zero is not
  * established.
  */
 static uint32_t jent_common_timer_gcd[JENT_GCD_CLOCKS] = { 0 };
@@ -111,16 +111,20 @@ static int jent_gcd_analyze_internal(uint64_t *delta_history, size_t nelem,
 	return 0;
 }
 
-int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr,
-		     unsigned int notime)
+int jent_gcd_verdict(uint64_t *delta_history, size_t nelem, size_t osr,
+		     uint64_t *gcd)
 {
-	unsigned int clock = jent_gcd_clock(notime);
 	uint64_t running_gcd, delta_sum;
 	int ret = jent_gcd_analyze_internal(delta_history, nelem, &running_gcd,
 					    &delta_sum);
 
+	/* No delta recorded: every reading went backwards. */
 	if (ret == -EAGAIN)
-		return 0;
+		return ENOMONOTONIC;
+
+	/* Count in units of the GCD, independent of a stored divisor. */
+	if (running_gcd)
+		delta_sum = jent_udiv64(delta_sum, running_gcd);
 
 	/*
 	 * We assume 1/osr bits of entropy per sample. On average, variations
@@ -139,6 +143,16 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr,
 		goto out;
 	}
 
+	*gcd = running_gcd;
+
+out:
+	return ret;
+}
+
+void jent_gcd_store(uint64_t gcd, unsigned int notime)
+{
+	unsigned int clock = jent_gcd_clock(notime);
+
 	/*
 	 * Adjust all deltas by the observed (small) common factor. The first
 	 * startup on the clock sets it, and it is fixed from then on: startups
@@ -151,14 +165,24 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr,
 	 * collector divides by what jent_gcd_get() gives it, and the "not
 	 * established yet" answer has one measuring the clock divide by one and
 	 * refuses any other. It takes an all-zero delta history to arrive here
-	 * with one, which the variation check above rejects before this point -
-	 * the guard states the invariant rather than covering a reachable case.
+	 * with one, which the variation check of jent_gcd_verdict() rejects
+	 * before this is called - the guard states the invariant rather than
+	 * covering a reachable case.
 	 */
-	if (running_gcd)
+	if (gcd)
 		(void)jent_atomic_cmpxchg_u32(&jent_common_timer_gcd[clock], 0,
-					      (uint32_t)running_gcd);
+					      (uint32_t)gcd);
+}
 
-out:
+int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr,
+		     unsigned int notime)
+{
+	uint64_t gcd;
+	int ret = jent_gcd_verdict(delta_history, nelem, osr, &gcd);
+
+	if (!ret)
+		jent_gcd_store(gcd, notime);
+
 	return ret;
 }
 
