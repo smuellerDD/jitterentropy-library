@@ -30,6 +30,8 @@ function(jent_unit_test name)
     endif()
 
     add_test(NAME ${name} COMMAND ${name})
+    # jent_ut_report(): a program that checked nothing and skipped something.
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
 endfunction()
 
 jent_unit_test(unit-sha3)
