@@ -100,6 +100,12 @@ static int foreground = 0;
  */
 static int exit_on_error = 0;
 
+/* --oneshot: seed the kernel once in the foreground and exit */
+static int oneshot = 0;
+
+/* Set once the kernel accepted a full injection */
+static int seeded = 0;
+
 struct kernel_rng {
 	int fd;
 	struct rand_data *ec;
@@ -313,6 +319,7 @@ static void usage(void)
 	fprintf(stderr, "\t   --status\tStatus information of the Jitter RNG - invoke with\n");
 	fprintf(stderr, "\t           \tsame flags as used for runtime\n");
 	fprintf(stderr, "\t   --exit-on-error\tCause the daemon to exit on errors\n");
+	fprintf(stderr, "\t   --oneshot\tSeed the kernel once and exit\n");
 	fprintf(stderr, "\nLRNG presence %sdetected\n",
 		lrng_present() ? "" : "not ");
 	exit(1);
@@ -386,6 +393,7 @@ static void parse_opts(int argc, char *argv[])
 			{"fips", 0, 0, 0},
 			{"phase1", 1, 0, 0},
 			{"phase2", 1, 0, 0},
+			{"oneshot", 0, 0, 0},
 			{0, 0, 0, 0}
 		};
 		c = getopt_long(argc, argv, "svp:hf:o:lFniI", opts, &opt_index);
@@ -481,6 +489,11 @@ static void parse_opts(int argc, char *argv[])
 			/* phase2 */
 			case 16:
 				parse_phase(optarg, 1);
+				break;
+
+			/* oneshot */
+			case 17:
+				oneshot = 1;
 				break;
 
 			default:
@@ -946,8 +959,10 @@ out:
 	 * alive and retries, and the service manager is told about the success
 	 * whenever it eventually happens.
 	 */
-	if (ret > 0)
+	if (ret > 0) {
+		seeded = 1;
 		notify_ready();
+	}
 
 	return ret;
 }
@@ -1513,6 +1528,14 @@ int main(int argc, char *argv[])
 	ret = alloc();
 	if (ret)
 		goto out;
+
+	/* alloc() injected once; a failure gets the retries the alarm has */
+	if (oneshot) {
+		if (!seeded)
+			gather_entropy_retry(&Random);
+		dealloc();
+		return seeded ? 0 : 1;
+	}
 
 	if (!foreground)
 		daemonize();
