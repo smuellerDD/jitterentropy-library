@@ -528,7 +528,12 @@ int jent_secure_memory_supported(void);
  *
  * @var jent_notime_fini This function shall terminate the threading support.
  *	The function must dispose of all memory and resources used for the
- *	threading operation. It must also dispose of the ctx memory.
+ *	threading operation. It must also dispose of the ctx memory. It is
+ *	only called with a non-NULL ctx, the one a successful init stored: a
+ *	collector that never enabled the timer-less mode, or whose init
+ *	failed, is released without it - as is one whose init succeeded but
+ *	left ctx NULL, so such an init must not hold resources fini would
+ *	release.
  *
  * @var jent_notime_start This function is called when the Jitter RNG wants
  *	to start a thread. Besides providing a pointer to the ctx
@@ -539,7 +544,10 @@ int jent_secure_memory_supported(void);
  *
  * @var jent_notime_stop This function is invoked by the Jitter RNG when the
  *	thread should be stopped. Note, the Jitter RNG intends to start/stop
- *	the thread frequently.
+ *	the thread frequently. It is called exactly once for each start that
+ *	returned success, and never for one that failed, so it may assume the
+ *	thread its start recorded exists - it is not called to clean up after
+ *	a start that did not create one.
  *
  * An example implementation is found in the Jitter RNG itself with its
  * default thread handler of jent_notime_thread_builtin.
@@ -571,8 +579,11 @@ int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread);
  *
  * This must be called before the library is initialized (i.e. before
  * jent_entropy_init*); afterwards it returns -EAGAIN and has no effect.
- * When unset, the counting thread defaults to the highest-numbered online
- * CPU. Pinning itself is best-effort: an out-of-range index or a platform
+ * When unset, the counting thread defaults to the highest-numbered CPU in the
+ * affinity set of the thread that starts it - the caller's, which a cpuset or
+ * job object may confine - rather than the highest online CPU. Outside Linux
+ * and Windows, where no affinity set can be read, it is the CPU count minus
+ * one. Pinning itself is best-effort: an out-of-range index or a platform
  * without affinity support does not stop the internal timer from working.
  *
  * Not every platform can honour the CPU index. OpenBSD exposes no
@@ -581,7 +592,8 @@ int jent_entropy_switch_notime_impl(struct jent_notime_thread *new_thread);
  * Silicon even those are rejected by the kernel. On such systems the index is
  * accepted and recorded but has no effect on placement.
  *
- * Returns 0 on success or a negative errno on failure.
+ * Returns 0 on success or a negative errno on failure, -EOPNOTSUPP as does
+ * jent_entropy_switch_notime_impl() without the internal timer compiled in.
  */
 JENT_PRIVATE_STATIC
 int jent_entropy_set_notime_cpu(unsigned long cpu);
