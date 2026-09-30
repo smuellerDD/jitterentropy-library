@@ -20,8 +20,8 @@
  * failure.
  *
  * The permanent failures - the SP800-90B permanent health test failures and a
- * failed self test bound to the instance - are sticky for the affected
- * instance, and under fips=1 the whole kernel must panic on them. The
+ * failed self test bound to the instance, which the module never runs again
+ * on it - are sticky for the affected instance, and under fips=1 the whole kernel must panic on them. The
  * intermittent ones reach here only after jent_read_entropy_safe() gave up
  * recovering them, and map to -EAGAIN as they do in the upstream kernel
  * Jitter RNG.

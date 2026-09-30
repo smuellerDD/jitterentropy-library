@@ -277,8 +277,9 @@ and the debugfs test interface implement it, and it takes no argument:
 On the character device the run is that of the instance the ioctl arrives on,
 handled exactly as a failing periodic run of that instance is, panic under
 `fips=1` included: the call returns 0 when the tests pass, and a failure gives
-`-EFAULT` and permanently stops the output of this instance - reads on this
-open file description fail from then on, while every other instance keeps
+`-EFAULT` and stops the output of this instance for good - reads on this
+open file description fail from then on, as the module runs no further test
+on it that could bring it back, while every other instance keeps
 delivering (see
 [Periodic Cryptographic Self Test](#linux-kernel-jitter-rng-periodic-cryptographic-self-test)
 below). A call made after a failed run of this instance gives `-EFAULT`
@@ -478,9 +479,10 @@ Should a run of an instance ever fail:
   failure is.
 
 * Otherwise the failure is logged as `cryptographic self test failed`, naming
-  the instance by its UUID where it has one, and that instance permanently
-  stops delivering: the library marks it and its reads fail with
-  `JENT_ERR_SELFTEST`, surfacing as `EFAULT`. Every other instance - and every
+  the instance by its UUID where it has one, and that instance stops
+  delivering: the library marks it and its reads fail with
+  `JENT_ERR_SELFTEST`, surfacing as `EFAULT`. The library would let a later
+  passing run bring it back; the module runs none on that instance. Every other instance - and every
   instance created later - keeps delivering, each vouched for by its own runs.
   The debugfs test interface is not covered: it delivers raw, unconditioned
   noise, which does not involve the conditioning component.

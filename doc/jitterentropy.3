@@ -148,14 +148,14 @@ including in parallel with entropy collection and before initialization.
 The
 .IR entropy_collector
 argument binds the verdict to an instance: on failure, that instance is
-permanently taken out of service and
+taken out of service and
 .BR jent_read_entropy ()
 and
 .BR jent_read_entropy_safe ()
 return
 .B JENT_ERR_SELFTEST
-instead of data from then on, in every mode of operation, not only under
-FIPS. It may be
+instead of data, in every mode of operation, not only under FIPS, until a
+later run bound to it passes. It may be
 .I NULL
 to obtain the verdict without binding it to an instance.
 .LP
@@ -331,7 +331,7 @@ indicates that the Repetition Count Test with memory failed permanently.
 .RI ( -11 )
 indicates that a
 .BR jent_selftest ()
-run bound to this instance failed; the failure is permanent.
+run bound to this instance failed; it lasts until a later bound run passes.
 .LP
 When either online health test fails the Jitter RNG will not
 have any data provided in

@@ -60,9 +60,10 @@ void jent_selftest_instance_exit(struct jent_selftest_instance *st);
  * Run the known answer tests of one instance now, for the JENT_IOCSELFTEST
  * ioctl of the character device. Takes the instance lock; the caller must not
  * hold it. Returns 0 when they pass, -EFAULT when they fail or a run of this
- * instance has already failed - the failure is sticky, as the library's
- * JENT_ERR_SELFTEST gate that stops the instance's output is - and
- * -ERESTARTSYS when interrupted waiting for the lock. A failure is a panic
+ * instance has already failed - the module keeps a failure: it runs no
+ * further test on the instance, so the library's JENT_ERR_SELFTEST gate that
+ * stops the instance's output stays closed - and -ERESTARTSYS when
+ * interrupted waiting for the lock. A failure is a panic
  * under fips=1, as a permanent health test failure is, and every run is
  * counted in the statistics.
  */
