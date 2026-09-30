@@ -113,24 +113,7 @@ extern "C" {
 /* The kernel supplies a fallthrough macro of its own. */
 #define JENT_FALLTHROUGH	fallthrough
 
-/*
- * Test interface support (see jitterentropy-base.c): allocate an entropy
- * collector without running the startup entropy collection and its
- * health-test reset ladder. Only intended for the kernel test interface
- * (linux_kernel/jitterentropy_testing.c).
- */
-struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
-						   unsigned int flags);
-
-/*
- * 64-bit division / modulo with a 64-bit divisor.
- *
- * The plain C operators on 64-bit operands are lowered to libgcc helper
- * calls (__udivdi3, __aeabi_uldivmod, ...) on 32-bit kernels, and the kernel
- * does not provide those helpers; route the operations through the kernel's
- * div64 primitives instead. On 64-bit kernels both primitives are inline
- * plain divisions, so code generation there is identical to the operators.
- */
+/* 64-bit division: 32-bit kernels have no libgcc helpers for the operators. */
 static inline uint64_t jent_udiv64(uint64_t dividend, uint64_t divisor)
 {
 	return div64_u64(dividend, divisor);
@@ -191,44 +174,7 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 
 #endif /* LINUX_KERNEL */
 
-/*
- * An instance that measures a clock rather than generating entropy from it:
- * the startup's own collector, and the raw noise recording. Both want the
- * deltas as the clock produces them, and the first of them is what
- * establishes the common divisor the others are normalized by - so these are
- * the only instances allowed to run without one.
- *
- * Internal, and not in jitterentropy.h: the library sets it on the flags it
- * passes down, a caller never does. The public allocation clears it. The bit
- * is above the public flags and below the hash loop field; internal flags
- * grow downwards from here.
- */
-#define JENT_INT_MEASURE_CLOCK	(UINT32_C(1) << 23)
-
-/*
- * JENT_-prefixed, and defined outside the LINUX_KERNEL split above, for the
- * same reason JENT_FALLTHROUGH is: the bare names belong to the environment,
- * not to this library.
- *
- * jitterentropy.h deliberately does not pull in <linux/module.h> (and so not
- * <linux/kernel.h>), which keeps the -O0 entropy core free of headers that do
- * not compile without optimisation - but it also means the kernel's
- * ARRAY_SIZE()/BUILD_BUG_ON() are not available to the core, so equivalents
- * have to be defined here.
- *
- * Spelling them with the kernel's names and an #ifndef guard is what this did
- * before, and it only worked by accident: some other header had to define them
- * first for the guard to suppress ours. That held while <linux/timex.h> pulled
- * <linux/kernel.h> into every translation unit; once the timer backend moved
- * out (see arch/jitterentropy-arch-timer.c) our definitions landed first
- * instead, and every file that later included a kernel header got a
- * "'ARRAY_SIZE' redefined" warning. A distinct name cannot collide in either
- * order, on any kernel, so no guard is needed.
- *
- * linux_kernel/ is deliberately not converted: that layer includes
- * <linux/kernel.h> itself and uses the kernel's own macros, as kernel code
- * should.
- */
+/* JENT_-prefixed: the kernel's own macros are not in scope, or collide. */
 #define JENT_BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 
 #define JENT_ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
@@ -324,8 +270,9 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
  * If the memory updates should dominantly result in a memory update, then
  * the value should be set to at least 3.
  * The actual size of the memory region is never larger than requested by
- * the passed in JENT_MAX_MEMSIZE_* flag (if provided) or JENT_MEMORY_SIZE
- * (if no JENT_MAX_MEMSIZE_* flag is provided).
+ * the passed in JENT_MAX_MEMSIZE_* flag (if provided); without one it is
+ * derived from the cache size, or JENT_DEFAULT_MEMORY_BITS where that is
+ * unknown (see jent_memsize()).
  */
 #ifndef JENT_CACHE_SHIFT_BITS
 #define JENT_CACHE_SHIFT_BITS 0
@@ -624,7 +571,6 @@ struct rand_data
 	unsigned int apt_base_set:1;	/* APT base reference set? */
 	unsigned int is_fips_enabled:1;
 	unsigned int enable_notime:1;	/* Use internal high-res timer */
-	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
 	unsigned int in_recovery:1;	/* Flag to indicate a recovery op. */
 	unsigned int rct_mem_primed:1;	/* RCT-mem count carried into the
 					 * next window */
@@ -706,6 +652,19 @@ struct rand_data
 	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE];
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 };
+
+#if defined(LINUX_KERNEL) || defined(JENT_RAW_COLLECTOR)
+/*
+ * A collector without the startup, for the raw noise recordings of
+ * linux_kernel/jitterentropy_testing.c and tests/raw-entropy/recording_library.
+ */
+JENT_INTERNAL
+struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
+						   unsigned int flags);
+/* Its self tests of the conditioning: 0, EHASH or EGCD. */
+JENT_INTERNAL
+int jent_raw_selftest(unsigned int flags);
+#endif
 
 /* The window of the RCT with memory: the measurements of one output block. */
 #define JENT_MEASURE_JITTER_LOOP_CTR(_osr, _safety_factor)                     \

@@ -324,18 +324,28 @@ static void test_startup_on_mocked_clocks(void)
 
 /* A collector for replaying stamps into: FIPS mode, so the tests report. */
 /*
- * A startup that fails under NTG.1 must not commit the process to the internal
- * timer.
- *
- * NTG.1 forbids the internal timer and the collector allocation enforces that,
- * so the fallback jent_entropy_init_ex() makes when the platform attempt fails
- * cannot produce a usable NTG.1 collector - but it does call the one-way
- * jent_notime_force(). Every later NTG.1 initialization then fails at the
- * allocation, reporting a memory error rather than anything about a clock.
- *
- * Not a corner case: the tighter NTG.1 cutoffs make an occasional startup
- * health failure normal, and one used to put NTG.1 out of action until the
- * process exited.
+ * Whether the startup rejects this machine's own clock when it may not fall
+ * back to the internal timer - a clock too coarse for it, say. That is the
+ * machine's verdict, and a case that needs the platform clock to pass skips
+ * (it says so) rather than fail. A startup that fails for another reason is
+ * not the machine's and does not excuse the case. Asked with no mock
+ * installed.
+ */
+static int platform_clock_rejected(const char *what)
+{
+	int ret = jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER);
+
+	if (ret && JENT_UT_MACHINE_VERDICT(ret)) {
+		JENT_UT_SKIP(what, "the startup rejects the platform clock");
+		return 1;
+	}
+	return 0;
+}
+
+/*
+ * A startup that fails under NTG.1 must leave later NTG.1 initializations
+ * usable: the tighter NTG.1 cutoffs make an occasional startup health failure
+ * normal.
  */
 static void test_ntg1_failure_does_not_force_notime(void)
 {
@@ -345,9 +355,6 @@ static void test_ntg1_failure_does_not_force_notime(void)
 
 	jent_ut_group("a failed NTG.1 startup and the internal timer");
 
-	JENT_UT_EQ(jent_notime_forced(), 0,
-		   "the internal timer is not forced to begin with");
-
 	/* A clock that does not move, so the startup has to reject it. */
 	fi_replay_init(&r, constant, 1);
 	r.hold = 1;
@@ -356,20 +363,71 @@ static void test_ntg1_failure_does_not_force_notime(void)
 	jent_set_mock_timer(NULL, NULL);
 
 	JENT_UT_NE(ret, 0, "the startup rejects a clock that does not move");
-	JENT_UT_EQ(jent_notime_forced(), 0,
-		   "and the NTG.1 attempt has forced nothing");
 
-	/* The contradiction stated outright is refused, and forces nothing. */
+	/* The contradiction stated outright is refused. */
 	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_NTG1 |
 					   JENT_FORCE_INTERNAL_TIMER),
 		   ENOTIME,
 		   "NTG.1 with the internal timer is refused as a contradiction");
-	JENT_UT_EQ(jent_notime_forced(), 0, "which also forces nothing");
 
-	/* And the platform clock still initialises under NTG.1 afterwards. */
-	ret = jent_entropy_init_ex(0, JENT_NTG1);
-	JENT_UT_NE(ret, EMEM,
-		   "a later NTG.1 startup is not refused for want of memory");
+	/*
+	 * And the platform clock still initialises under NTG.1 afterwards -
+	 * where memory can be locked at all, which NTG.1 demands.
+	 */
+	if (!jent_ut_strict() && !jent_ut_memlock_available()) {
+		JENT_UT_SKIP("a later NTG.1 startup",
+			     "this machine locks no memory (RLIMIT_MEMLOCK)");
+		return;
+	}
+	/* NTG.1 is on the platform clock only, so it has to pass. */
+	if (platform_clock_rejected("a later NTG.1 startup"))
+		return;
+	/*
+	 * Passes, not merely "is not EMEM": the regression this names showed
+	 * as EMEM once and as ENOTIME after the allocation learned to refuse
+	 * the combination, and a check for one code passes the other. A few
+	 * attempts, as the NTG.1 cutoffs let an honest clock fail once in a
+	 * while - a startup that is refused for good fails all of them.
+	 */
+	{
+		struct rand_data *ec;
+		unsigned int i;
+
+		for (i = 0; i < 3; i++) {
+			ret = jent_entropy_init_ex(0, JENT_NTG1);
+			if (!ret)
+				break;
+		}
+		/*
+		 * A clock that keeps failing the NTG.1 health tests - not the
+		 * EMEM or ENOTIME the regression showed as - is the machine.
+		 */
+		if (!jent_ut_strict() &&
+		    (ret == EHEALTH || ret == ERCT || ret == ESTUCK)) {
+			JENT_UT_SKIP("a later NTG.1 startup",
+				     "the NTG.1 health tests do not pass on "
+				     "this machine");
+			return;
+		}
+		JENT_UT_EQ(ret, 0, "a later NTG.1 startup passes");
+
+		/*
+		 * Where the regression showed: the collector allocation. It
+		 * runs an NTG.1 startup of its own, which a coarse clock - the
+		 * 24 MHz counter of the macOS arm64 runners - fails once in a
+		 * while just the same, so it gets the same attempts.
+		 */
+		ec = NULL;
+		for (i = 0; i < 3 && !ec; i++)
+			ec = jent_entropy_collector_alloc(0, JENT_NTG1);
+		JENT_UT_TRUE(ec != NULL,
+			     "and an NTG.1 collector can be allocated");
+		if (ec) {
+			JENT_UT_EQ(ec->enable_notime, 0,
+				   "on the platform clock");
+			jent_entropy_collector_free(ec);
+		}
+	}
 }
 
 static struct rand_data *replay_collector(uint64_t first)
@@ -713,7 +771,9 @@ static void test_realloc_on_read_gives_up(void)
 	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS |
 					     JENT_DISABLE_INTERNAL_TIMER);
 	if (!ec) {
-		JENT_UT_SKIP("reallocation on read", "no collector");
+		JENT_UT_NO_COLLECTOR("reallocation on read",
+				     JENT_FORCE_FIPS |
+				     JENT_DISABLE_INTERNAL_TIMER);
 		return;
 	}
 	osr_before = ec->osr;
@@ -732,7 +792,8 @@ static void test_realloc_on_read_gives_up(void)
 	ret = jent_read_entropy_safe(&ec, buf, sizeof(buf));
 	jent_set_mock_timer(NULL, NULL);
 
-	JENT_UT_EQ(ret, JENT_ERR_RCT,
+	/* As a permanent one: _safe returns no intermittent failure. */
+	JENT_UT_EQ(ret, JENT_ERR_RCT_PERMANENT,
 		   "the health failure is returned once recovery is exhausted");
 	JENT_UT_EQ(ec->osr, osr_before,
 		   "and the caller keeps the collector it had");

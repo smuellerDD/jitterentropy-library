@@ -315,7 +315,7 @@ static void test_recovery_gives_up(void)
 	jent_ut_group("recovery gives up above the maximum oversampling rate");
 
 	if (!ec) {
-		JENT_UT_SKIP("recovery limit", "no collector");
+		JENT_UT_NO_COLLECTOR("recovery limit", 0);
 		return;
 	}
 
@@ -328,10 +328,25 @@ static void test_recovery_gives_up(void)
 	ec->is_fips_enabled = 1;
 	ec->health_failure = JENT_RCT_FAILURE;
 
-	JENT_UT_EQ(jent_read_entropy_safe(&ec, buf, sizeof(buf)), JENT_ERR_RCT,
-		   "the intermittent failure is returned once recovery is exhausted");
+	/*
+	 * Permanent, not the intermittent JENT_ERR_RCT that asked for the
+	 * recovery: that would tell the caller to try again, on a collector
+	 * nothing can put back into service.
+	 */
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, buf, sizeof(buf)),
+		   JENT_ERR_RCT_PERMANENT,
+		   "an exhausted recovery is returned as a permanent failure");
 	JENT_UT_EQ(ec->osr, (unsigned int)JENT_MAX_OSR,
-		   "and the collector was left untouched");
+		   "and the collector was left in place");
+	JENT_UT_TRUE((ec->health_failure & JENT_RCT_FAILURE_PERMANENT) != 0,
+		     "with the permanent failure raised on it");
+
+	/* The verdict is final: later reads report it again. */
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, buf, sizeof(buf)),
+		   JENT_ERR_RCT_PERMANENT,
+		   "the same failure is reported again");
+	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)),
+		   JENT_ERR_RCT_PERMANENT, "by jent_read_entropy as well");
 
 	jent_entropy_collector_free(ec);
 }
@@ -530,7 +545,8 @@ static void test_state_duplication_clock_change(void)
  * A clock nothing has measured has no common divisor, and an instance that
  * would generate from it is refused rather than given an invented one. Only
  * the instances that do the measuring - the startup's own collector and the
- * raw noise recording - run without one, and a caller cannot claim to be one.
+ * raw noise recording - run without one. A caller cannot claim to be one: it
+ * is an argument of the internal allocation, not a flag.
  */
 static void test_alloc_needs_a_measured_clock(void)
 {
@@ -550,22 +566,21 @@ static void test_alloc_needs_a_measured_clock(void)
 	 * Pinned, so that the allocations below skip the startup - which would
 	 * establish the divisor again and defeat the check.
 	 */
-	saved_selftest_run = jent_atomic_load_int(&jent_selftest_run);
-	jent_atomic_store_int(&jent_selftest_run, 1);
+	saved_selftest_run =
+		jent_atomic_load_int(&jent_selftest_run[JENT_CLOCK_PLATFORM]);
+	jent_atomic_store_int(&jent_selftest_run[JENT_CLOCK_PLATFORM], 1);
 	jent_atomic_store_u32(&jent_common_timer_gcd[JENT_GCD_CLOCK_PLATFORM],
 			      0);
 
-	ec = jent_entropy_collector_alloc_internal(JENT_MIN_OSR, 0);
+	ec = jent_entropy_collector_alloc_internal(JENT_MIN_OSR, 0, 0, 0);
 	JENT_UT_TRUE(ec == NULL, "the allocation is refused");
 	jent_entropy_collector_free(ec);
 
-	ec = jent_entropy_collector_alloc(JENT_MIN_OSR,
-					  JENT_INT_MEASURE_CLOCK);
-	JENT_UT_TRUE(ec == NULL, "and a caller cannot ask to be excused");
+	ec = jent_entropy_collector_alloc(JENT_MIN_OSR, 0);
+	JENT_UT_TRUE(ec == NULL, "the public allocation just as much");
 	jent_entropy_collector_free(ec);
 
-	ec = jent_entropy_collector_alloc_internal(JENT_MIN_OSR,
-						   JENT_INT_MEASURE_CLOCK);
+	ec = jent_entropy_collector_alloc_internal(JENT_MIN_OSR, 0, 0, 1);
 	JENT_UT_TRUE(ec != NULL, "the instance that measures the clock is not");
 	if (ec)
 		JENT_UT_EQ(ec->jent_common_timer_gcd, 1,
@@ -574,21 +589,24 @@ static void test_alloc_needs_a_measured_clock(void)
 
 	jent_atomic_store_u32(&jent_common_timer_gcd[JENT_GCD_CLOCK_PLATFORM],
 			      (uint32_t)divisor);
-	jent_atomic_store_int(&jent_selftest_run, saved_selftest_run);
+	jent_atomic_store_int(&jent_selftest_run[JENT_CLOCK_PLATFORM],
+			      saved_selftest_run);
 }
 
-/*
- * And a compliance-mode instance is not moved to the other clock at all.
- *
- * Last in this program, and it has to be: it forces the internal timer, which
- * is one-way and process-wide.
- */
+/* And a compliance-mode instance is not moved to the other clock at all. */
 static void test_recovery_pins_the_clock(void)
 {
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	struct rand_data *ec, *before;
+	unsigned int flags;
 
 	jent_ut_group("the recovery of a compliance-mode instance keeps its clock");
+
+	if (!jent_ut_memlock_available()) {
+		JENT_UT_SKIP("the pinned clock",
+			     "this machine locks too little memory (RLIMIT_MEMLOCK)");
+		return;
+	}
 
 	ec = jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
 	if (!ec || ec->enable_notime) {
@@ -599,27 +617,25 @@ static void test_recovery_pins_the_clock(void)
 		return;
 	}
 
-	/* What one caller asking for the internal timer does to the process. */
-	jent_notime_force();
-
 	before = ec;
-	JENT_UT_NE(jent_health_failure_reset(&ec,
-					     jent_entropy_collector_alloc_internal),
-		   0, "the reallocation is refused rather than switching");
-	JENT_UT_TRUE(ec == before,
-		     "and the instance is left as it was");
+	flags = ec->flags;
+	JENT_UT_EQ(jent_health_failure_reset(&ec, 0), 0,
+		   "the reallocation succeeds");
+	JENT_UT_TRUE(ec != before, "with a replacement");
 	JENT_UT_EQ(ec->enable_notime, 0, "still on the platform clock");
-	jent_entropy_collector_free(ec);
 
-	/* Outside the compliance modes it still moves. */
-	ec = jent_entropy_collector_alloc(0, 0);
-	if (!ec) {
-		JENT_UT_SKIP("the unpinned clock", "no collector");
-		return;
-	}
-	JENT_UT_EQ(ec->enable_notime, 1,
-		   "a collector built after the forcing drives a counting "
-		   "thread");
+	/*
+	 * Pinned for the reset only: the replacement keeps the flags the
+	 * caller configured, which jent_status() reports, and the next reset
+	 * pins the clock afresh.
+	 */
+	JENT_UT_EQ(ec->flags, flags,
+		   "with the caller's flags, not the pin the reset used");
+	before = ec;
+	JENT_UT_EQ(jent_health_failure_reset(&ec, 0), 0,
+		   "a second reallocation succeeds");
+	JENT_UT_TRUE(ec != before && !ec->enable_notime,
+		     "on the platform clock again");
 	jent_entropy_collector_free(ec);
 #else
 	jent_ut_group("the recovery of a compliance-mode instance keeps its clock");
@@ -725,13 +741,14 @@ static void test_recovery_keeps_caller_memsize(void)
 	jent_ut_group("recovery with a caller-configured memory size");
 
 	if (!ec) {
-		JENT_UT_SKIP("recovery", "no collector");
+		JENT_UT_NO_COLLECTOR("recovery", JENT_MAX_MEMSIZE_1MB);
 		return;
 	}
 
 	ec->is_fips_enabled = 1;
 
-	JENT_UT_EQ(ec->max_mem_set, 1u, "the size counts as caller-configured");
+	JENT_UT_TRUE(JENT_FLAGS_TO_MAX_MEMSIZE(ec->flags),
+		     "the collector keeps the size the caller configured");
 	memsize_before = ec->memmask + 1;
 
 	ec->health_failure = JENT_APT_FAILURE;
@@ -754,7 +771,8 @@ static void test_recovery_keeps_caller_memsize(void)
 	JENT_UT_TRUE(ec->reinit_count >= 1, "the collector was reallocated");
 	JENT_UT_EQ(ec->memmask + 1, memsize_before,
 		   "and the memory size the caller chose is kept");
-	JENT_UT_EQ(ec->max_mem_set, 1u, "as is the fact that they chose it");
+	JENT_UT_TRUE(JENT_FLAGS_TO_MAX_MEMSIZE(ec->flags),
+		     "as is the fact that they chose it");
 
 	jent_entropy_collector_free(ec);
 }

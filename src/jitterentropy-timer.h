@@ -45,8 +45,8 @@ JENT_INTERNAL
 void jent_notime_disable(struct rand_data *ec);
 JENT_INTERNAL
 int jent_notime_switch(struct jent_notime_thread *new_thread);
-void jent_notime_force(void);
-int jent_notime_forced(void);
+JENT_INTERNAL
+int jent_notime_cpus_missing(void);
 
 #else /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
@@ -94,9 +94,10 @@ static inline int jent_notime_switch(struct jent_notime_thread *new_thread)
 	return -EOPNOTSUPP;
 }
 
-static inline void jent_notime_force(void) { }
-
-static inline int jent_notime_forced(void) { return 0; }
+static inline int jent_notime_cpus_missing(void)
+{
+	return 0;
+}
 
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 

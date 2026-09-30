@@ -892,6 +892,23 @@ static unsigned int ut_notime_flags(unsigned int idx)
 	return ut_notime_arm(idx) ? JENT_FORCE_INTERNAL_TIMER : 0;
 }
 
+/*
+ * Whether a run raced anything. A short run still exercises the library, but
+ * one thread passes every check without overlapping anything, so it is a
+ * skip. Two suffices; arms needing more check for it themselves.
+ */
+static int ut_raced(unsigned int started, const char *what)
+{
+	if (started >= 2)
+		return 1;
+
+	JENT_UT_SKIP(what, started ?
+			   "only one thread could be created, so nothing ran "
+			   "concurrently" :
+			   "no thread could be created");
+	return 0;
+}
+
 static void test_concurrent_notime(void)
 {
 	struct ut_worker workers[UT_MAX_THREADS];
@@ -906,26 +923,12 @@ static void test_concurrent_notime(void)
 
 	jent_ut_group("the counting thread against the platform clock");
 
-	if (jent_notime_forced()) {
-		/*
-		 * The platform clock did not pass the startup, so every
-		 * collector here is on the counting thread already and there
-		 * is no second arm. The configuration the timer exists for.
-		 */
-		JENT_UT_SKIP("the two clocks against each other",
-			     "this machine has no usable clock of its own");
-		return;
-	}
-
 	ut_init_workers(workers, nthreads, ut_work_notime, ut_notime_flags);
 	for (i = 0; i < nthreads; i++)
 		workers[i].osr = ut_notime_arm(i) ? UT_OSR_NOTIME :
 						    UT_OSR_TIMER;
 
-	/*
-	 * The platform-clock collectors, built here and not in their threads:
-	 * the forcing below is one-way and process-wide.
-	 */
+	/* The platform-clock collectors, built here, not in their threads. */
 	for (i = 0; i < nthreads; i++) {
 		if (ut_notime_arm(i))
 			continue;
@@ -936,14 +939,25 @@ static void test_concurrent_notime(void)
 			continue;
 
 		workers[i].allocs++;
-		JENT_UT_EQ(workers[i].ec->enable_notime, 0,
-			   "a collector built first is on the platform clock");
+		if (workers[i].ec->enable_notime) {
+			/*
+			 * The platform clock does not pass, so every collector
+			 * falls back to the counting thread and there is no
+			 * second arm.
+			 */
+			for (j = 0; j <= i; j++)
+				jent_entropy_collector_free(workers[j].ec);
+			JENT_UT_SKIP("the two clocks against each other",
+				     "this machine has no usable clock of its "
+				     "own");
+			return;
+		}
 	}
 
 	/*
 	 * The probe that says whether this machine can build one at all - the
 	 * counting thread needs a CPU of its own - so that an arm building
-	 * none does not leave the test passing on nothing. It also forces.
+	 * none does not leave the test passing on nothing.
 	 */
 	probe = jent_entropy_collector_alloc(UT_OSR_NOTIME,
 					     JENT_FORCE_INTERNAL_TIMER);
@@ -964,9 +978,8 @@ static void test_concurrent_notime(void)
 		for (i = 0; i < nthreads; i++)
 			jent_entropy_collector_free(workers[i].ec);
 
-		JENT_UT_SKIP("the counting-thread arm",
-			     "no collector with an internal timer can be "
-			     "built on this machine");
+		JENT_UT_NO_COLLECTOR("the counting-thread arm",
+				     JENT_FORCE_INTERNAL_TIMER);
 		return;
 	}
 
@@ -976,11 +989,8 @@ static void test_concurrent_notime(void)
 	for (i = 0; i < nthreads; i++)
 		jent_entropy_collector_free(workers[i].ec);
 
-	if (!started) {
-		JENT_UT_SKIP("the two clocks against each other",
-			     "no thread could be created");
+	if (!ut_raced(started, "the two clocks against each other"))
 		return;
-	}
 
 	/* What each clock established, substituting one as the library does. */
 	for (i = 0; i < 2; i++) {
@@ -1027,9 +1037,6 @@ static void test_concurrent_notime(void)
 	       UT_OSR_NOTIME, started - notime_threads, UT_OSR_TIMER);
 	printf("  note: %u collectors, %u generations (%u on the platform "
 	       "clock)\n", allocs, reads, timer_reads);
-	printf("  note: common timer divisor %llu for the platform clock, "
-	       "%llu for the counting thread\n",
-	       (unsigned long long)divisor[0], (unsigned long long)divisor[1]);
 
 	JENT_UT_TRUE(notime_threads > 1,
 		     "several collectors drive a counting thread at once");
@@ -1048,7 +1055,7 @@ static void test_concurrent_notime(void)
 	JENT_UT_EQ(notime_used, notime_threads * UT_NOTIME_ROUNDS,
 		   "the counting-thread arm used a counting thread throughout");
 	JENT_UT_EQ(ticked, notime_used,
-		   "and every one of those threads was seen to count");
+		   "and every one of those collectors measured its thread");
 	JENT_UT_TRUE(timer_reads > 0,
 		     "the platform-clock arm generated alongside it");
 	JENT_UT_EQ(osr_low, 0u,

@@ -743,12 +743,8 @@ static void test_still_usable_afterwards(void)
 		 * came back: an allocation here runs the whole self test again
 		 * - test_alloc_runs_failing_selftest() cleared the flag that
 		 * would have skipped it - and reports neither of the two paths
-		 * it tries in turn. This being the last case in the program,
-		 * the one-way global that asking for the internal timer sets
-		 * has nothing left to affect.
+		 * it tries in turn.
 		 */
-		printf("  note: internal timer already forced: %d\n",
-		       jent_notime_forced());
 		printf("  note: startup without the internal timer gives %d\n",
 		       jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER));
 		printf("  note: startup with the internal timer gives %d\n",
@@ -1155,7 +1151,8 @@ static void test_alloc_runs_failing_selftest(void)
 	 * there is: without it the initialization falls back to the counting
 	 * thread, which is a real timer and would rightly succeed.
 	 */
-	jent_selftest_run = 0;
+	jent_selftest_run[JENT_CLOCK_PLATFORM] = 0;
+	jent_selftest_run[JENT_CLOCK_NOTIME] = 0;
 	fi_time_set(FI_TIME_ZERO);
 	ec = jent_entropy_collector_alloc(0, JENT_DISABLE_INTERNAL_TIMER);
 	fi_time_set(FI_TIME_REAL);
@@ -1165,17 +1162,11 @@ static void test_alloc_runs_failing_selftest(void)
 	jent_entropy_collector_free(ec);
 
 	/* And that a collector can be had again once the timer works. */
-	jent_selftest_run = 0;
+	jent_selftest_run[JENT_CLOCK_PLATFORM] = 0;
+	jent_selftest_run[JENT_CLOCK_NOTIME] = 0;
 	ec = jent_entropy_collector_alloc(0, 0);
 	if (!ec) {
-		/*
-		 * Same reasoning as in test_still_usable_afterwards(), and the
-		 * same limitation: only the path that does not force the
-		 * internal timer is asked, because forcing it is a one-way
-		 * global and there is still a case to run after this one.
-		 */
-		printf("  note: internal timer already forced: %d\n",
-		       jent_notime_forced());
+		/* Same reasoning as in test_still_usable_afterwards(). */
 		printf("  note: startup without the internal timer gives %d\n",
 		       jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER));
 	}
@@ -1183,36 +1174,6 @@ static void test_alloc_runs_failing_selftest(void)
 	jent_entropy_collector_free(ec);
 }
 
-/*
- * The startup self test once the internal timer has been forced. A collector
- * that disables it cannot be allocated then, and that refusal used to be
- * reported as EMEM - a machine out of memory rather than a process that has
- * settled on the other timer.
- *
- * Runs last and forces the timer itself: the flag is one-way, so anything
- * after this would see a library that can no longer produce a collector on the
- * platform clock.
- */
-static void test_forced_notime_reports_no_timer(void)
-{
-#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
-	jent_ut_group("the startup self test once the internal timer is forced");
-
-	if (jent_entropy_init_ex(0, JENT_FORCE_INTERNAL_TIMER)) {
-		JENT_UT_SKIP("the forced internal timer",
-			     "it does not initialise on this machine");
-		return;
-	}
-
-	JENT_UT_TRUE(jent_notime_forced(),
-		     "asking for the internal timer records the choice");
-
-	JENT_UT_EQ(jent_time_entropy_init(JENT_MIN_OSR,
-					  JENT_DISABLE_INTERNAL_TIMER),
-		   ENOTIME,
-		   "a startup that disables it reports no timer, not no memory");
-#endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
-}
 
 int main(void)
 {
@@ -1252,7 +1213,6 @@ int main(void)
 	test_still_usable_afterwards();
 
 	/* Last: it forces the internal timer, which cannot be undone. */
-	test_forced_notime_reports_no_timer();
 
 	return jent_ut_report("unit-fault");
 }

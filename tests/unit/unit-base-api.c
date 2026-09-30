@@ -487,8 +487,6 @@ static void test_selftest(void)
 		   "they pass bound to a collector");
 	JENT_UT_EQ(ec->selftest_failed, 0u,
 		   "a passing run leaves the instance in service");
-	JENT_UT_EQ(jent_selftest_run, 1,
-		   "the startup self test remains recorded as run");
 	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)), (ssize_t)sizeof(buf),
 		   "the collector still delivers afterwards");
 
