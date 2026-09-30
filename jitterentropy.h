@@ -148,20 +148,20 @@ extern "C" {
  * be updated (as long as this number is zero, the API is not considered stable
  * and can change without a bump of the major version).
  */
-#define JENT_MAJVERSION 3
+#define JENT_MAJVERSION 4
 
 /*
  * API compatible, ABI may change, functional enhancements only, consumer can be
  * left unchanged if enhancements are not considered.
  */
-#define JENT_MINVERSION 7
+#define JENT_MINVERSION 0
 
 /*
  * API / ABI compatible, no functional changes, no enhancements, bug fixes only.
  * Also, the entropy collection is not changed in any way that would necessitate
  * a re-assessment.
  */
-#define JENT_PATCHLEVEL 1
+#define JENT_PATCHLEVEL 0
 
 #define JENT_VERSION (JENT_MAJVERSION * 1000000 + \
 		      JENT_MINVERSION * 10000 + \
