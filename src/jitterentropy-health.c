@@ -72,7 +72,7 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
  * their permanent cutoff from alpha=2^-60 out of the intermittent alpha=2^-30.
  *
  * The global cutoffs are calculated using the
- * InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
+ * 1 + InverseBinomialCDF(n=(JENT_LAG_WINDOW_SIZE-JENT_LAG_HISTORY_SIZE), p=2^(-1/osr); 1-alpha)
  * The local cutoffs are somewhat more complicated: the probability of no run
  * of length r in n trials is (1 - p x) / ((r + 1 - r x) q) * x^-(n+1), where x
  * is the root near 1 of 1 - x + q p^r x^(r+1).
@@ -92,13 +92,13 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
  * against the ones below.
  */
 static const unsigned int jent_lag_global_cutoff_lookup[20] =
-	{ 66443,  93504, 104761, 110875, 114707, 117330, 119237, 120686, 121823,
-	 122739, 123493, 124124, 124660, 125120, 125520, 125871, 126181, 126457,
-	 126704, 126926 };
+	{ 66444,  93505, 104762, 110876, 114708, 117331, 119238, 120687, 121824,
+	 122740, 123494, 124125, 124661, 125121, 125521, 125872, 126182, 126458,
+	 126705, 126927 };
 static const unsigned int jent_lag_global_cutoff_permanent_lookup[20] =
-	{ 66876,  93896, 105108, 111188, 114993, 117596, 119486, 120920, 122045,
-	 122951, 123696, 124318, 124847, 125301, 125695, 126041, 126346, 126617,
-	 126860, 127079 };
+	{ 66877,  93897, 105109, 111189, 114994, 117597, 119487, 120921, 122046,
+	 122952, 123697, 124319, 124848, 125302, 125696, 126042, 126347, 126618,
+	 126861, 127080 };
 static const unsigned int jent_lag_local_cutoff_lookup[20] =
 	{  38,  75, 111, 146, 181, 215, 250, 284, 318, 351,
 	  385, 419, 452, 485, 518, 551, 584, 617, 650, 683 };
