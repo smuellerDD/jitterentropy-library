@@ -55,7 +55,7 @@ static inline void jent_notime_block_switch(void) { }
 static inline int jent_notime_set_cpu(unsigned long cpu)
 {
 	(void)cpu;
-	return -1;
+	return -EOPNOTSUPP;
 }
 
 static inline int jent_notime_settick(struct rand_data *ec)
@@ -91,7 +91,7 @@ static inline void jent_notime_disable(struct rand_data *ec)
 static inline int jent_notime_switch(struct jent_notime_thread *new_thread)
 {
 	(void)new_thread;
-	return -1;
+	return -EOPNOTSUPP;
 }
 
 static inline void jent_notime_force(void) { }
