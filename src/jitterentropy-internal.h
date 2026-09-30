@@ -198,7 +198,7 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
  * is above the public flags and below the hash loop field; internal flags
  * grow downwards from here.
  */
-#define JENT_INT_MEASURE_CLOCK	(UINT32_C(1) << 23)
+#define JENT_INT_MEASURE_CLOCK	(UINT32_C(1) << 22)
 
 /*
  * JENT_-prefixed, and defined outside the LINUX_KERNEL split above, for the

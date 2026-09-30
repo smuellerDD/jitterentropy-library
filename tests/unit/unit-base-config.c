@@ -158,6 +158,34 @@ static void test_hashloop(void)
 			   loops[i].cnt,
 			   "the count is independent of the other flags");
 	}
+
+	/*
+	 * A collector runs the count its flags ask for, whether the internal
+	 * JENT_INT_MEASURE_CLOCK is set on them - as for the startup's and the
+	 * raw collectors - or cleared - as by the public allocation.
+	 */
+	jent_ut_group("a collector runs the count of its JENT_HASHLOOP_* flag");
+
+	for (i = 0; i < sizeof(loops) / sizeof(loops[0]); i++) {
+		struct rand_data *ec;
+		unsigned int with;
+
+		for (with = 0; with < 2; with++) {
+			ec = jent_entropy_collector_alloc_internal(0,
+				loops[i].flag |
+				(with ? JENT_INT_MEASURE_CLOCK : 0));
+			if (!ec) {
+				JENT_UT_SKIP("JENT_HASHLOOP_*",
+					     "no collector could be allocated");
+				return;
+			}
+			snprintf(what, sizeof(what),
+				 "JENT_HASHLOOP_%u %s the internal flag",
+				 loops[i].cnt, with ? "with" : "without");
+			JENT_UT_EQ(ec->hashloopcnt, loops[i].cnt, what);
+			jent_entropy_collector_free(ec);
+		}
+	}
 }
 
 /* The oversampling rate is clamped into [JENT_MIN_OSR, JENT_MAX_OSR]. */
