@@ -3,6 +3,7 @@
  * Character device interface for Jitter RNG.
  *
  * Copyright (C) 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 #ifndef _JITTERENTROPY_CHARDEV_H

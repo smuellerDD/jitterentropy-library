@@ -14,8 +14,10 @@
  * Kbuild.config). In that case the stubs in jitterentropy_chardev.h are used.
  *
  * Copyright (C) 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
+#include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -28,6 +30,7 @@
 #include <linux/sched/signal.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 
 #include "jitterentropy.h"
@@ -36,6 +39,7 @@
 #include "jitterentropy_ioctl.h"
 #include "jitterentropy_proc.h"
 #include "jitterentropy_selftest.h"
+#include "jitterentropy_status.h"
 #include "jitterentropy_uapi.h"
 
 /*
@@ -43,8 +47,8 @@
  * shared with the crypto API interface and are configurable via the module
  * parameters of the same name (see jitterentropy_mod.c).
  */
-extern unsigned int osr;
-extern unsigned int flags;
+extern unsigned int jent_osr;
+extern unsigned int jent_flags;
 
 /*
  * Largest chunk handed to jent_read_entropy_safe() in one iteration. The
@@ -52,6 +56,37 @@ extern unsigned int flags;
  * reader can stall other users (readers, ioctl, procfs) of the same instance.
  */
 #define JENT_CHARDEV_READ_BUF_SIZE 32
+
+/*
+ * Concurrent open instances allowed an unprivileged caller, 0 for unlimited.
+ * Every open allocates a collector of hundreds of kB (up to 512 MB with
+ * JENT_CACHE_ALL), so the world-readable device needs a bound. It is global,
+ * so one caller can hold every slot and keep others out (ENFILE); restrict the
+ * device to a group, or set 0 and rely on the memory cgroup accounting, where
+ * that matters.
+ */
+static unsigned int max_instances = 256;
+module_param(max_instances, uint, S_IRUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(max_instances,
+		 "Maximum concurrent unprivileged /dev/jitterentropy instances (0: unlimited)");
+
+static bool jent_chardev_instance_get(void)
+{
+	if (jent_proc_instance_inc(max_instances))
+		return true;
+
+	/*
+	 * Exempt, so a device filled by unprivileged callers stays usable. Only
+	 * asked once the limit would refuse, so an open that fits neither logs
+	 * an LSM audit denial nor marks the caller PF_SUPERPRIV.
+	 */
+	return capable(CAP_SYS_RESOURCE) && jent_proc_instance_inc(0);
+}
+
+static void jent_chardev_instance_put(void)
+{
+	jent_proc_instance_dec();
+}
 
 /*
  * Subdirectory /proc/jitterentropy/instances holding one status file per open
@@ -72,39 +107,17 @@ struct jent_chardev_ctx {
 
 /*
  * Emit the JSON status string of a single open instance, exported read-only as
- * /proc/jitterentropy/instances/<id>. Holds the instance lock (as read()/ioctl()
- * do) so the collector cannot be reallocated on health-test recovery while
- * jent_status() runs.
+ * /proc/jitterentropy/instances/<id>. The shared renderer holds the instance
+ * lock (as read()/ioctl() do) so the collector cannot be reallocated on
+ * health-test recovery while jent_status() runs. __maybe_unused: without
+ * CONFIG_PROC_FS proc_create_single_data() discards it.
  */
-static int jent_chardev_instance_status_show(struct seq_file *m, void *v)
+static int __maybe_unused jent_chardev_instance_status_show(struct seq_file *m,
+							    void *v)
 {
 	struct jent_chardev_ctx *ctx = m->private;
-	char *buf;
-	int ret;
 
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	if (mutex_lock_interruptible(&ctx->lock)) {
-		kvfree(buf);
-		return -ERESTARTSYS;
-	}
-	if (ctx->entropy_collector)
-		ret = jent_status(ctx->entropy_collector, buf,
-				  JENT_STATUS_MAX_LEN);
-	else
-		ret = -1;
-	mutex_unlock(&ctx->lock);
-
-	if (ret) {
-		kvfree(buf);
-		return -EIO;
-	}
-
-	seq_puts(m, buf);
-	kvfree(buf);
-	return 0;
+	return jent_status_seq_show(m, &ctx->lock, &ctx->entropy_collector);
 }
 
 /*
@@ -119,10 +132,11 @@ static void jent_chardev_instance_proc_create(struct jent_chardev_ctx *ctx)
 	if (!jent_chardev_proc_dir)
 		return;
 
-	if (jent_uuid(ctx->entropy_collector, name, sizeof(name)))
+	if (jent_entropy_collector_uuid(ctx->entropy_collector, name,
+					sizeof(name)))
 		return;
 
-	ctx->proc = proc_create_single_data(name, 0444, jent_chardev_proc_dir,
+	ctx->proc = proc_create_single_data(name, 0400, jent_chardev_proc_dir,
 					    jent_chardev_instance_status_show,
 					    ctx);
 	if (!ctx->proc)
@@ -134,16 +148,30 @@ static int jent_chardev_open(struct inode *inode, struct file *file)
 {
 	struct jent_chardev_ctx *ctx;
 
-	ctx = kvzalloc(sizeof(*ctx), GFP_KERNEL);
-	if (!ctx)
+	if (!jent_chardev_instance_get())
+		return -ENFILE;
+
+	ctx = kvzalloc(sizeof(*ctx), GFP_KERNEL_ACCOUNT);
+	if (!ctx) {
+		jent_chardev_instance_put();
 		return -ENOMEM;
+	}
 
 	mutex_init(&ctx->lock);
 
-	ctx->entropy_collector = jent_entropy_collector_alloc(osr, flags);
+	ctx->entropy_collector =
+		jent_entropy_collector_alloc(jent_osr, jent_flags);
 	if (!ctx->entropy_collector) {
+		/*
+		 * The allocation also fails when the collector's startup gives
+		 * up - its health tests exhausted the oversampling rates on a
+		 * poor clock - which the NULL does not tell apart from memory
+		 * running out. Say so, rather than leave it to the ENOMEM.
+		 */
+		pr_warn_ratelimited("jitterentropy: no entropy collector for /dev/jitterentropy: its startup failed or memory ran out\n");
 		mutex_destroy(&ctx->lock);
 		kvfree(ctx);
+		jent_chardev_instance_put();
 		return -ENOMEM;
 	}
 
@@ -152,11 +180,7 @@ static int jent_chardev_open(struct inode *inode, struct file *file)
 	jent_selftest_instance_init(&ctx->selftest, &ctx->lock,
 				    &ctx->entropy_collector);
 
-	/*
-	 * Account for this instance in /proc/jitterentropy/statistics and
-	 * publish its status under /proc/jitterentropy/instances/<uuid>.
-	 */
-	jent_proc_instance_inc();
+	/* Publish its status under /proc/jitterentropy/instances/<uuid>. */
 	jent_chardev_instance_proc_create(ctx);
 
 	return 0;
@@ -185,7 +209,7 @@ static int jent_chardev_release(struct inode *inode, struct file *file)
 	kvfree(ctx);
 	file->private_data = NULL;
 
-	jent_proc_instance_dec();
+	jent_chardev_instance_put();
 
 	return 0;
 }
@@ -194,7 +218,14 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 				 size_t nbytes, loff_t *ppos)
 {
 	struct jent_chardev_ctx *ctx = file->private_data;
-	u8 *tmp;
+	/*
+	 * Small and fixed (see JENT_CHARDEV_READ_BUF_SIZE), and this is a
+	 * read(2) handler called straight from vfs_read(), so the frame it
+	 * adds is affordable and an allocation per read is not worth its error
+	 * path. Wiped before returning, as the kvfree_sensitive() it replaces
+	 * did.
+	 */
+	u8 tmp[JENT_CHARDEV_READ_BUF_SIZE];
 	ssize_t ret = 0;
 
 	if (!ctx)
@@ -202,10 +233,6 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 
 	if (!nbytes)
 		return 0;
-
-	tmp = kvmalloc(JENT_CHARDEV_READ_BUF_SIZE, GFP_KERNEL);
-	if (!tmp)
-		return -ENOMEM;
 
 	/*
 	 * A non-blocking reader must not sleep on the instance lock and is
@@ -251,7 +278,9 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 		 * It returns the number of generated bytes (== towork) or a
 		 * negative error code on a permanent/generic failure -
 		 * JENT_ERR_SELFTEST after a failed run of this instance's
-		 * self test included.
+		 * self test included - or on an intermittent one it could
+		 * not recover from for want of memory, which a later read
+		 * retries.
 		 */
 		rc = jent_read_entropy_safe(&ctx->entropy_collector, tmp,
 					    towork);
@@ -262,7 +291,7 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 			 * Map the error; panics under FIPS if the health
 			 * test failure is permanent.
 			 */
-			int err = jent_map_read_error(rc);
+			int err = jent_map_user_read_error(rc);
 
 			if (ret == 0)
 				ret = err;
@@ -292,108 +321,8 @@ static ssize_t jent_chardev_read(struct file *file, char __user *buf,
 			cond_resched();
 	}
 
-	kvfree_sensitive(tmp, JENT_CHARDEV_READ_BUF_SIZE);
+	memzero_explicit(tmp, sizeof(tmp));
 	return ret;
-}
-
-/*
- * Serialize the JSON status string of the per-open Jitter RNG instance into a
- * user-provided buffer.
- *
- * The Jitter RNG status is derived from the state of the entropy collector, so
- * the collector lock is held while jent_status() runs: the read path may
- * reallocate the collector on health-test recovery, and this prevents a
- * concurrent read() from freeing it underneath us.
- */
-static long jent_chardev_ioctl_status(struct jent_chardev_ctx *ctx,
-				      void __user *arg)
-{
-	struct jent_status_ioctl status;
-	char *buf;
-	size_t slen;
-	long ret;
-
-	if (copy_from_user(&status, arg, sizeof(status)))
-		return -EFAULT;
-
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	if (mutex_lock_interruptible(&ctx->lock)) {
-		ret = -ERESTARTSYS;
-		goto out;
-	}
-
-	/*
-	 * Without a collector, jent_status() would emit a version-only JSON
-	 * stub; report an error instead, matching the per-instance proc file.
-	 */
-	if (ctx->entropy_collector)
-		ret = jent_status(ctx->entropy_collector, buf,
-				  JENT_STATUS_MAX_LEN);
-	else
-		ret = -1;
-	mutex_unlock(&ctx->lock);
-
-	if (ret) {
-		ret = -EIO;
-		goto out;
-	}
-
-	/* Number of bytes to copy out, including the terminating NUL. */
-	slen = strlen(buf) + 1;
-
-	if (status.length < slen) {
-		/* Buffer too small: report the required size to userspace. */
-		status.length = slen;
-		if (copy_to_user(arg, &status, sizeof(status)))
-			ret = -EFAULT;
-		else
-			ret = -EOVERFLOW;
-		goto out;
-	}
-
-	if (copy_to_user(u64_to_user_ptr(status.buf), buf, slen)) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	status.length = slen;
-	if (copy_to_user(arg, &status, sizeof(status))) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	ret = 0;
-
-out:
-	kvfree(buf);
-	return ret;
-}
-
-/*
- * The collector lock is held while the value is taken, as for the status
- * handler above; the copy to userspace can fault, so it follows the unlock.
- */
-static long jent_chardev_ioctl_field(struct jent_chardev_ctx *ctx,
-				     unsigned int cmd, void __user *arg)
-{
-	struct jent_ioctl_field field;
-	int ret;
-
-	if (mutex_lock_interruptible(&ctx->lock))
-		return -ERESTARTSYS;
-	ret = jent_ioctl_field_get(ctx->entropy_collector, cmd, &field);
-	mutex_unlock(&ctx->lock);
-
-	if (ret)
-		return ret;
-
-	if (copy_to_user(arg, &field.value, field.size))
-		return -EFAULT;
-
-	return 0;
 }
 
 static long jent_chardev_ioctl(struct file *file, unsigned int cmd,
@@ -404,15 +333,23 @@ static long jent_chardev_ioctl(struct file *file, unsigned int cmd,
 	if (!ctx)
 		return -EFAULT;
 
+	/*
+	 * The status and field handlers take ctx->lock themselves: the read
+	 * path may reallocate the collector on health-test recovery, so it must
+	 * not be read unlocked.
+	 */
 	switch (cmd) {
 	case JENT_IOCSTATUS:
-		return jent_chardev_ioctl_status(ctx, (void __user *)arg);
+		return jent_status_to_user(&ctx->lock, &ctx->entropy_collector,
+					   (void __user *)arg);
 	case JENT_IOCSELFTEST:
 		/* The run of this instance; it takes ctx->lock itself. */
 		return jent_ioctl_selftest(&ctx->selftest);
 	default:
 		if (jent_ioctl_is_field(cmd))
-			return jent_chardev_ioctl_field(ctx, cmd,
+			return jent_ioctl_field_to_user(&ctx->lock,
+							&ctx->entropy_collector,
+							cmd,
 							(void __user *)arg);
 		return -ENOTTY;
 	}
@@ -434,30 +371,47 @@ static struct miscdevice jent_chardev_misc = {
 	.mode	= 0444,
 };
 
+/*
+ * Whether misc_register() succeeded. A failure here does not fail the module
+ * load (see jent_mod_init()), so the module exit runs with the device never
+ * registered - and misc_deregister() of such a device walks a list_head that
+ * was never linked.
+ */
+static bool jent_chardev_registered;
+
 int __init jent_chardev_init(void)
 {
-	int ret = misc_register(&jent_chardev_misc);
-
-	if (ret) {
-		pr_err("jitterentropy: failed to register character device: %d\n",
-		       ret);
-		return ret;
-	}
-
-	pr_info("jitterentropy: character device /dev/%s registered\n",
-		jent_chardev_misc.name);
+	int ret;
 
 	/*
+	 * Before the device can be opened: an open() racing the module load
+	 * would otherwise get an instance without its status file.
+	 *
 	 * Non-fatal: the device works without the per-instance status export
 	 * (and jent_proc_dir is NULL without CONFIG_PROC_FS).
 	 */
 	if (jent_proc_dir) {
-		jent_chardev_proc_dir = proc_mkdir(JENT_CHARDEV_PROC_DIRNAME,
-						   jent_proc_dir);
+		/* Root only: the file names are the instances' UUIDs. */
+		jent_chardev_proc_dir = proc_mkdir_mode(JENT_CHARDEV_PROC_DIRNAME,
+							0500, jent_proc_dir);
 		if (!jent_chardev_proc_dir)
 			pr_warn("jitterentropy: failed to create /proc/%s/%s\n",
 				JENT_PROC_DIRNAME, JENT_CHARDEV_PROC_DIRNAME);
 	}
+
+	ret = misc_register(&jent_chardev_misc);
+	if (ret) {
+		pr_err("jitterentropy: failed to register character device: %d\n",
+		       ret);
+		proc_remove(jent_chardev_proc_dir);
+		jent_chardev_proc_dir = NULL;
+		return ret;
+	}
+
+	jent_chardev_registered = true;
+
+	pr_info("jitterentropy: character device /dev/%s registered\n",
+		jent_chardev_misc.name);
 
 	return 0;
 }
@@ -469,8 +423,15 @@ void jent_chardev_exit(void)
 	 * the module cannot be unloaded while instances exist. By the time this
 	 * runs there are therefore no per-instance files left below the
 	 * directory, and removing it cannot race a release().
+	 *
+	 * Only undo a registration that happened: a failed jent_chardev_init()
+	 * leaves the module loaded without the device, and already removed the
+	 * proc directory it may have created.
 	 */
-	misc_deregister(&jent_chardev_misc);
+	if (jent_chardev_registered) {
+		misc_deregister(&jent_chardev_misc);
+		jent_chardev_registered = false;
+	}
 
 	proc_remove(jent_chardev_proc_dir);
 	jent_chardev_proc_dir = NULL;

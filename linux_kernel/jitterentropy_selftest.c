@@ -21,7 +21,7 @@
 #include "jitterentropy_selftest.h"
 
 /* Shared with the other interfaces, see jitterentropy_mod.c. */
-extern unsigned int verbose;
+extern unsigned int jent_verbose;
 
 /*
  * Seconds between two runs of the known answer tests of each instance. 0 by
@@ -36,14 +36,27 @@ extern unsigned int verbose;
 static unsigned int selftest_interval;
 module_param(selftest_interval, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(selftest_interval,
-		 "Seconds between two runs of the cryptographic self test of each instance (default 0, no periodic run)");
+		 "Seconds between two runs of the cryptographic self test of each instance (default 0, no periodic run; maximum 2592000, less on 32 bit kernels with HZ of 500 and above)");
 
 /*
- * The upper bound exists so the delay computation below stays within an
- * unsigned long on 32 bit systems: 30 days at HZ=1000 is 2.6e9 jiffies, which
- * still fits, and no periodic self test regime asks for a longer interval.
+ * No periodic self test regime asks for more than 30 days. The delay in
+ * jiffies is bounded further by MAX_JIFFY_OFFSET: the timer wheel's
+ * calc_wheel_index() treats a delta with the sign bit of a long set as already
+ * expired, so on a 32 bit kernel at HZ=1000 anything from 2^31 jiffies (24.8
+ * days) on would fire at once and requeue itself in a tight loop, even though
+ * the product still fits an unsigned long. MAX_JIFFY_OFFSET (LONG_MAX / 2) is
+ * the bound the kernel's own conversions clamp to; on 32 bit it cuts the
+ * maximum to 2147483 seconds (24.8 days) at HZ=500 and 1073741 seconds (12.4
+ * days) at HZ=1000, and leaves 30 days everywhere else.
+ *
+ * Delays beyond the wheel's last level (WHEEL_TIMEOUT_CUTOFF, about 12 days
+ * at HZ=1000 and 15 days at HZ=100) are shortened by the timer core to that
+ * range, so the longest intervals run somewhat early - harmless for a self
+ * test.
  */
-#define JENT_SELFTEST_INTERVAL_MAX (30U * 24U * 60U * 60U)
+#define JENT_SELFTEST_INTERVAL_MAX					\
+	((unsigned int)min_t(unsigned long, 30UL * 24UL * 60UL * 60UL,	\
+			     MAX_JIFFY_OFFSET / HZ))
 
 /*
  * Statistics across all instances, so what
@@ -71,6 +84,14 @@ void jent_selftest_get_stats(struct jent_selftest_stats *stats)
  * health test failure (see jitterentropy_error.h). Otherwise a bound run
  * marks its instance (the library's JENT_ERR_SELFTEST gate), which from then
  * on refuses output - every other instance keeps delivering.
+ *
+ * A bound run also fails, without running the tests, on an instance the
+ * library already stopped: after a failed self test of a health-test recovery
+ * (the conditioning KAT or the GCD self test) jent_selftest() reports EHASH,
+ * as a passing run must not vouch for an instance that delivers nothing. It is
+ * logged and counted as a failed run like any other; under fips=1 the read
+ * that hit the recovery failure has already panicked (see
+ * jitterentropy_error.h).
  */
 static int jent_selftest_execute(struct rand_data *ec)
 {
@@ -83,7 +104,8 @@ static int jent_selftest_execute(struct rand_data *ec)
 	 * Name the instance in every verdict logged - an unbound run carries
 	 * no UUID and goes unnamed.
 	 */
-	if (ec && !jent_uuid(ec, uuid, sizeof(uuid)) && uuid[0])
+	if (ec && !jent_entropy_collector_uuid(ec, uuid, sizeof(uuid)) &&
+	    uuid[0])
 		snprintf(instance, sizeof(instance), " (instance %s)", uuid);
 	else
 		instance[0] = '\0';
@@ -91,7 +113,7 @@ static int jent_selftest_execute(struct rand_data *ec)
 	atomic64_inc(&jent_selftest_runs);
 
 	if (!ret) {
-		if (verbose)
+		if (jent_verbose)
 			pr_info("jitterentropy: cryptographic self test passed%s\n",
 				instance);
 
@@ -120,7 +142,8 @@ static void jent_selftest_instance_schedule(struct jent_selftest_instance *st)
 	 * A periodic timer with no deadline of its own, so it should not be
 	 * what wakes an idle CPU on a kernel in power-efficient mode. That
 	 * workqueue always exists; without the mode it is the per-CPU system
-	 * workqueue.
+	 * workqueue. The delay is at most MAX_JIFFY_OFFSET, see
+	 * JENT_SELFTEST_INTERVAL_MAX.
 	 */
 	queue_delayed_work(system_power_efficient_wq, &st->work,
 			   (unsigned long)selftest_interval * HZ);
