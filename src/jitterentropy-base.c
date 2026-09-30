@@ -806,8 +806,10 @@ static struct rand_data
 	if (!(flags & JENT_DISABLE_MEMORY_ACCESS)) {
 		flags = jent_update_memsize(flags, 0);
 		memsize = jent_memsize(flags);
+
+		/* Never locked: the region is only timed, never output. */
 		entropy_collector->mem =
-			(unsigned char *)jent_zalloc(memsize, flags);
+			(unsigned char *)jent_zalloc_unlocked(memsize);
 
 		if (entropy_collector->mem == NULL)
 			goto err;
