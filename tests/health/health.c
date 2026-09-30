@@ -252,6 +252,13 @@ static void jent_test_init(struct rand_data *ec, unsigned int osr,
 
 	jent_health_init(ec, inittype);
 	ec->rct_mem_nosr = jent_test_rct_mem_nosr(osr);
+
+	/*
+	 * jent_health_init() lets the stuck test take a new source's first
+	 * deltas as its reference. The tests here feed chosen deltas and
+	 * expect them judged from the first one on.
+	 */
+	ec->stuck_prime = 0;
 }
 
 /*

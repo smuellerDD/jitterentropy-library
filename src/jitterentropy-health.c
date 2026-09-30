@@ -303,6 +303,11 @@ static inline void jent_lag_init(struct rand_data *ec, unsigned int osr)
 	(void)osr;
 }
 
+static inline void jent_lag_reset(struct rand_data *ec)
+{
+	(void)ec;
+}
+
 void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec)
 {
 	new_ec->last_delta = old_ec->last_delta;
@@ -783,6 +788,17 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta)
 	unsigned int stuck = !current_delta || !delta2 || !delta3;
 
 	/*
+	 * A noise source's first deltas only establish the reference of
+	 * delta2 and delta3: unjudged, and reported stuck so that they are
+	 * measured again rather than counted.
+	 */
+	if (ec->stuck_prime) {
+		ec->stuck_prime--;
+		jent_lag_insert(ec, current_delta);
+		return 1;
+	}
+
+	/*
 	 * Insert the result of the comparison of two back-to-back time
 	 * deltas.
 	 */
@@ -894,6 +910,16 @@ int jent_health_init(struct rand_data *ec, enum jent_health_init_type inittype)
 	 */
 	if (!ec->osr || ec->osr > JENT_MAX_OSR)
 		return 1;
+
+	/*
+	 * Each startup stage samples another noise source: restart the APT and
+	 * the lag predictor, and let the stuck test take its reference from the
+	 * new source's first deltas instead of judging them against the old
+	 * source's lag state.
+	 */
+	jent_apt_reset(ec);
+	jent_lag_reset(ec);
+	ec->stuck_prime = JENT_STUCK_PRIME;
 
 	jent_lag_init(ec, ec->osr);
 	switch (inittype) {
