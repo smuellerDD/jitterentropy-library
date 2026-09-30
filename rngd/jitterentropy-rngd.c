@@ -153,11 +153,18 @@ static unsigned int jent_osr = 1;
  * that new seed is added after every (force reseed wakeups) * (alarm period).
  * PHASE1: 120(force reseed wakeups) * 5(alarm period) == 600s
  * PHASE2: 12(force reseed wakeups) * 50(alarm period) == 600s
+ * These are the defaults of --phase1 and --phase2.
  */
 #define FORCE_RESEED_WAKEUPS_PHASE1	120
 #define ALARM_PERIOD_PHASE1	5
 #define FORCE_RESEED_WAKEUPS_PHASE2	12
 #define ALARM_PERIOD_PHASE2	50
+static unsigned int alarm_period[2] = {
+	ALARM_PERIOD_PHASE1, ALARM_PERIOD_PHASE2
+};
+static unsigned int force_reseed_wakeups[2] = {
+	FORCE_RESEED_WAKEUPS_PHASE1, FORCE_RESEED_WAKEUPS_PHASE2
+};
 #define ENTROPYAVAIL "/proc/sys/kernel/random/entropy_avail"
 #define ENTROPYTHRESH "/proc/sys/kernel/random/write_wakeup_threshold"
 #define LRNG_FILE "/proc/lrng_type"
@@ -297,6 +304,12 @@ static void usage(void)
 	fprintf(stderr, "\t-I --disable-internal-timer\tAdds JENT_DISABLE_INTERNAL_TIMER to --flags\n");
 	fprintf(stderr, "\t-f --flags\tInteger with flags used to allocate Jitter RNG\n");
 	fprintf(stderr, "\t-o --osr\tInteger with OSR used to allocate Jitter RNG\n");
+	fprintf(stderr, "\t   --phase1 PERIOD:WAKEUPS\tAlarm period in seconds and wakeups until\n");
+	fprintf(stderr, "\t           \tthe forced reseed that ends phase 1 (default %u:%u)\n",
+		ALARM_PERIOD_PHASE1, FORCE_RESEED_WAKEUPS_PHASE1);
+	fprintf(stderr, "\t   --phase2 PERIOD:WAKEUPS\tThe same for every later forced reseed\n");
+	fprintf(stderr, "\t           \t(default %u:%u)\n",
+		ALARM_PERIOD_PHASE2, FORCE_RESEED_WAKEUPS_PHASE2);
 	fprintf(stderr, "\t   --status\tStatus information of the Jitter RNG - invoke with\n");
 	fprintf(stderr, "\t           \tsame flags as used for runtime\n");
 	fprintf(stderr, "\t   --exit-on-error\tCause the daemon to exit on errors\n");
@@ -305,8 +318,12 @@ static void usage(void)
 	exit(1);
 }
 
-/* Convert a command line argument into an unsigned int or bail out */
-static unsigned int parse_uint(const char *str)
+/*
+ * Convert a command line argument up to the character term into an unsigned
+ * int or bail out. Where rest is given, it points behind term.
+ */
+static unsigned int parse_uint_until(const char *str, char term,
+				     const char **rest)
 {
 	char *endptr = NULL;
 	unsigned long val;
@@ -315,14 +332,33 @@ static unsigned int parse_uint(const char *str)
 	val = strtoul(str, &endptr, 10);
 
 	/* Reject empty strings, trailing garbage and out-of-range values */
-	if (errno || endptr == str || *endptr != '\0')
+	if (errno || endptr == str || *endptr != term)
 		usage();
+	if (rest)
+		*rest = endptr + 1;
 #if ULONG_MAX > UINT_MAX
 	if (val > UINT_MAX)
 		usage();
 #endif
 
 	return (unsigned int)val;
+}
+
+static unsigned int parse_uint(const char *str)
+{
+	return parse_uint_until(str, '\0', NULL);
+}
+
+/* PERIOD:WAKEUPS of --phase1 / --phase2, zero would stop the alarm */
+static void parse_phase(const char *str, unsigned int phase)
+{
+	unsigned int period = parse_uint_until(str, ':', &str);
+	unsigned int wakeups = parse_uint(str);
+
+	if (!period || !wakeups)
+		usage();
+	alarm_period[phase] = period;
+	force_reseed_wakeups[phase] = wakeups;
 }
 
 static void parse_opts(int argc, char *argv[])
@@ -348,6 +384,8 @@ static void parse_opts(int argc, char *argv[])
 			{"force-internal-timer", 0, 0, 0},
 			{"disable-internal-timer", 0, 0, 0},
 			{"fips", 0, 0, 0},
+			{"phase1", 1, 0, 0},
+			{"phase2", 1, 0, 0},
 			{0, 0, 0, 0}
 		};
 		c = getopt_long(argc, argv, "svp:hf:o:lFniI", opts, &opt_index);
@@ -433,6 +471,16 @@ static void parse_opts(int argc, char *argv[])
 			/* fips */
 			case 14:
 				jent_flags_add |= JENT_FORCE_FIPS;
+				break;
+
+			/* phase1 */
+			case 15:
+				parse_phase(optarg, 0);
+				break;
+
+			/* phase2 */
+			case 16:
+				parse_phase(optarg, 1);
 				break;
 
 			default:
@@ -1039,14 +1087,14 @@ static void process_alarm(void)
 {
 	int entropy = 0, thresh = 0;
 	ssize_t written = 0;
-	static unsigned int force_reseed = FORCE_RESEED_WAKEUPS_PHASE1;
-	static unsigned int alarm_period = ALARM_PERIOD_PHASE1;
+	static unsigned int phase = 0;
+	static unsigned int wakeups = 0;
 
 	dolog(JENT_LOG_VERBOSE, "Wakeup call for alarm on %s", ENTROPYAVAIL);
 
-	if (--force_reseed == 0) {
-		force_reseed = FORCE_RESEED_WAKEUPS_PHASE2;
-		alarm_period = ALARM_PERIOD_PHASE2;
+	if (++wakeups >= force_reseed_wakeups[phase]) {
+		wakeups = 0;
+		phase = 1;
 		dolog(JENT_LOG_DEBUG, "Force reseed");
 		written = gather_entropy_retry(&Random);
 		dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
@@ -1067,7 +1115,7 @@ static void process_alarm(void)
 	written = gather_entropy_retry(&Random);
 	dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
 out:
-	install_alarm(alarm_period);
+	install_alarm(alarm_period[phase]);
 	return;
 }
 
@@ -1469,7 +1517,7 @@ int main(int argc, char *argv[])
 	if (!foreground)
 		daemonize();
 	install_term();
-	install_alarm(ALARM_PERIOD_PHASE1);
+	install_alarm(alarm_period[0]);
 	select_fd();
 	/* NOTREACHED */
 
