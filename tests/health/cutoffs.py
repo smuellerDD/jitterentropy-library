@@ -25,8 +25,10 @@ The cutoffs:
     for so the test can still fail. margin is 1, or 8 for the NTG.1 tables.
 
   Lag predictor, global cutoff
-    qbinom(1 - alpha, JENT_LAG_WINDOW_SIZE - JENT_LAG_HISTORY_SIZE,
-           2^(-1/osr))
+    C = 1 + qbinom(1 - alpha, JENT_LAG_WINDOW_SIZE - JENT_LAG_HISTORY_SIZE,
+                   2^(-1/osr))
+    one above the quantile, because the test fires once the count of correct
+    predictions reaches C, so P(X >= C) is what has to stay within alpha.
 
   Lag predictor, local cutoff
     The shortest run of correct predictions whose probability of occurring
@@ -229,7 +231,8 @@ def apt_table(margin, alpha):
 
 def lag_global_table(alpha):
     n = LAG_WINDOW_SIZE - LAG_HISTORY_SIZE
-    return [qbinom(alpha, n, power(2, mpf(-1) / osr))
+    # jent_lag_insert() fires at count >= C: P(X >= qbinom + 1) <= alpha.
+    return [1 + qbinom(alpha, n, power(2, mpf(-1) / osr))
             for osr in range(1, MAX_OSR + 1)]
 
 
