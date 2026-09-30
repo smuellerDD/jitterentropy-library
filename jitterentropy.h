@@ -452,6 +452,23 @@ typedef int (*jent_notime_start_routine)(void *);
 /* Forward declaration of opaque value */
 struct rand_data;
 
+/*
+ * Thread safety - the library takes no locks.
+ *
+ * - One entropy collector belongs to one thread at a time: jent_read_entropy,
+ *   jent_read_entropy_safe and jent_status access its state unsynchronized.
+ *   Separate collectors are independent.
+ * - jent_entropy_set_notime_cpu, jent_entropy_switch_notime_impl and
+ *   jent_set_fips_failure_callback must be called before the first
+ *   jent_entropy_init* and before any thread generates; afterwards they
+ *   return -EAGAIN.
+ * - jent_entropy_init and jent_entropy_init_ex may run on several threads at
+ *   once.
+ * - jent_selftest is reentrant and may run in parallel with jent_read_entropy,
+ *   but not with jent_read_entropy_safe on the same collector: its recovery
+ *   frees the collector the verdict would be written to. See below.
+ */
+
 /* Number of low bits of the time value that we want to consider */
 /* get raw entropy */
 JENT_PRIVATE_STATIC
@@ -479,7 +496,10 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags);
  * lifetime of a long-running process.
  *
  * They run on stack-local state alone: callable at any time, from any thread,
- * in parallel with entropy collection, allocating nothing and never blocking.
+ * in parallel with jent_read_entropy, allocating nothing and never blocking.
+ * Not in parallel with jent_read_entropy_safe on the same instance, though:
+ * its recovery frees the instance and replaces it, and a verdict bound to the
+ * old pointer would then be written into freed memory.
  *
  * ec binds the verdict to an instance: on failure that instance stops
  * producing output - jent_read_entropy and jent_read_entropy_safe return

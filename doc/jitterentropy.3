@@ -144,7 +144,12 @@ on failure, the same code
 .BR jent_entropy_init ()
 reports for it. The tests run on stack-local state alone, allocate nothing and
 never block; they may therefore be called from any thread at any time,
-including in parallel with entropy collection and before initialization.
+including in parallel with
+.BR jent_read_entropy ()
+and before initialization - but not in parallel with
+.BR jent_read_entropy_safe ()
+on the same instance, whose recovery frees the instance a verdict would be
+written to.
 The
 .IR entropy_collector
 argument binds the verdict to an instance: on failure, that instance is
