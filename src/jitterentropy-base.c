@@ -298,6 +298,32 @@ static void jent_stack_scrub_frame(void)
  * Random Number Generation
  ***************************************************************************/
 
+/* The JENT_ERR_* code of a non-zero set of health failure bits. */
+static int jent_health_err(unsigned int health_test_result)
+{
+	if (health_test_result & JENT_RCT_FAILURE_PERMANENT)
+		return JENT_ERR_RCT_PERMANENT;
+	if (health_test_result & JENT_APT_FAILURE_PERMANENT)
+		return JENT_ERR_APT_PERMANENT;
+	if (health_test_result & JENT_LAG_FAILURE_PERMANENT)
+		return JENT_ERR_LAG_PERMANENT;
+	if (health_test_result & JENT_RCT_MEM_FAILURE_PERMANENT)
+		return JENT_ERR_RCT_MEM_PERMANENT;
+	if (health_test_result & JENT_RCT_FAILURE)
+		return JENT_ERR_RCT;
+	if (health_test_result & JENT_APT_FAILURE)
+		return JENT_ERR_APT;
+	if (health_test_result & JENT_RCT_MEM_FAILURE)
+		return JENT_ERR_RCT_MEM;
+
+	/*
+	 * The only remaining defined bit is JENT_LAG_FAILURE. A hypothetical
+	 * unknown bit lands here as well: a health test failure must never
+	 * result in a success return.
+	 */
+	return JENT_ERR_LAG;
+}
+
 /**
  * Entry function: Obtain entropy for the caller.
  *
@@ -388,32 +414,7 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		jent_random_data(ec);
 
 		if ((health_test_result = jent_health_failure(ec))) {
-			if (health_test_result & JENT_RCT_FAILURE_PERMANENT)
-				ret = JENT_ERR_RCT_PERMANENT;
-			else if (health_test_result &
-				 JENT_APT_FAILURE_PERMANENT)
-				ret = JENT_ERR_APT_PERMANENT;
-			else if (health_test_result &
-				 JENT_LAG_FAILURE_PERMANENT)
-				ret = JENT_ERR_LAG_PERMANENT;
-			else if (health_test_result &
-				 JENT_RCT_MEM_FAILURE_PERMANENT)
-				ret = JENT_ERR_RCT_MEM_PERMANENT;
-			else if (health_test_result & JENT_RCT_FAILURE)
-				ret = JENT_ERR_RCT;
-			else if (health_test_result & JENT_APT_FAILURE)
-				ret = JENT_ERR_APT;
-			else if (health_test_result & JENT_RCT_MEM_FAILURE)
-				ret = JENT_ERR_RCT_MEM;
-			else
-				/*
-				 * The only remaining defined bit is
-				 * JENT_LAG_FAILURE. A hypothetical unknown bit
-				 * lands here as well: a health test failure
-				 * must never result in a success return.
-				 */
-				ret = JENT_ERR_LAG;
-
+			ret = jent_health_err(health_test_result);
 			goto err;
 		}
 
