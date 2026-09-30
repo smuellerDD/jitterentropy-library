@@ -18,11 +18,12 @@
  */
 
 /*
- * Compile for older kernels (< 6.13):
- * gcc -Wall -pedantic -Wextra -I../../.. -I../../../linux_kernel -o getrawentropy getrawentropy.c
- *
- * Compile for newer kernels (>= 6.13):
+ * Compile for the out-of-tree module of linux_kernel/ (the default
+ * --debugfs-file), and for the Jitter RNG of the vanilla kernel >= 6.13:
  * gcc -Wall -pedantic -Wextra -I../../.. -I../../../linux_kernel -DRAW_DATATYPE_U64 -o getrawentropy getrawentropy.c
+ *
+ * Compile for the Jitter RNG of the vanilla kernel < 6.13 only:
+ * gcc -Wall -pedantic -Wextra -I../../.. -I../../../linux_kernel -o getrawentropy getrawentropy.c
  */
 
 #include <sys/types.h>
@@ -50,9 +51,12 @@
 #define JENT_TEST_MEMACCLOOP (1<<16)
 
 /*
- * Starting with Linux kernel version 6.13, the data size changed from u32 to
- * u64 (see crypto/jitterentropy-testing.c:jent_testing_rb). Therefore, starting
- * from this kernel onwards, this tool MUST be compiled with -DRAW_DATATYPE_U64.
+ * The out-of-tree module (linux_kernel/jitterentropy_testing.c) delivers u64
+ * samples only and rejects reads of any other size with EINVAL, so this tool
+ * MUST be compiled with -DRAW_DATATYPE_U64 for it, whatever the kernel
+ * version. The vanilla kernel's interface changed its data size from u32 to
+ * u64 with Linux 6.13 (see crypto/jitterentropy-testing.c:jent_testing_rb):
+ * only for the vanilla kernel before 6.13 compile without it.
  */
 #ifdef RAW_DATATYPE_U64
 
@@ -92,7 +96,7 @@ static int parse_ulong(const char *str, unsigned long *val)
 	errno = 0;
 	*val = strtoul(str, &endptr, 10);
 	if (endptr == str || *endptr != '\0' || errno != 0) {
-		printf("Invalid numeric value \"%s\"\n", str);
+		fprintf(stderr, "Invalid numeric value \"%s\"\n", str);
 		return -EINVAL;
 	}
 	return 0;
@@ -110,18 +114,26 @@ static int write_config(const struct opts *opts, const char *file,
 	config = fopen(filename, "r+");
 	/*
 	 * If we cannot open the file, we silently ignore that (e.g. for older)
-	 * variants of the in-kernel Jitter RNG.
+	 * variants of the in-kernel Jitter RNG) - but only for the default of
+	 * 0, which such a kernel records anyway. A requested value that cannot
+	 * be set would record the default configuration under the name of the
+	 * requested one.
 	 */
-	if (!config)
-		return 0;
+	if (!config) {
+		if (!val)
+			return 0;
+		fprintf(stderr, "Cannot set %s to %u: %s (wrong --param-dir, or a kernel without the parameter)\n",
+		        filename, val, strerror(errno));
+		return -EINVAL;
+	}
 
 	/* Create string to write and write it */
 	snprintf(filename, sizeof(filename), "%u", val);
 	len = strlen(filename);
 	written = fwrite(filename, 1, len, config);
 	if (written != len) {
-		printf("Configuration parameters writing to %s failed (%zu written, %zu expected to write)\n",
-		       file, written, len);
+		fprintf(stderr, "Configuration parameters writing to %s failed (%zu written, %zu expected to write)\n",
+		        file, written, len);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -134,8 +146,8 @@ out:
 	 * run with a different osr/flags configuration than requested.
 	 */
 	if (config && fclose(config) != 0 && !ret) {
-		printf("Configuration parameters writing to %s failed: %s\n",
-		       file, strerror(errno));
+		fprintf(stderr, "Configuration parameters writing to %s failed: %s\n",
+		        file, strerror(errno));
 		ret = -EINVAL;
 	}
 	return ret;
@@ -168,8 +180,31 @@ static int getrawentropy(const struct opts *opts)
 		return ret;
 
 	fd = open(opts->debugfs_file, O_RDONLY);
-	if (fd < 0)
-		return errno;
+	if (fd < 0) {
+		int err = errno;
+
+		fprintf(stderr, "Cannot open %s: %s\n", opts->debugfs_file,
+			strerror(err));
+		return err;
+	}
+
+#ifndef RAW_DATATYPE_U64
+	/*
+	 * The out-of-tree module answers its ioctls, the vanilla kernel's
+	 * interface none. Its u64 samples read as u32 pass its size check for
+	 * an even count and come out as interleaved halves.
+	 */
+	{
+		__u32 version;
+
+		if (!ioctl(fd, JENT_IOCVERSION, &version)) {
+			fprintf(stderr, "%s is the out-of-tree module's, which delivers u64 samples: compile with -DRAW_DATATYPE_U64\n",
+				opts->debugfs_file);
+			close(fd);
+			return EINVAL;
+		}
+	}
+#endif
 
 	/*
 	 * A non-default loop count requires the JENT_IOCLOOPCNT ioctl of the
@@ -337,6 +372,7 @@ out:
  * --loopcnt Apply the given loop count value for the operation (i.e. apply it
  *	     to the respecive used noise source(s)) - requires the
  *	     JENT_IOCLOOPCNT ioctl of the out-of-tree module's test interface
+ *	     and is bounded by JENT_LOOPCNT_MAX
  * --max-mem Set the memory size of the memory block used for the memory access
  *	     loop
  * --hashloop Perform the measurement of the hash loop only
@@ -364,7 +400,7 @@ int main(int argc, char * argv[])
 	 * or --status) is a valid invocation.
 	 */
 	if (argc < 2) {
-		printf("%s --samples <NUMSAMPLES> | --debugfs-file <FILE> [ --param-dir <DIR> | --timestamps | --ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>|--status]\n", argv[0]);
+		fprintf(stderr, "%s --samples <NUMSAMPLES> | --debugfs-file <FILE> [ --param-dir <DIR> | --timestamps | --ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--osr <OSR>|--loopcnt <NUM>|--max-mem <NUM>|--hashloop|--memaccess|--all-caches|--hloopcnt <NUM>|--status]\n", argv[0]);
 		return 1;
 	}
 
@@ -376,7 +412,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("OSR value missing\n");
+				fprintf(stderr, "Sample count missing\n");
 				return 1;
 			}
 
@@ -389,15 +425,18 @@ int main(int argc, char * argv[])
 			 * status 0.
 			 */
 			if (!val || val >= UINT_MAX ||
-			    val + 1 > SIZE_MAX / DATASIZE)
+			    val + 1 > SIZE_MAX / DATASIZE) {
+				fprintf(stderr, "Sample count %lu out of range\n",
+				        val);
 				return 1;
+			}
 			opts.samples = (size_t)val;
 		} else if (!strncmp(argv[1], "--debugfs-file", 14) ||
 			   !strncmp(argv[1], "-f", 6)) {
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("debugfs file path missing\n");
+				fprintf(stderr, "debugfs file path missing\n");
 				return 1;
 			}
 
@@ -407,7 +446,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("sysfs parameter directory path missing\n");
+				fprintf(stderr, "sysfs parameter directory path missing\n");
 				return 1;
 			}
 
@@ -437,7 +476,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("OSR value missing\n");
+				fprintf(stderr, "OSR value missing\n");
 				return 1;
 			}
 
@@ -450,17 +489,17 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("Loop count value missing\n");
+				fprintf(stderr, "Loop count value missing\n");
 				return 1;
 			}
 
-			/*
-			 * Mirror the bound of the userspace recording tool
-			 * jitterentropy-hashtime (also enforced by the
-			 * JENT_IOCLOOPCNT ioctl).
-			 */
-			if (parse_ulong(argv[1], &val) || val >= UINT_MAX)
+			/* Checked here for a clearer error than EINVAL. */
+			if (parse_ulong(argv[1], &val) ||
+			    val > JENT_LOOPCNT_MAX) {
+				fprintf(stderr, "Loop count out of range (maximum %u)\n",
+				        JENT_LOOPCNT_MAX);
 				return 1;
+			}
 			opts.loopcnt = val;
 		} else if (!strncmp(argv[1], "--max-mem", 9)) {
 			unsigned long val;
@@ -468,12 +507,14 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("Maximum memory value missing\n");
+				fprintf(stderr, "Maximum memory value missing\n");
 				return 1;
 			}
 
 			if (parse_ulong(argv[1], &val))
 				return 1;
+			/* A repeated option replaces the field. */
+			opts.flags &= ~(unsigned int)JENT_MAX_MEMSIZE_MASK;
 			switch (val) {
 			case 0:
 				/* Allow to set no option */
@@ -539,7 +580,7 @@ int main(int argc, char * argv[])
 				opts.flags |= JENT_MAX_MEMSIZE_512MB;
 				break;
 			default:
-				printf("Unknown maximum memory value\n");
+				fprintf(stderr, "Unknown maximum memory value\n");
 				return 1;
 			}
 		} else if (!strncmp(argv[1], "--hloopcnt", 10)) {
@@ -548,12 +589,14 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("Hash loop count value missing\n");
+				fprintf(stderr, "Hash loop count value missing\n");
 				return 1;
 			}
 
 			if (parse_ulong(argv[1], &val))
 				return 1;
+			/* A repeated option replaces the field. */
+			opts.flags &= ~(unsigned int)JENT_MAX_HASHLOOP_MASK;
 			switch (val) {
 			case 0:
 				opts.flags |= JENT_HASHLOOP_1;
@@ -580,13 +623,13 @@ int main(int argc, char * argv[])
 				opts.flags |= JENT_HASHLOOP_128;
 				break;
 			default:
-				printf("Unknown hashloop value\n");
+				fprintf(stderr, "Unknown hashloop value\n");
 				return 1;
 			}
 		} else if (!strncmp(argv[1], "--status", 8)) {
 			opts.status = 1;
 		} else {
-			printf("Unknown option %s\n", argv[1]);
+			fprintf(stderr, "Unknown option %s\n", argv[1]);
 			return 1;
 		}
 

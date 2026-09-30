@@ -5,7 +5,8 @@ add_executable(getrawentropy getrawentropy.c)
 target_include_directories(getrawentropy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../..
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../linux_kernel)
-# u64 raw samples, as the in-kernel Jitter RNG also delivers since 6.13. For
-# older kernels compile manually without this (see getrawentropy.c).
+# u64 raw samples, as the out-of-tree module always and the vanilla kernel's
+# Jitter RNG since 6.13 deliver. For the vanilla kernel before 6.13 compile
+# manually without this (see getrawentropy.c).
 target_compile_definitions(getrawentropy PRIVATE RAW_DATATYPE_U64)
 install(TARGETS getrawentropy)

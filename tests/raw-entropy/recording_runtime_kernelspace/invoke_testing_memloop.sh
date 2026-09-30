@@ -1,11 +1,17 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # This test is intended to analyze the memory access entropy rate. It invokes
 # the memory access with all supported memory sizes and measures its execution
 # time.
 #
-# The testing disables the maximum memory check to allow analyzing all
-# memory sizes.
+# Each size is passed to the kernel as the JENT_MAX_MEMSIZE_* field of
+# testing_flags, which the collector takes as given - there is no check to
+# bypass, only the library's 512 MB maximum. The kernel must still be able to
+# allocate the region, though: a size it cannot (such as one above about 64 MB
+# on a 32-bit kernel, whose vmalloc area is small) fails the open of the test
+# interface with ENOMEM, and record() then aborts the script. The sizes
+# recorded before remain; the larger ones are not recorded, and
+# validation-runtime/processdata_memloop.sh analyzes the recorded ones only.
 #
 # Specifically with the deterministic memory access pattern, the measurement
 # is intended to show the access variations of the "just" the cache that
@@ -30,6 +36,8 @@
 #    will always be L1 data cache-misses for accessing the bytes in the memory.
 #
 
+set -euxo pipefail
+
 . ./invoke_testing_helper.sh
 
 raw_entropy_ntg1_memloop()
@@ -42,14 +50,18 @@ raw_entropy_ntg1_memloop()
 	echo "---"
 	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
 
-	local cmdopts="--max-mem ${memsize} --memaccess -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
+	local cmdopts="--max-mem ${memsize} --memaccess -f $DEBUGFS_DIR --param-dir $PARAM_DIR $*"
 
-	$JENT_GETRAWENTROPY -s $NUM_EVENTS $cmdopts > $OUTDIR/${NONIID_MEMLOOP_DATA}_${testtype}${memsize}-0001.data
+	record $OUTDIR/${NONIID_MEMLOOP_DATA}_${testtype}${memsize}-0001.data -s $NUM_EVENTS $cmdopts
 
 	echo "---"
 }
 
 initialization
+commonop_marker_remove
+# A run replaces the whole set: one stopped halfway leaves no sizes of an
+# earlier run for the analysis to take as part of its own.
+memloop_set_remove
 
 ################################################################################
 build
