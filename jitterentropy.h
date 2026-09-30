@@ -234,20 +234,24 @@ extern "C" {
  */
 #define JENT_MAX_MEMSIZE_OFFSET		9
 
-/* Flags field defining the hash loop */
-#define JENT_FLAGS_TO_HASHLOOP_SHIFT	24
+/*
+ * Flags field defining the hash loop: field value n selects 2^(n - 1) loops,
+ * and 0 - no JENT_HASHLOOP_* flag - the built-in default. JENT_HASHLOOP_1 is
+ * one loop, not the absence of the flag, which is why the field starts at 1.
+ */
+#define JENT_FLAGS_TO_HASHLOOP_SHIFT	23
 #define JENT_HASHLOOP_TO_FLAGS(val)	((val) << JENT_FLAGS_TO_HASHLOOP_SHIFT)
-#define JENT_MAX_HASHLOOP_MASK		JENT_HASHLOOP_TO_FLAGS(0x7)
+#define JENT_MAX_HASHLOOP_MASK		JENT_HASHLOOP_TO_FLAGS(0xf)
 #define JENT_FLAGS_TO_HASHLOOP(val)	(((val) >> JENT_FLAGS_TO_HASHLOOP_SHIFT)\
-					 & 0x7)
-#define JENT_HASHLOOP_1			JENT_HASHLOOP_TO_FLAGS(UINT32_C(0))
-#define JENT_HASHLOOP_2			JENT_HASHLOOP_TO_FLAGS(UINT32_C(1))
-#define JENT_HASHLOOP_4			JENT_HASHLOOP_TO_FLAGS(UINT32_C(2))
-#define JENT_HASHLOOP_8			JENT_HASHLOOP_TO_FLAGS(UINT32_C(3))
-#define JENT_HASHLOOP_16		JENT_HASHLOOP_TO_FLAGS(UINT32_C(4))
-#define JENT_HASHLOOP_32		JENT_HASHLOOP_TO_FLAGS(UINT32_C(5))
-#define JENT_HASHLOOP_64		JENT_HASHLOOP_TO_FLAGS(UINT32_C(6))
-#define JENT_HASHLOOP_128		JENT_HASHLOOP_TO_FLAGS(UINT32_C(7))
+					 & 0xf)
+#define JENT_HASHLOOP_1			JENT_HASHLOOP_TO_FLAGS(UINT32_C(1))
+#define JENT_HASHLOOP_2			JENT_HASHLOOP_TO_FLAGS(UINT32_C(2))
+#define JENT_HASHLOOP_4			JENT_HASHLOOP_TO_FLAGS(UINT32_C(3))
+#define JENT_HASHLOOP_8			JENT_HASHLOOP_TO_FLAGS(UINT32_C(4))
+#define JENT_HASHLOOP_16		JENT_HASHLOOP_TO_FLAGS(UINT32_C(5))
+#define JENT_HASHLOOP_32		JENT_HASHLOOP_TO_FLAGS(UINT32_C(6))
+#define JENT_HASHLOOP_64		JENT_HASHLOOP_TO_FLAGS(UINT32_C(7))
+#define JENT_HASHLOOP_128		JENT_HASHLOOP_TO_FLAGS(UINT32_C(8))
 #define JENT_MAX_HASHLOOP		JENT_HASHLOOP_128
 
 /*
@@ -603,7 +607,8 @@ void jent_notime_fini(void *ctx);
 #define EVARVAR		5 /* UNUSED - Timer does not produce variations of
 			     variations (2nd derivation of time is zero) */
 #define EMINVARVAR	6 /* Timer variations of variations is too small */
-#define EPROGERR	7 /* UNUSED - Programming error */
+#define EPROGERR	7 /* Invalid argument, e.g. an osr above JENT_MAX_OSR
+			     or a reserved flag bit */
 #define ESTUCK		8 /* Too many stuck results during init. */
 #define EHEALTH		9 /* Health test failed during initialization */
 #define ERCT		10 /* RCT failed during initialization */

@@ -189,6 +189,19 @@ static inline unsigned int jent_update_hashloop(unsigned int flags,
 	unsigned int max;
 
 	max = JENT_FLAGS_TO_HASHLOOP(flags);
+
+	/*
+	 * Field n is 2^(n - 1) loops, field 0 JENT_HASH_LOOP_DEFAULT: step up
+	 * from the field covering the default, never below it.
+	 */
+	if (!max && inc) {
+		if (JENT_HASH_LOOP_DEFAULT > (UINT32_C(1) << (global_max - 1)))
+			return flags;
+		max = 1;
+		while ((UINT32_C(1) << (max - 1)) < JENT_HASH_LOOP_DEFAULT)
+			max++;
+	}
+
 	max += inc;
 	max = (max > global_max) ? global_max : max;
 
@@ -619,10 +632,14 @@ unsigned int jent_hashloop_cnt(unsigned int flags)
 {
 	unsigned int cnt = JENT_FLAGS_TO_HASHLOOP(flags);
 
+	/* Clamp an unchecked field to the maximum. */
+	if (cnt > JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP))
+		cnt = JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP);
+
 	if (cnt == 0)
 		cnt = JENT_HASH_LOOP_DEFAULT;
 	else
-		cnt = UINT32_C(1) << cnt;
+		cnt = UINT32_C(1) << (cnt - 1);
 
 	return cnt;
 }

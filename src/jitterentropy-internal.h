@@ -445,6 +445,29 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 #define JENT_MAX_OSR	20
 #endif
 
+/* Every bit of the flags word jitterentropy.h gives a meaning. */
+#define JENT_FLAGS_DEFINED						       \
+	(JENT_DISABLE_STIR | JENT_DISABLE_UNBIAS |			       \
+	 JENT_DISABLE_MEMORY_ACCESS | JENT_FORCE_INTERNAL_TIMER |	       \
+	 JENT_DISABLE_INTERNAL_TIMER | JENT_FORCE_FIPS | JENT_NTG1 |	       \
+	 JENT_CACHE_ALL | JENT_FORCE_SECURE_MEM |			       \
+	 JENT_MAX_HASHLOOP_MASK | JENT_MAX_MEMSIZE_MASK)
+
+/*
+ * An undefined bit, or a memory size / hash loop field above its maximum.
+ * Caller flags only: the kernel test interface uses the unused bits. Also
+ * checked by the kernel module before jent_entropy_init_ex(), which would
+ * report them as a failed startup.
+ */
+static inline int jent_flags_invalid(unsigned int flags)
+{
+	return (flags & ~(unsigned int)JENT_FLAGS_DEFINED) ||
+	       JENT_FLAGS_TO_MAX_MEMSIZE(flags) >
+			JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX) ||
+	       JENT_FLAGS_TO_HASHLOOP(flags) >
+			JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP);
+}
+
 /***************************************************************************
  * Jitter RNG State Definition Section
  ***************************************************************************/
