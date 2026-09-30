@@ -31,6 +31,11 @@ endif
 # two were split into one program per subject, so make stopped at the missing
 # unit-arch.c and never built the ten programs that had replaced them.
 NAMES		:= $(sort $(patsubst %.c,%,$(wildcard unit-*.c)))
+# libjitterentropy-kernel talks to the module through <linux/ioctl.h>, so as in
+# CMakeLists.txt its test is built on Linux alone.
+ifneq ($(UNAME_S),Linux)
+NAMES		:= $(filter-out unit-kernel-lib,$(NAMES))
+endif
 
 DESTDIR		:=
 ETCDIR		:= /etc
