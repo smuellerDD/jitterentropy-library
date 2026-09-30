@@ -290,23 +290,22 @@ static void test_zfree_wipes(void)
 }
 
 /*
- * The collector's state, which is what the wipe exists for. Three allocations
+ * The collector's state, which is what the wipe exists for. Two allocations
  * carry it and each is released by jent_entropy_collector_free():
  *
- *   - the entropy pool, the memory the noise source walks,
- *   - the SHAKE state, which holds the collected entropy itself, and
+ *   - the entropy pool, the memory the noise source walks, and
  *   - struct rand_data, with the previous time stamp, the health test
- *     counters and the pointers to the other two.
+ *     counters, the pointer to the pool and, as a member, the SHAKE state,
+ *     which holds the collected entropy itself.
  *
  * One collector per allocation: the watch follows one address at a time, and
- * the free path releases all three in the same call.
+ * the free path releases both in the same call.
  */
 static void test_collector_state_wiped(void)
 {
-	enum { ZE_POOL, ZE_HASH, ZE_STATE, ZE_PARTS };
+	enum { ZE_POOL, ZE_STATE, ZE_PARTS };
 	static const char *names[ZE_PARTS] = {
 		"the entropy pool is wiped on free",
-		"the hash state is wiped on free",
 		"the collector state is wiped on free",
 	};
 	unsigned int part;
@@ -351,10 +350,6 @@ static void test_collector_state_wiped(void)
 		case ZE_POOL:
 			ptr = ec->mem;
 			len = (size_t)ec->memmask + 1;
-			break;
-		case ZE_HASH:
-			ptr = ec->hash_state;
-			len = JENT_SHA_MAX_CTX_SIZE;
 			break;
 		default:
 			ptr = ec;

@@ -452,6 +452,32 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 #define JENT_SHA3_256_SIZE_DIGEST_BITS	256
 #define JENT_SHA3_256_SIZE_DIGEST	(JENT_SHA3_256_SIZE_DIGEST_BITS >> 3)
 
+#define JENT_SHA3_SIZE_BLOCK(bits)	((1600 - 2 * (bits)) >> 3)
+
+#define JENT_SHA3_256_SIZE_BLOCK                                               \
+	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_256_SIZE_DIGEST_BITS)
+
+#define JENT_XDRBG_SIZE_STATE		64
+
+/* Here, not in jitterentropy-sha3.h: struct rand_data embeds it. */
+struct jent_sha_ctx {
+	uint64_t state[25];
+	uint8_t partial[JENT_SHA3_256_SIZE_BLOCK];
+	size_t msg_len;
+	uint8_t r;
+	uint8_t rword;
+	/*
+	 * This implementation only supports up to rate-size digests for XOFs,
+	 * thus the data type can be appropriately small.
+	 */
+	uint8_t digestsize;
+	uint8_t padding;
+	uint8_t initially_seeded:1;
+
+	/* XDRBG scratch, in the collector's secure memory, not on the stack. */
+	uint8_t xdrbg_block[JENT_XDRBG_SIZE_STATE + JENT_SHA3_256_SIZE_DIGEST];
+};
+
 /*
  * The output 256 bits can receive more than 256 bits of min entropy,
  * of course, but the 256-bit output of XDRBG-256(M) can only
@@ -486,7 +512,7 @@ struct rand_data
 	 * of the RNG are marked as SENSITIVE. A user must not
 	 * access that information while the RNG executes its loops to
 	 * calculate the next random value. */
-	void *hash_state;		/* SENSITIVE hash state entropy pool */
+	struct jent_sha_ctx hash_state;	/* SENSITIVE hash state entropy pool */
 	uint64_t prev_time;		/* SENSITIVE Previous time stamp */
 #define DATA_SIZE_BITS (JENT_SHA3_256_SIZE_DIGEST_BITS)
 

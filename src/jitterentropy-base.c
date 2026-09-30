@@ -724,13 +724,10 @@ static struct rand_data
 	flags = jent_update_hashloop(flags, 0);
 	entropy_collector->hashloopcnt = jent_hashloop_cnt(flags);
 
-	if (jent_sha3_alloc(&entropy_collector->hash_state, flags))
-		goto err;
-
 	/*
 	 * Initialize the hash state for the XDRBG
 	 */
-	jent_shake256_init(entropy_collector->hash_state);
+	jent_shake256_init(&entropy_collector->hash_state);
 
 	if ((flags & JENT_FORCE_FIPS) || jent_fips_enabled()) {
 		/*
@@ -950,11 +947,6 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 		jent_notime_unsettick(entropy_collector);
 
 		jent_notime_disable(entropy_collector);
-
-		if (entropy_collector->hash_state != NULL) {
-			jent_sha3_dealloc(entropy_collector->hash_state);
-			entropy_collector->hash_state = NULL;
-		}
 
 		if (entropy_collector->mem != NULL) {
 			/*

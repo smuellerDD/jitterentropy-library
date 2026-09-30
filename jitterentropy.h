@@ -460,10 +460,10 @@ JENT_PRIVATE_STATIC
 int jent_entropy_init_ex(unsigned int osr, unsigned int flags);
 
 /*
- * Run the known answer tests of the conditioning component: SHA3-256 and
- * XDRBG-256. jent_entropy_init* performs them before anything else; they are
- * offered separately for callers that must repeat them over the lifetime of a
- * long-running process.
+ * Run the known answer tests of the conditioning component: SHA3-256,
+ * SHAKE-256 and XDRBG-256. jent_entropy_init* performs them before anything
+ * else; they are offered separately for callers that must repeat them over the
+ * lifetime of a long-running process.
  *
  * They run on stack-local state alone: callable at any time, from any thread,
  * in parallel with entropy collection, allocating nothing and never blocking.

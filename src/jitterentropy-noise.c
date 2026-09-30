@@ -97,10 +97,10 @@ static void jent_hash_insert(struct rand_data *ec, uint64_t time_delta,
 	 * where
 	 *
 	 * seed ← (intermediary_0 || intermediary_1 || ... ||
-	 *	   intermediary_[(osr + safety_factor)*256])
+	 *	   intermediary_[(256 + safety_factor) * osr])
 	 */
-	jent_sha3_update(ec->hash_state, intermediary,
-			 jent_sha3_rate(ec->hash_state));
+	jent_sha3_update(&ec->hash_state, intermediary,
+			 jent_sha3_rate(&ec->hash_state));
 	jent_memset_secure(intermediary, JENT_SIZEOF_INTERMEDIARY);
 }
 
@@ -655,5 +655,5 @@ void jent_random_data(struct rand_data *ec)
 
 void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len)
 {
-	jent_drbg_generate_block(ec->hash_state, (uint8_t*)dst, dst_len);
+	jent_drbg_generate_block(&ec->hash_state, (uint8_t*)dst, dst_len);
 }

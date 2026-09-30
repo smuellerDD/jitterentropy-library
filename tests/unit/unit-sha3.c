@@ -20,6 +20,15 @@
  * DAMAGE.
  */
 
+/*
+ * jitterentropy-arch-memory.c is absorbed below, after the atomic accessors
+ * have pulled in the system headers: its own feature macros come too late for
+ * MAP_ANON on glibc under -std=c11. Stated once up front.
+ */
+#ifdef __linux__
+#define _GNU_SOURCE
+#endif
+
 #include "unit.h"
 
 /*
@@ -140,7 +149,6 @@ static void test_shake256(void)
 {
 	HASH_CTX_ON_STACK(ctx);
 	uint8_t a[128], b[128];
-	uint8_t guard[16];
 	size_t i;
 
 	jent_ut_group("SHAKE256 / XDRBG block generation");
@@ -165,36 +173,56 @@ static void test_shake256(void)
 		JENT_UT_FAIL("%s", "a different input gives the same output");
 
 	/*
-	 * jent_drbg_generate_block() writes dst_len bytes and must not touch
-	 * anything past them - it is called with the caller's output buffer.
-	 */
-	/*
-	 * More than one digest worth: the generator produces the block in
-	 * digest-sized pieces, and the last one is short unless the length
-	 * divides evenly.
+	 * jent_drbg_generate_block() produces one digest at most: the squeeze
+	 * is deliberately a single block and the length is clamped to
+	 * JENT_SHA3_256_SIZE_DIGEST. So what has to hold for a request longer
+	 * than that is not that the request is filled - it never is - but that
+	 * exactly a digest is written and the rest of the caller's buffer is
+	 * left alone.
+	 *
+	 * Checked against a non-zero fill. Against a zeroed buffer "some byte
+	 * is non-zero" is satisfied by the first digest alone, so the check
+	 * passed with 96 of the 128 bytes never written, and would have gone on
+	 * passing had the clamp been lowered to a single byte.
 	 */
 	jent_shake256_init(&ctx);
 	jent_sha3_update(&ctx, (const uint8_t *)"seed", 4);
-	memset(a, 0, sizeof(a));
+	memset(a, 0xcc, sizeof(a));
 	jent_drbg_generate_block(&ctx, a, sizeof(a));
 	jent_ut_checks++;
 	{
 		size_t n = 0;
 
-		for (i = 0; i < sizeof(a); i++) {
-			if (a[i])
+		for (i = 0; i < JENT_SHA3_256_SIZE_DIGEST; i++) {
+			if (a[i] != 0xcc)
 				n++;
 		}
 		if (!n)
-			JENT_UT_FAIL("%s", "a multi-digest block is all zero");
+			JENT_UT_FAIL("%s", "the digest was not written at all");
+	}
+	jent_ut_checks++;
+	for (i = JENT_SHA3_256_SIZE_DIGEST; i < sizeof(a); i++) {
+		if (a[i] != 0xcc) {
+			JENT_UT_FAIL(
+				"byte %u past the digest was written by a clamped request",
+				(unsigned int)i);
+			break;
+		}
 	}
 
+	/*
+	 * A length that is neither a multiple of the rate nor of the digest
+	 * size: exactly 17 bytes must be written and the rest of the buffer
+	 * left alone, which the two loops below check. There used to be a
+	 * "guard" array beside this as well, filled with 0xa5 and then
+	 * asserted to still hold 0xa5 - an unrelated local that is not
+	 * adjacent to anything and that nothing writes to, so it held
+	 * whatever the generator did.
+	 */
 	jent_shake256_init(&ctx);
 	jent_sha3_update(&ctx, (const uint8_t *)"seed", 4);
-	memset(guard, 0xa5, sizeof(guard));
 	memset(a, 0, sizeof(a));
 	jent_drbg_generate_block(&ctx, a, 17);
-	JENT_UT_TRUE(guard[0] == 0xa5, "the guard bytes are untouched");
 
 	jent_ut_checks++;
 	for (i = 0; i < 17; i++) {
@@ -214,25 +242,16 @@ static void test_shake256(void)
 	}
 }
 
-/* The heap-allocating variant, including the failure path of a bogus size. */
-static void test_alloc(void)
+/* The rate an initialized SHA3-256 state reports. */
+static void test_rate(void)
 {
-	void *hash_state = NULL;
+	HASH_CTX_ON_STACK(ctx);
 
-	jent_ut_group("SHA-3 state allocation");
+	jent_ut_group("SHA-3 state rate");
 
-	JENT_UT_EQ(jent_sha3_alloc(&hash_state, 0), 0, "jent_sha3_alloc");
-	JENT_UT_TRUE(hash_state != NULL, "the state was allocated");
-	if (hash_state) {
-		jent_sha3_256_init(hash_state);
-		JENT_UT_EQ(jent_sha3_rate(hash_state),
-			   JENT_SHA3_256_SIZE_BLOCK,
-			   "the rate of an initialized SHA3-256 state");
-		jent_sha3_dealloc(hash_state);
-	}
-
-	/* Must tolerate being handed nothing. */
-	jent_sha3_dealloc(NULL);
+	jent_sha3_256_init(&ctx);
+	JENT_UT_EQ(jent_sha3_rate(&ctx), JENT_SHA3_256_SIZE_BLOCK,
+		   "the rate of an initialized SHA3-256 state");
 }
 
 int main(void)
@@ -241,7 +260,7 @@ int main(void)
 	test_sha3_256_kat();
 	test_sha3_incremental();
 	test_shake256();
-	test_alloc();
+	test_rate();
 
 	return jent_ut_report("unit-sha3");
 }

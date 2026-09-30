@@ -27,28 +27,7 @@ extern "C"
 {
 #endif
 
-#define JENT_SHA3_SIZE_BLOCK(bits)	((1600 - 2 * bits) >> 3)
-
-#define JENT_SHA3_256_SIZE_BLOCK                                               \
-	JENT_SHA3_SIZE_BLOCK(JENT_SHA3_256_SIZE_DIGEST_BITS)
-
-#define JENT_XDRBG_SIZE_STATE		64
-
-struct jent_sha_ctx {
-	uint64_t state[25];
-	uint8_t partial[JENT_SHA3_256_SIZE_BLOCK];
-	size_t msg_len;
-	uint8_t r;
-	uint8_t rword;
-	/*
-	 * This implementation only supports up to rate-size digests for XOFs,
-	 * thus the data type can be appropriately small.
-	 */
-	uint8_t digestsize;
-	uint8_t padding;
-	uint8_t initially_seeded:1;
-};
-
+/* struct jent_sha_ctx is defined in jitterentropy-internal.h. */
 #define JENT_SHA_MAX_CTX_SIZE	(sizeof(struct jent_sha_ctx))
 #define HASH_CTX_ON_STACK(name)						       \
 	struct jent_sha_ctx name
@@ -67,8 +46,7 @@ void jent_sha3_update(struct jent_sha_ctx *ctx, const uint8_t *in,
 		      size_t inlen);
 JENT_INTERNAL
 void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest);
-int jent_sha3_alloc(void **hash_state, unsigned int flags);
-void jent_sha3_dealloc(void *hash_state);
+JENT_INTERNAL
 int jent_sha3_tester(void);
 
 JENT_INTERNAL
