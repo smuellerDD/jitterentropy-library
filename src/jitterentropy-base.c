@@ -990,8 +990,13 @@ struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 	 * passed: this one would let an instance generate from a clock no
 	 * startup measured.
 	 */
-	return _jent_entropy_collector_alloc(osr,
-					     flags & ~JENT_INT_MEASURE_CLOCK);
+	struct rand_data *ec =
+		_jent_entropy_collector_alloc(osr,
+					      flags & ~JENT_INT_MEASURE_CLOCK);
+
+	jent_stack_scrub();
+
+	return ec;
 }
 
 #ifdef LINUX_KERNEL
@@ -1327,7 +1332,11 @@ int jent_entropy_init(void)
 					     JENT_FORCE_INTERNAL_TIMER);
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
-	return jent_entropy_init_common_post(ret);
+	ret = jent_entropy_init_common_post(ret);
+
+	jent_stack_scrub();
+
+	return ret;
 }
 
 JENT_PRIVATE_STATIC
@@ -1388,7 +1397,11 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 					     flags | JENT_FORCE_INTERNAL_TIMER);
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
-	return jent_entropy_init_common_post(ret);
+	ret = jent_entropy_init_common_post(ret);
+
+	jent_stack_scrub();
+
+	return ret;
 }
 
 JENT_PRIVATE_STATIC
