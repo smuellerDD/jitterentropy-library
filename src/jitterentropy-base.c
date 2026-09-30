@@ -244,9 +244,9 @@ static inline unsigned int jent_update_secure_mem(unsigned int flags)
  *
  * This function invokes the entropy gathering logic as often to generate
  * as many bytes as requested by the caller. The entropy gathering logic
- * creates 64 bit per invocation.
+ * creates 256 bit per invocation.
  *
- * This function truncates the last 64 bit entropy value output to the exact
+ * This function truncates the last 256 bit entropy value output to the exact
  * size specified by the caller.
  *
  * @param[in] ec Reference to entropy collector
