@@ -1,7 +1,7 @@
-prefix=@CMAKE_INSTALL_PREFIX@
+prefix=@JENT_PC_PREFIX@
 exec_prefix=${prefix}
-libdir=@CMAKE_INSTALL_FULL_LIBDIR@
-includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+libdir=@JENT_PC_LIBDIR@
+includedir=@JENT_PC_INCLUDEDIR@
 
 Name: @PROJECT_NAME@
 Description: Hardware RNG based on CPU timing jitter
@@ -9,6 +9,5 @@ Version: @PROJECT_VERSION@
 URL: https://www.chronox.de/jent/
 Libs: -L${libdir} @JITTER_PC_LIBS@
 Libs.private: @JITTER_PC_LIBS_PRIVATE@
-Requires: @JITTER_PC_REQUIRES@
 Requires.private: @JITTER_PC_REQUIRES_PRIVATE@
 Cflags: -I${includedir}@JITTER_PC_CFLAGS@

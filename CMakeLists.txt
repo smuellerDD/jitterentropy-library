@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 
 # From jitterentropy.h, as the Makefile does, so the package files cannot
-# drift from the library version.
+# drift from the library version. A version bump reconfigures.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_CURRENT_SOURCE_DIR}/jitterentropy.h)
 foreach(_jent_comp MAJVERSION MINVERSION PATCHLEVEL)
     file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/jitterentropy.h" _jent_line
          REGEX "^#define[ \t]+JENT_${_jent_comp}[ \t]+[0-9]+")
@@ -16,6 +18,11 @@ project(jitterentropy
     VERSION ${JENT_MAJVERSION}.${JENT_MINVERSION}.${JENT_PATCHLEVEL}
 )
 set(CMAKE_C_STANDARD 11)
+# -std=c11 as the Makefile passes, not CMake's default -std=gnu11: the sources
+# define the feature test macros they need themselves (see
+# arch/jitterentropy-arch-compat.h), and the two builds of one library should
+# not see different system headers.
+set(CMAKE_C_EXTENSIONS OFF)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -29,8 +36,34 @@ option(ENABLE_THREAD_SANITIZER "Compile with the thread sanitizer, which is what
 option(ENABLE_COVERAGE "Instrument the build for code coverage and add the 'coverage' target (only for development)" OFF)
 option(ENABLE_FUZZING "Instrument the build for libFuzzer and build the fuzzing harness under tests/fuzz (Clang only, for development)" OFF)
 option(MOCK_TIMER "Allow the time source to be replaced by a caller-supplied callback (only for testing - a build with this on produces no entropy of its own)" OFF)
-option(ENABLE_TOOLS "Build and install the recording and validation tools (jitterentropy-rng, getrawentropy, extractlsb, ...), which live under tests/" ON)
+option(ENABLE_RECORDING "Also build and install libjitterentropy-record: the library with the raw noise recording API of jitterentropy-record.h added, for recording where no tool can run (the Android and iOS example apps); not for production" OFF)
+option(ENABLE_KERNEL_LIB "Also build and install libjitterentropy-kernel and the jitter_rng tool: user space access to the jitter_rng Linux kernel module (Linux only)" OFF)
+option(ENABLE_RNGD "Also build and install jitterentropy-rngd, the daemon feeding the Jitter RNG into the Linux /dev/random, and its systemd unit (Linux only)" OFF)
 option(BUILD_TESTING "Build the test programs and register the CTest suite" ON)
+
+# The tools are command line programs. On the Apple platforms other than macOS
+# CMake builds every executable as an app bundle, which install(TARGETS) needs a
+# BUNDLE DESTINATION for, and the configure stopped at the first tool - so they
+# are off there unless asked for, as INSTALL_MAN below is.
+if(CMAKE_SYSTEM_NAME MATCHES "^(iOS|tvOS|watchOS|visionOS)$")
+    set(_jent_enable_tools_default OFF)
+else()
+    set(_jent_enable_tools_default ON)
+endif()
+option(ENABLE_TOOLS "Build and install the recording and validation tools (jitterentropy-rng, getrawentropy, extractlsb, ...), which live under tests/" ${_jent_enable_tools_default})
+
+# The man pages are generated and installed only for a target that has man to
+# display them: not Windows (MinGW included - Cygwin and MSYS are not WIN32 and
+# keep them), Android, the Apple platforms other than macOS, bare metal or
+# Emscripten. Settable either way, e.g. for a Windows package that ships the
+# pages for another system to read.
+if(WIN32 OR ANDROID OR CMAKE_SYSTEM_NAME MATCHES
+   "^(iOS|tvOS|watchOS|visionOS|Generic|Emscripten)$")
+    set(_jent_install_man_default OFF)
+else()
+    set(_jent_install_man_default ON)
+endif()
+option(INSTALL_MAN "Generate and install the man pages and their aliases" ${_jent_install_man_default})
 
 # CMake sets MSVC itself; do the same for the others.
 if(CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -40,6 +73,15 @@ elseif(CMAKE_C_COMPILER_ID MATCHES "GNU")
 elseif(CMAKE_C_COMPILER_ID MATCHES "SunPro")
     set(SUNPRO 1)
 endif()
+
+# Built up with list(APPEND) only, so each starts out empty here: an unset
+# variable reads the parent scope's value, or a -D cache entry, and a project
+# that add_subdirectory()s this one - tests/ios/CMakeLists.txt does - would
+# otherwise hand its own JITTER_LINK_LIBRARIES or JITTER_C_FLAGS to the
+# library's link and compile, as JITTER_PC_REQUIRES_PRIVATE below explains.
+set(JITTER_C_FLAGS "")
+set(JITTER_LINKER_FLAGS "")
+set(JITTER_LINK_LIBRARIES "")
 
 if(INTERNAL_TIMER)
     list(APPEND JITTER_C_FLAGS -DJENT_CONF_ENABLE_INTERNAL_TIMER)
@@ -185,13 +227,23 @@ if(ENABLE_COVERAGE)
     add_link_options(--coverage)
 endif()
 
-if(BUILD_SHARED_LIBS)
-  set(JITTER_PC_LIBS "-l${CMAKE_PROJECT_NAME}")
-  set(JITTER_PC_LIBS_PRIVATE "")
-else()
-  set(JITTER_PC_LIBS "")
-  set(JITTER_PC_LIBS_PRIVATE "-l${CMAKE_PROJECT_NAME}")
-endif()
+# The library itself belongs in Libs whether it is shared or static: plain
+# "pkg-config --libs" does not print Libs.private, and a static-only install
+# must still name the archive there. Libs.private is for what the archive
+# depends on (-pthread, the stack protector flag, -lbcrypt), which only a
+# static link has to be told about; those are appended further down.
+set(JITTER_PC_LIBS "-l${PROJECT_NAME}")
+set(JITTER_PC_LIBS_PRIVATE "")
+
+# Requires.private: the pkg-config modules a static link has to resolve as
+# well, set only where one was found. Initialized here rather than only in the
+# branches that set it, because this project can be add_subdirectory()'d -
+# tests/ios/CMakeLists.txt does exactly that - and an unset variable in
+# configure_file() takes the parent scope's value, so a JITTER_PC_REQUIRES_PRIVATE
+# belonging to something else would be written into our .pc file. There is no
+# "Requires:" counterpart: nothing is needed to *compile* against
+# jitterentropy.h, which includes no other package's headers.
+set(JITTER_PC_REQUIRES_PRIVATE "")
 
 # Appended to the Cflags line of the .pc file. Only the Windows static build
 # has anything to put here; see the JENT_STATIC_LIB branch further down.
@@ -200,7 +252,61 @@ set(JITTER_PC_CFLAGS "")
 if(WIN32)
     if(MSVC)
         # MSVC deprecates the portable spellings for its own _s variants.
-        list(APPEND JITTER_C_FLAGS  /Od /W4 /D_CRT_SECURE_NO_WARNINGS)
+        list(APPEND JITTER_C_FLAGS  /Od /Ob0 /W4 /D_CRT_SECURE_NO_WARNINGS)
+
+        # The entropy core must not be optimized, and on MSVC the source alone
+        # cannot refuse it: the __OPTIMIZE__ guard in src/jitterentropy-base.c
+        # is a GCC/Clang macro, and cl /O2 compiles that file clean. Appending
+        # /Od is not enough either. /Od overrides /O2 (with warning D9025 on
+        # every compile), but an explicit /Ob outlives it: CMake's Release
+        # and RelWithDebInfo flags carry /Ob2 and /Ob1, and with them
+        # jent_delta(), jent_udiv64() and uint32rotl() were inlined into the
+        # timed loop - the instruction stream the entropy assessment describes
+        # was not the one shipped. So the configuration flags are rewritten
+        # rather than out-ordered: /O1, /O2 and /Ox become /Od, /Ob1-/Ob3
+        # become /Ob0. This is directory scope, so it reaches the library and
+        # every test below that compiles the sources into itself; a parent
+        # project that add_subdirectory()s this one keeps its own flags. The
+        # /Od /Ob0 in JITTER_C_FLAGS above still come last on each command
+        # line, which covers an /O2 added through add_compile_options().
+        #
+        # /GL is refused. With it cl emits no machine code at all - code
+        # generation is deferred to the linker under /LTCG, so what the timed
+        # loop becomes is decided in a step no flag checked here witnesses.
+        # Nothing here sets either; CMAKE_INTERPROCEDURAL_OPTIMIZATION would,
+        # on a consumer's behalf.
+        foreach(_var CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+                     CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_C_FLAGS_MINSIZEREL)
+            if("${${_var}}" MATCHES "[-/]GL( |$)")
+                message(FATAL_ERROR
+                    "${_var} carries /GL: whole-program optimization defers "
+                    "code generation to the linker, where the unoptimized "
+                    "build the entropy core requires cannot be enforced. "
+                    "Remove it.")
+            endif()
+            string(REGEX REPLACE "[-/]O[12x]( |$)" "/Od\\1" ${_var} "${${_var}}")
+            string(REGEX REPLACE "[-/]Ob[123]( |$)" "/Ob0\\1" ${_var} "${${_var}}")
+        endforeach()
+        foreach(_var CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS
+                     CMAKE_STATIC_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
+            foreach(_cfg "" _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+                if("${${_var}${_cfg}}" MATCHES "[-/]LTCG")
+                    message(FATAL_ERROR
+                        "${_var}${_cfg} carries /LTCG: link-time code "
+                        "generation is where /GL defers the optimization the "
+                        "entropy core must not have. Remove it.")
+                endif()
+            endforeach()
+        endforeach()
+        foreach(_cfg "" _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+            if(CMAKE_INTERPROCEDURAL_OPTIMIZATION${_cfg})
+                message(FATAL_ERROR
+                    "CMAKE_INTERPROCEDURAL_OPTIMIZATION${_cfg} is on: on MSVC "
+                    "that is /GL and /LTCG, which defer code generation to the "
+                    "linker, where the unoptimized build the entropy core "
+                    "requires cannot be enforced. Turn it off.")
+            endif()
+        endforeach()
     else()
         list(APPEND JITTER_C_FLAGS  -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -Wcast-align
         -Wmissing-field-initializers -Wshadow -Wswitch-enum -Wextra -Wall -pedantic -O0 -fwrapv -Wconversion)
@@ -227,19 +333,16 @@ else()
             list(APPEND JITTER_LINKER_FLAGS -Wl,-z,now,-z,relro)
         endif()
     endif()
+    # -pthread is a dependency rather than a hardening flag, and a static
+    # consumer needs it as well - on FreeBSD nothing else names it - so it is
+    # linked as a library, which the exported target carries as LINK_ONLY.
     if((CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") OR (CMAKE_SYSTEM_NAME STREQUAL "OpenBSD") OR (CMAKE_SYSTEM_NAME STREQUAL "NetBSD"))
-        list(APPEND JITTER_LINKER_FLAGS -pthread)
+        list(APPEND JITTER_LINK_LIBRARIES -pthread)
     endif()
     if(SUNPRO)
         list(APPEND JITTER_C_FLAGS  -m64 -Kpic -errtags=yes -erroff=E_KW_IS_AN_EXTENSION_OF_ANSI,E_ASM_UNUSED_PARAM)
     else()
         list(APPEND JITTER_C_FLAGS  -fwrapv --param ssp-buffer-size=4 -fPIE -fPIC)
-    endif()
-
-    if ((NOT GCC) OR (GCC AND CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.3"))
-        # Before GCC 4.3 this meant something else entirely.
-        # https://gcc.gnu.org/wiki/NewWconversion.
-        set(JITTER_COMPILE_FLAGS "${JITTER_COMPILE_FLAGS} -Wconversion")
     endif()
 endif()
 
@@ -299,10 +402,12 @@ if(STACK_PROTECTOR)
             # Every target compiled with the flag needs it on its own link
             # command, and a shared library propagates nothing to the test
             # programs. add_link_options() reaches every target created after
-            # it, tests/ included.
+            # it, tests/ included - but only in this build: it is a directory
+            # property, not a target one, and nothing of it is exported.
             add_link_options(${JITTER_SSP_FLAG})
 
-            # Kept for the .pc file only; the link itself is handled above.
+            # Kept for the static consumers, the exported CMake target and the
+            # .pc file, both handled once the library target exists below.
             set(JITTER_SSP_LINK_FLAGS ${JITTER_SSP_FLAG})
         else()
             message(WARNING
@@ -318,14 +423,48 @@ endif()
 # producing an archive with missing objects.
 file(GLOB JITTER_SRC CONFIGURE_DEPENDS "src/*.c" "arch/*.c")
 add_library(${PROJECT_NAME})
+# The name find_package() gives it, so that a project pulling this one in with
+# add_subdirectory() or FetchContent links the same target name either way.
+add_library(${PROJECT_NAME}::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE ${JITTER_SRC})
 set_target_properties(${PROJECT_NAME} PROPERTIES
     PUBLIC_HEADER "jitterentropy.h"
     # As the Makefile: .so.<maj>.<min>.<patch>, SONAME .so.<maj>.
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR})
+
+# As the Makefile's -install_name: the installed dylib names itself by its
+# absolute path, so the installed tools and any consumer linked through
+# pkg-config load it without an LC_RPATH of their own. CMake's default,
+# @rpath/, left every installed tool aborting with "Library not loaded" - the
+# install tree carries no rpath to resolve it. $<INSTALL_PREFIX> is the prefix
+# of the install, not of the configure, so "cmake --install --prefix" is
+# honoured. The build tree keeps @rpath and CMake's build rpath.
+if(APPLE)
+    if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+        set(_jent_install_name_dir "${CMAKE_INSTALL_LIBDIR}")
+    else()
+        set(_jent_install_name_dir "$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}")
+    endif()
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        INSTALL_NAME_DIR "${_jent_install_name_dir}")
+endif()
 target_compile_options(${PROJECT_NAME} PRIVATE ${JITTER_C_FLAGS})
-target_link_libraries(${PROJECT_NAME} PRIVATE ${JITTER_LINKER_FLAGS})
+# A link option, not a link library: target_link_libraries() on a static
+# library puts even a PRIVATE item into INTERFACE_LINK_LIBRARIES as
+# $<LINK_ONLY:...>, so install(EXPORT) handed -z now/-z relro to the link of
+# every consumer of the archive. A PRIVATE link option stays on this target's
+# own link, which only a shared build has.
+target_link_options(${PROJECT_NAME} PRIVATE ${JITTER_LINKER_FLAGS})
+# The programs built here - jitterentropy-rng and the other installed tools
+# among them - need the same hardening on their own link, and in a static
+# build they no longer inherit it from the archive. As with the stack
+# protector above, add_link_options() is a directory property that reaches
+# every target created after it, tests/ included, and nothing of it is
+# exported. It is limited to executables: the library has its own option
+# just above, and anything else created here is not linked by a linker.
+add_link_options("$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:${JITTER_LINKER_FLAGS}>")
+target_link_libraries(${PROJECT_NAME} PRIVATE ${JITTER_LINK_LIBRARIES})
 
 # version.lds is the exported set of a shared build. Only where the linker
 # takes a GNU-style version script - ld64 and the Windows toolchains want their
@@ -333,9 +472,21 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${JITTER_LINKER_FLAGS})
 set(JITTER_VERSION_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/version.lds")
 if(BUILD_SHARED_LIBS AND NOT WIN32 AND NOT APPLE)
     include(CheckLinkerFlag)
-    check_linker_flag(C "-Wl,--version-script=${JITTER_VERSION_SCRIPT}"
-                      JITTER_VERSION_SCRIPT_USABLE)
-    if(JITTER_VERSION_SCRIPT_USABLE)
+    # With a script of its own: version.lds names symbols the probe does not
+    # define, which lld refuses (--no-undefined-version, its default since
+    # LLVM 16) - the probe then failed wherever lld links, FreeBSD's default
+    # toolchain included, and the library went without the version script.
+    set(JITTER_VERSION_SCRIPT_PROBE
+        "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/jent-version-probe.lds")
+    # With a C comment as version.lds has, which the Solaris link editor
+    # refuses where it takes the option as a mapfile: the probe then fails
+    # wherever version.lds would. A result name of its own, so a tree that
+    # cached the old probe's verdict probes again.
+    file(WRITE "${JITTER_VERSION_SCRIPT_PROBE}"
+         "/* probe */\n{ global: main; local: *; };\n")
+    check_linker_flag(C "-Wl,--version-script=${JITTER_VERSION_SCRIPT_PROBE}"
+                      JITTER_VERSION_SCRIPT_LINKS)
+    if(JITTER_VERSION_SCRIPT_LINKS)
         target_link_options(${PROJECT_NAME} PRIVATE
             "-Wl,--version-script=${JITTER_VERSION_SCRIPT}")
         # So a change to the list relinks the library.
@@ -373,21 +524,50 @@ endfunction()
 
 # Nothing at build time would notice the two drifting: a declaration missing
 # from the script just goes missing from the library. A function for the scope;
-# block() is CMake 3.25 and this project asks for 3.22.
-function(jent_check_version_script header script linktest)
+# block() is CMake 3.25 and this project asks for 3.22. Also called for
+# libjitterentropy-record, whose header marks its API with JENT_RECORD_API and
+# which has no link test: @linktest empty skips that check.
+function(jent_check_version_script header script marker linktest)
+    get_filename_component(header_name "${header}" NAME)
+    get_filename_component(script_name "${script}" NAME)
+
+    # Every exported function is declared as a bare @marker line followed by
+    # the declaration. The declaration need not be on the very next
+    # line - a long return type may stand on its own - so the lines after the
+    # marker are read until one names a function, and anything that ends the
+    # declaration before that is a parse failure rather than a silent skip: a
+    # declaration this loop dropped would be compared against nothing, the two
+    # lists would still agree, and a function omitted from version.lds as well
+    # would quietly stop being exported on ELF.
     set(header_api "")
-    set(take_next FALSE)
+    set(pending "")
+    set(pending_line 0)
+    set(lineno 0)
     file(STRINGS "${header}" lines)
     foreach(line IN LISTS lines)
-        if(take_next)
-            if(line MATCHES "(jent_[A-Za-z0-9_]+)\\(")
+        math(EXPR lineno "${lineno} + 1")
+        if(pending)
+            if(line MATCHES "(jent_[A-Za-z0-9_]+)[ \t]*\\(")
                 list(APPEND header_api "${CMAKE_MATCH_1}")
+                set(pending "")
+            elseif(line MATCHES "^[ \t]*$" OR line MATCHES "^[ \t]*[#/*]" OR
+                   line MATCHES "^${marker}" OR line MATCHES ";")
+                message(FATAL_ERROR
+                    "${header}:${pending_line}: ${marker} is not "
+                    "followed by a function declaration this parser "
+                    "understands, so it would be left out of the comparison "
+                    "with ${script}. Stopped at line ${lineno}: '${line}'")
             endif()
-            set(take_next FALSE)
-        elseif(line MATCHES "^JENT_PRIVATE_STATIC$")
-            set(take_next TRUE)
+        elseif(line MATCHES "^${marker}$")
+            set(pending TRUE)
+            set(pending_line "${lineno}")
         endif()
     endforeach()
+    if(pending)
+        message(FATAL_ERROR
+            "${header}:${pending_line}: ${marker} at the end of the "
+            "file with no function declaration after it.")
+    endif()
 
     # Only between "global:" and "local:", so the commentary above them is
     # not read as part of the list.
@@ -409,8 +589,10 @@ function(jent_check_version_script header script linktest)
     if(header_api STREQUAL script_api)
         list(LENGTH header_api n)
         message(STATUS
-            "version.lds exports the ${n} functions of jitterentropy.h")
-        jent_check_linktest_calls("${linktest}" "${header_api}")
+            "${script_name} exports the ${n} functions of ${header_name}")
+        if(linktest)
+            jent_check_linktest_calls("${linktest}" "${header_api}")
+        endif()
         return()
     endif()
 
@@ -423,19 +605,23 @@ function(jent_check_version_script header script linktest)
         list(REMOVE_ITEM only_script ${header_api})
     endif()
     message(FATAL_ERROR
-        "version.lds and jitterentropy.h disagree. "
+        "${script_name} and ${header_name} disagree. "
         "Only in the header: ${only_header}. "
         "Only in the script: ${only_script}.")
 endfunction()
 
 jent_check_version_script("${CMAKE_CURRENT_SOURCE_DIR}/jitterentropy.h"
-                          "${JITTER_VERSION_SCRIPT}"
+                          "${JITTER_VERSION_SCRIPT}" JENT_PRIVATE_STATIC
                           "${CMAKE_CURRENT_SOURCE_DIR}/tests/linking/jitterentropy-linktest.c")
 
 # As bcrypt below: a static consumer links this archive's instrumented frames
-# and must resolve the symbols itself. The exported CMake target says so, the
-# .pc file does not.
+# and must resolve __stack_chk_fail/__stack_chk_guard itself, which on Solaris
+# means the flag on its own link command. add_link_options() above is not
+# exported, so the flag goes onto the target as an INTERFACE link option, where
+# install(EXPORT) carries it into jitterentropyTargets.cmake; the .pc file gets
+# it in Libs.private. A shared library resolved the symbols at its own link.
 if(JITTER_SSP_LINK_FLAGS AND NOT BUILD_SHARED_LIBS)
+    target_link_options(${PROJECT_NAME} INTERFACE ${JITTER_SSP_LINK_FLAGS})
     set(JITTER_PC_LIBS_PRIVATE "${JITTER_PC_LIBS_PRIVATE} ${JITTER_SSP_LINK_FLAGS}")
 endif()
 
@@ -501,16 +687,124 @@ target_include_directories(${PROJECT_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/arch>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 
-if(EXTERNAL_CRYPTO STREQUAL "AWSLC")
-    # Unique to AWS-LC.
-    set(EXTERNAL_CRYPTO_HEADER "openssl/base.h")
-    set(EXTERNAL_CRYPTO_LIBRARY_NAME libcrypto)
-elseif(EXTERNAL_CRYPTO STREQUAL "OPENSSL")
-    set(EXTERNAL_CRYPTO_HEADER "openssl/crypto.h")
-    set(EXTERNAL_CRYPTO_LIBRARY_NAME libcrypto)
+# The external crypto library. Found for what it is, not for how this library
+# is linked: a static jitterentropy used to go looking for a static libcrypto.a,
+# which most distributions do not install, and carried on with a NOTFOUND
+# library until generation failed. Either linkage links whatever the system
+# has, and a static archive's dependents are told what to add below.
+#
+# LIBCRYPTO_INCLUDE_DIR and LIBCRYPTO_LIBRARY are what the programs absorbing
+# the library sources (tests/gcd, tests/unit, the AMALGAMATED recording tool)
+# add for themselves. Linked PRIVATE here: jitterentropy.h includes none of
+# these headers, so a consumer needs neither them nor, for a shared library,
+# the link.
+set(JENT_CONFIG_DEPENDENCIES "")
+if(EXTERNAL_CRYPTO STREQUAL "AWSLC" OR EXTERNAL_CRYPTO STREQUAL "OPENSSL")
+    # AWS-LC installs itself as libcrypto with OpenSSL's headers, so the one
+    # module finds both; OPENSSL_ROOT_DIR chooses between them when both are
+    # installed. On Windows it finds the import library, not the DLL.
+    find_package(OpenSSL COMPONENTS Crypto)
+    if(NOT OPENSSL_FOUND OR NOT TARGET OpenSSL::Crypto)
+        message(FATAL_ERROR
+            "EXTERNAL_CRYPTO=${EXTERNAL_CRYPTO}: no libcrypto found. Install "
+            "its development files or set OPENSSL_ROOT_DIR to the prefix "
+            "holding include/openssl and the library.")
+    endif()
+    # openssl/base.h is unique to AWS-LC (and BoringSSL): without it, what was
+    # found is OpenSSL, and AWSLC would compile against the wrong API.
+    if(EXTERNAL_CRYPTO STREQUAL "AWSLC" AND
+       NOT EXISTS "${OPENSSL_INCLUDE_DIR}/openssl/base.h")
+        message(FATAL_ERROR
+            "EXTERNAL_CRYPTO=AWSLC: the libcrypto found at ${OPENSSL_INCLUDE_DIR} "
+            "is not AWS-LC (no openssl/base.h). Set OPENSSL_ROOT_DIR to the "
+            "AWS-LC installation.")
+    endif()
+    set(LIBCRYPTO_INCLUDE_DIR "${OPENSSL_INCLUDE_DIR}")
+    set(LIBCRYPTO_LIBRARY OpenSSL::Crypto)
+    message(STATUS "Found external crypto library ${OPENSSL_CRYPTO_LIBRARY}")
+
+    # A static archive exports the dependency as $<LINK_ONLY:OpenSSL::Crypto>,
+    # a target the consumer has to create again.
+    #
+    # The .pc file names the libcrypto module only once pkg-config confirms it
+    # exists, exactly as the LIBGCRYPT branch below does. FindOpenSSL does not
+    # go through pkg-config, so nothing about it says the installation found
+    # here ships a libcrypto.pc - a hand-built prefix reached through
+    # OPENSSL_ROOT_DIR, and some vcpkg and AWS-LC layouts, do not. An
+    # unresolvable name in Requires.private is not a static-link-only problem:
+    # pkg-config resolves that field for --cflags and --exists too, so every
+    # consumer of our .pc file would fail with "Package libcrypto was not
+    # found". Where there is no module, the library goes into Libs.private by
+    # its absolute path instead, which needs nothing found again.
+    if(NOT BUILD_SHARED_LIBS)
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(JENT_PC_LIBCRYPTO QUIET libcrypto)
+        endif()
+        if(JENT_PC_LIBCRYPTO_FOUND)
+            set(JITTER_PC_REQUIRES_PRIVATE "libcrypto")
+        else()
+            # Filtered on EXISTS: FindOpenSSL reports the library as a plain
+            # path, but on the multi-configuration generators it can be a
+            # "optimized;<lib>;debug;<lib>" list, and those two keywords are
+            # not linker arguments. -lcrypto if that leaves nothing at all.
+            set(_jent_pc_crypto "")
+            foreach(_jent_lib IN LISTS OPENSSL_CRYPTO_LIBRARY)
+                if(EXISTS "${_jent_lib}")
+                    set(_jent_pc_crypto "${_jent_pc_crypto} ${_jent_lib}")
+                endif()
+            endforeach()
+            if(NOT _jent_pc_crypto)
+                set(_jent_pc_crypto " -lcrypto")
+            endif()
+            set(JITTER_PC_LIBS_PRIVATE
+                "${JITTER_PC_LIBS_PRIVATE}${_jent_pc_crypto}")
+        endif()
+        set(JENT_CONFIG_DEPENDENCIES "find_dependency(OpenSSL COMPONENTS Crypto)")
+    endif()
 elseif(EXTERNAL_CRYPTO STREQUAL "LIBGCRYPT")
-    set(EXTERNAL_CRYPTO_HEADER "gcrypt.h")
-    set(EXTERNAL_CRYPTO_LIBRARY_NAME libgcrypt)
+    # libgpg-error by name as well: gcrypt.h includes gpg-error.h, and a static
+    # libgcrypt.a leaves its symbols unresolved. pkg-config, where present, only
+    # adds search locations - libgcrypt shipped no .pc file before 1.9, so the
+    # enterprise distributions still in support have none.
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(JENT_PC_GCRYPT QUIET libgcrypt)
+        pkg_check_modules(JENT_PC_GPG_ERROR QUIET gpg-error)
+    endif()
+    find_path(JENT_GCRYPT_INCLUDE_DIR NAMES gcrypt.h
+              HINTS ${JENT_PC_GCRYPT_INCLUDE_DIRS})
+    find_path(JENT_GPG_ERROR_INCLUDE_DIR NAMES gpg-error.h
+              HINTS ${JENT_PC_GPG_ERROR_INCLUDE_DIRS} ${JENT_PC_GCRYPT_INCLUDE_DIRS})
+    find_library(JENT_GCRYPT_LIBRARY NAMES gcrypt libgcrypt
+                 HINTS ${JENT_PC_GCRYPT_LIBRARY_DIRS})
+    find_library(JENT_GPG_ERROR_LIBRARY NAMES gpg-error libgpg-error
+                 HINTS ${JENT_PC_GPG_ERROR_LIBRARY_DIRS} ${JENT_PC_GCRYPT_LIBRARY_DIRS})
+    foreach(_jent_var JENT_GCRYPT_INCLUDE_DIR JENT_GPG_ERROR_INCLUDE_DIR
+                      JENT_GCRYPT_LIBRARY JENT_GPG_ERROR_LIBRARY)
+        if(NOT ${_jent_var})
+            message(FATAL_ERROR
+                "EXTERNAL_CRYPTO=LIBGCRYPT: ${_jent_var} not found. Install the "
+                "libgcrypt and libgpg-error development files, or add their "
+                "prefix to CMAKE_PREFIX_PATH.")
+        endif()
+    endforeach()
+    set(LIBCRYPTO_INCLUDE_DIR
+        "${JENT_GCRYPT_INCLUDE_DIR}" "${JENT_GPG_ERROR_INCLUDE_DIR}")
+    list(REMOVE_DUPLICATES LIBCRYPTO_INCLUDE_DIR)
+    set(LIBCRYPTO_LIBRARY "${JENT_GCRYPT_LIBRARY}" "${JENT_GPG_ERROR_LIBRARY}")
+    message(STATUS "Found external crypto library ${JENT_GCRYPT_LIBRARY}")
+
+    # Exported as absolute paths, which need nothing found again. The .pc file
+    # names the module where there is one - its own Requires.private brings in
+    # gpg-error - and the libraries where there is not.
+    if(NOT BUILD_SHARED_LIBS)
+        if(JENT_PC_GCRYPT_FOUND)
+            set(JITTER_PC_REQUIRES_PRIVATE "libgcrypt")
+        else()
+            set(JITTER_PC_LIBS_PRIVATE "${JITTER_PC_LIBS_PRIVATE} -lgcrypt -lgpg-error")
+        endif()
+    endif()
 elseif(NOT EXTERNAL_CRYPTO)
     message(STATUS "Using internal functions for everything")
 else()
@@ -518,29 +812,8 @@ else()
 endif()
 
 if(EXTERNAL_CRYPTO)
-    find_path(LIBCRYPTO_INCLUDE_DIR
-            NAMES "${EXTERNAL_CRYPTO_HEADER}"
-            PATH_SUFFIXES include
-            )
-    message(STATUS "Found external crypto headers at ${LIBCRYPTO_INCLUDE_DIR}")
-    target_include_directories(${PROJECT_NAME} PUBLIC ${LIBCRYPTO_INCLUDE_DIR})
-    if(BUILD_SHARED_LIBS)
-        find_library(LIBCRYPTO_LIBRARY
-                NAMES "${EXTERNAL_CRYPTO_LIBRARY_NAME}.so" "${EXTERNAL_CRYPTO_LIBRARY_NAME}.dylib" "${EXTERNAL_CRYPTO_LIBRARY_NAME}.dll"
-                HINTS "${CMAKE_INSTALL_PREFIX}"
-                PATH_SUFFIXES build/crypto build lib64 lib
-                )
-        set(JITTER_PC_REQUIRES "${EXTERNAL_CRYPTO_LIBRARY_NAME}")
-    else()
-        find_library(LIBCRYPTO_LIBRARY
-                NAMES "${EXTERNAL_CRYPTO_LIBRARY_NAME}.a" "${EXTERNAL_CRYPTO_LIBRARY_NAME}.lib"
-                HINTS "${CMAKE_INSTALL_PREFIX}"
-                PATH_SUFFIXES build/crypto build lib64 lib
-                )
-        set(JITTER_PC_REQUIRES_PRIVATE "${EXTERNAL_CRYPTO_LIBRARY_NAME}")
-    endif()
-    message(STATUS "Found external crypto library ${LIBCRYPTO_LIBRARY}")
-    target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBCRYPTO_LIBRARY})
+    target_include_directories(${PROJECT_NAME} PRIVATE ${LIBCRYPTO_INCLUDE_DIR})
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${LIBCRYPTO_LIBRARY})
 endif()
 
 # "NOT ANDROID", not "NOT ${ANDROID}": undefined, that leaves "AND NOT" with no
@@ -557,11 +830,12 @@ endif()
 
 # The same for the targets that cannot inherit it: the AMALGAMATED and unit
 # test programs absorb the library sources, so they resolve the timer's
-# pthread_create() themselves. -pthread, not -lpthread, because on FreeBSD only
-# the driver flag selects libthr. Windows resolves against the CRT.
-set(JITTER_THREAD_LIBRARIES "")
+# pthread_create() - and clock_gettime(), below - themselves. -pthread, not
+# -lpthread, because on FreeBSD only the driver flag selects libthr. Windows
+# resolves against the CRT.
+set(JITTER_SYSTEM_LIBRARIES "")
 if(INTERNAL_TIMER AND NOT ANDROID AND NOT WIN32)
-    set(JITTER_THREAD_LIBRARIES -pthread)
+    set(JITTER_SYSTEM_LIBRARIES -pthread)
 
     # And once more for pkg-config consumers of the static library, for the
     # same reason -lbcrypt is added to this variable on Windows: the exported
@@ -575,10 +849,33 @@ if(INTERNAL_TIMER AND NOT ANDROID AND NOT WIN32)
     endif()
 endif()
 
+# clock_gettime(), which the generic timer back-end calls, is in librt rather
+# than the C library on glibc before 2.17 and on Solaris 10; the Makefile links
+# -lrt on Linux and SunOS for it. Probed rather than keyed on the system, so
+# that a C library that has it links nothing more. CheckFunctionExists links a
+# call through a declaration of its own, independent of the feature test macros
+# the headers want.
+if(NOT WIN32)
+    include(CheckFunctionExists)
+    check_function_exists(clock_gettime JENT_CLOCK_GETTIME_IN_LIBC)
+    if(NOT JENT_CLOCK_GETTIME_IN_LIBC)
+        include(CheckLibraryExists)
+        check_library_exists(rt clock_gettime "" JENT_CLOCK_GETTIME_IN_LIBRT)
+        if(JENT_CLOCK_GETTIME_IN_LIBRT)
+            target_link_libraries(${PROJECT_NAME} PRIVATE rt)
+            list(APPEND JITTER_SYSTEM_LIBRARIES rt)
+            if(NOT BUILD_SHARED_LIBS)
+                set(JITTER_PC_LIBS_PRIVATE "${JITTER_PC_LIBS_PRIVATE} -lrt")
+            endif()
+        endif()
+    endif()
+endif()
+
 # Two independent options: ENABLE_TOOLS decides what is installed for a user to
 # run, BUILD_TESTING what CTest is given. They overlap in gcd,
-# jitterentropy-health and jitterentropy-rng, which the suite drives and a user
-# also runs: those are built for either and installed only for the first.
+# jitterentropy-health, jitterentropy-rng and jitterentropy-flags, which the
+# suite drives and a user also runs: those are built for either and installed
+# only for the first.
 #
 # BUILD_TESTING is the conventional name packaging already passes, and
 # honouring it is safe only because the tools have an option of their own.
@@ -586,6 +883,53 @@ endif()
 if(BUILD_TESTING)
     # Before the subdirectories, so their add_test() calls register.
     enable_testing()
+endif()
+
+# libjitterentropy-record, under tests/ so that nothing reaches it by
+# accident; see tests/raw-entropy/recording_library/CMakeLists.txt. After the
+# library target is complete, as it is copied from it, and after
+# enable_testing(), for its test.
+if(ENABLE_RECORDING)
+    add_subdirectory(tests/raw-entropy/recording_library)
+endif()
+
+# The installed tools find a shared library through an rpath relative to
+# themselves, $ORIGIN/../lib, so an install under any prefix - and one moved
+# elsewhere as a whole - runs without LD_LIBRARY_PATH. Only where the library
+# is not in a directory the linker searches anyway: an rpath there is dead
+# weight that rpmlint and Lintian report. Set before the subdirectories, whose
+# targets take it at creation; a CMAKE_INSTALL_RPATH or CMAKE_SKIP_INSTALL_RPATH
+# given on the command line wins. macOS needs none - the install name above is
+# absolute - and neither do Windows, Cygwin and MSYS, which find DLLs on PATH.
+if(BUILD_SHARED_LIBS AND NOT APPLE AND NOT WIN32 AND NOT CYGWIN AND NOT MSYS
+   AND NOT DEFINED CMAKE_INSTALL_RPATH)
+    list(FIND CMAKE_C_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_FULL_LIBDIR}"
+         _jent_libdir_implicit)
+    if(_jent_libdir_implicit EQUAL -1)
+        file(RELATIVE_PATH _jent_bin_to_lib "${CMAKE_INSTALL_FULL_BINDIR}"
+             "${CMAKE_INSTALL_FULL_LIBDIR}")
+        set(CMAKE_INSTALL_RPATH "$ORIGIN/${_jent_bin_to_lib}")
+    endif()
+endif()
+
+# libjitterentropy-kernel and the jitter_rng tool. After the rpath above,
+# which the tool takes; see linux_kernel/userspace/CMakeLists.txt.
+if(ENABLE_KERNEL_LIB)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "ENABLE_KERNEL_LIB needs Linux: it wraps the interfaces of the "
+            "Linux kernel module")
+    endif()
+    add_subdirectory(linux_kernel/userspace)
+endif()
+
+# jitterentropy-rngd and its systemd unit; see rngd/CMakeLists.txt.
+if(ENABLE_RNGD)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "ENABLE_RNGD needs Linux: the daemon feeds the Linux /dev/random")
+    endif()
+    add_subdirectory(rngd)
 endif()
 
 # The three the suite drives, plus the rest of their directories.
@@ -599,6 +943,61 @@ endif()
 if(BUILD_TESTING)
     add_subdirectory(tests/unit)
     add_subdirectory(tests/fuzz)
+endif()
+
+# Assert the export set of the built shared library against version.lds,
+# which configure already checked against jitterentropy.h. The version script
+# is not applied on macOS or Windows, where JENT_PRIVATE_STATIC on an internal
+# declaration would export it. nm needs -D for ELF and must not get it for
+# Mach-O. PE (Windows, Cygwin, MSYS) is skipped: it exports from the same
+# declarations, so a leak shows on macOS as well.
+if(BUILD_TESTING AND BUILD_SHARED_LIBS AND NOT WIN32 AND NOT CYGWIN AND NOT MSYS)
+    find_program(JENT_NM NAMES nm llvm-nm)
+    if(JENT_NM)
+        if(APPLE)
+            set(JENT_NM_ARGS -g)
+        else()
+            set(JENT_NM_ARGS -D -g)
+        endif()
+        add_test(NAME exported-symbols
+                 COMMAND ${CMAKE_COMMAND}
+                         -DJENT_LIB=$<TARGET_FILE:${PROJECT_NAME}>
+                         -DJENT_VERSION_SCRIPT=${JITTER_VERSION_SCRIPT}
+                         -DJENT_NM=${JENT_NM}
+                         "-DJENT_NM_ARGS=${JENT_NM_ARGS}"
+                         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/JentCheckExports.cmake)
+        # An nm output format the check cannot read is a skip.
+        set_tests_properties(exported-symbols PROPERTIES
+            SKIP_REGULAR_EXPRESSION "the export check does not know the output format")
+
+        # The library's exports and the recording's, nothing of the
+        # internals the recording reaches.
+        if(ENABLE_RECORDING)
+            add_test(NAME exported-symbols-record
+                     COMMAND ${CMAKE_COMMAND}
+                             -DJENT_LIB=$<TARGET_FILE:${PROJECT_NAME}-record>
+                             -DJENT_VERSION_SCRIPT=${JITTER_RECORD_VERSION_SCRIPT}
+                             -DJENT_NM=${JENT_NM}
+                             "-DJENT_NM_ARGS=${JENT_NM_ARGS}"
+                             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/JentCheckExports.cmake)
+            set_tests_properties(exported-symbols-record PROPERTIES
+                SKIP_REGULAR_EXPRESSION "the export check does not know the output format")
+        endif()
+        if(ENABLE_KERNEL_LIB)
+            add_test(NAME exported-symbols-kernel
+                     COMMAND ${CMAKE_COMMAND}
+                             -DJENT_LIB=$<TARGET_FILE:${PROJECT_NAME}-kernel>
+                             -DJENT_VERSION_SCRIPT=${JITTER_KERNEL_VERSION_SCRIPT}
+                             -DJENT_NM=${JENT_NM}
+                             "-DJENT_NM_ARGS=${JENT_NM_ARGS}"
+                             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/JentCheckExports.cmake)
+            set_tests_properties(exported-symbols-kernel PROPERTIES
+                SKIP_REGULAR_EXPRESSION "the export check does not know the output format")
+        endif()
+    else()
+        message(STATUS
+            "no nm found, not checking the export set of the shared library")
+    endif()
 endif()
 
 # Tools only: nothing here is driven by the suite.
@@ -659,7 +1058,7 @@ if(BUILD_TESTING)
             list(APPEND _rng_tests rng-${_name})
         endforeach()
         set_tests_properties(${_rng_tests} PROPERTIES ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>")
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
     endif()
 endif()
 
@@ -672,7 +1071,7 @@ if(ENABLE_COVERAGE)
     find_program(LCOV_EXECUTABLE lcov)
     find_program(GENHTML_EXECUTABLE genhtml)
 
-    set(JITTER_COVERAGE_DIR ${CMAKE_BINARY_DIR}/coverage)
+    set(JITTER_COVERAGE_DIR ${PROJECT_BINARY_DIR}/coverage)
 
     if(GCOVR_EXECUTABLE)
         # gcc's gcov cannot parse clang's counters, and the bare name does not
@@ -734,35 +1133,35 @@ if(ENABLE_COVERAGE)
             COMMAND ${CMAKE_COMMAND} -E make_directory ${JITTER_COVERAGE_DIR}
             COMMAND ${CMAKE_COMMAND}
                     -DCTEST_EXECUTABLE=${CMAKE_CTEST_COMMAND}
-                    -P ${CMAKE_SOURCE_DIR}/cmake/RunTestsForCoverage.cmake
+                    -P ${PROJECT_SOURCE_DIR}/cmake/RunTestsForCoverage.cmake
             COMMAND ${GCOVR_EXECUTABLE}
-                    --root ${CMAKE_SOURCE_DIR}
+                    --root ${PROJECT_SOURCE_DIR}
                     ${_gcov_tool}
                     --gcov-ignore-parse-errors ${_gcov_parse_errors}
                     --merge-mode-functions merge-use-line-min
-                    --exclude "${CMAKE_SOURCE_DIR}/tests/"
-                    --exclude "${CMAKE_SOURCE_DIR}/linux_kernel/"
+                    --exclude "${PROJECT_SOURCE_DIR}/tests/"
+                    --exclude "${PROJECT_SOURCE_DIR}/linux_kernel/"
                     --html-details ${JITTER_COVERAGE_DIR}/index.html
                     --print-summary
             COMMENT "Running the test suite and writing the HTML coverage report"
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
             VERBATIM)
     elseif(LCOV_EXECUTABLE AND GENHTML_EXECUTABLE)
         add_custom_target(coverage
-            COMMAND ${LCOV_EXECUTABLE} --directory ${CMAKE_BINARY_DIR} --zerocounters -q
+            COMMAND ${LCOV_EXECUTABLE} --directory ${PROJECT_BINARY_DIR} --zerocounters -q
             COMMAND ${CMAKE_COMMAND}
                     -DCTEST_EXECUTABLE=${CMAKE_CTEST_COMMAND}
-                    -P ${CMAKE_SOURCE_DIR}/cmake/RunTestsForCoverage.cmake
-            COMMAND ${LCOV_EXECUTABLE} --directory ${CMAKE_BINARY_DIR}
+                    -P ${PROJECT_SOURCE_DIR}/cmake/RunTestsForCoverage.cmake
+            COMMAND ${LCOV_EXECUTABLE} --directory ${PROJECT_BINARY_DIR}
                     --capture --output-file coverage.info -q
             COMMAND ${LCOV_EXECUTABLE} --remove coverage.info
-                    "${CMAKE_SOURCE_DIR}/tests/*"
-                    "${CMAKE_SOURCE_DIR}/linux_kernel/*" "/usr/*"
+                    "${PROJECT_SOURCE_DIR}/tests/*"
+                    "${PROJECT_SOURCE_DIR}/linux_kernel/*" "/usr/*"
                     --output-file coverage.info -q
             COMMAND ${GENHTML_EXECUTABLE} coverage.info
                     --output-directory ${JITTER_COVERAGE_DIR}
             COMMENT "Running the test suite and writing the HTML coverage report"
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
             VERBATIM)
     else()
         message(FATAL_ERROR
@@ -774,13 +1173,60 @@ if(ENABLE_COVERAGE)
 endif()
 
 # pkg-config
-configure_package_config_file(
+# The private dependencies are appended with a leading blank each.
+string(STRIP "${JITTER_PC_LIBS_PRIVATE}" JITTER_PC_LIBS_PRIVATE)
+#
+# libdir and includedir are spelled relative to ${prefix} where GNUInstallDirs
+# has them relative, and prefix itself is only filled in by the install: a
+# "cmake --install --prefix" changes CMAKE_INSTALL_PREFIX then, and a prefix
+# written at configure time pointed the installed file at the old tree. Not
+# ${pcfiledir}, which pkg-config prefixes with PKG_CONFIG_SYSROOT_DIR a second
+# time in a cross build. The build tree's jitterentropy.pc keeps the configure
+# prefix.
+#
+# pkg-config splits Libs and Cflags at blanks after expanding the variables,
+# so a prefix of "C:/Program Files (x86)/jitterentropy" gave -LC:/Program and
+# a stray Files... argument. A blank in any path written here is escaped with
+# a backslash, which pkg-config and pkgconf both take out again - as they
+# would a backslash separator, hence forward slashes only.
+foreach(_jent_pc_dir LIBDIR INCLUDEDIR)
+    if(IS_ABSOLUTE "${CMAKE_INSTALL_${_jent_pc_dir}}")
+        string(REPLACE " " "\\ " JENT_PC_${_jent_pc_dir}
+               "${CMAKE_INSTALL_${_jent_pc_dir}}")
+    else()
+        set(JENT_PC_${_jent_pc_dir} "\${prefix}/${CMAKE_INSTALL_${_jent_pc_dir}}")
+    endif()
+endforeach()
+string(REPLACE " " "\\ " JENT_PC_PREFIX "${CMAKE_INSTALL_PREFIX}")
+configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/jitterentropy.pc.in
   ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.pc
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+  @ONLY
 )
+# The same once more with the placeholder left in, for the install to fill.
+set(JENT_PC_PREFIX "@JENT_PC_PREFIX@")
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/jitterentropy.pc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.pc.install
+  @ONLY
+)
+set(_jent_pc_installed ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/jitterentropy.pc)
+install(CODE "
+  set(_jent_pc_in \"${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.pc.install\")
+  set(_jent_pc_out \"${_jent_pc_installed}\")
+")
+install(CODE [[
+  set(_jent_pc_prefix "${CMAKE_INSTALL_PREFIX}")
+  if(CMAKE_HOST_WIN32)
+    string(REPLACE "\\" "/" _jent_pc_prefix "${_jent_pc_prefix}")
+  endif()
+  string(REPLACE " " "\\ " _jent_pc_prefix "${_jent_pc_prefix}")
+  file(READ "${_jent_pc_in}" _jent_pc)
+  string(REPLACE "@JENT_PC_PREFIX@" "${_jent_pc_prefix}" _jent_pc "${_jent_pc}")
+  file(WRITE "${_jent_pc_out}" "${_jent_pc}")
+]])
 install(FILES
-  ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.pc
+  ${_jent_pc_installed}
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
 
@@ -804,6 +1250,102 @@ install(FILES
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
 
-# man page(s)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/doc/jitterentropy.3
-        DESTINATION ${CMAKE_INSTALL_MANDIR}/man3)
+# man pages, for a target that can display them - see INSTALL_MAN above: the
+# overview, doc/jitterentropy.3, a page per group of functions, the tools'
+# where they are installed, and the kernel module's on Linux. Every title
+# names the version as x.y.z and the overview's synopsis as x, y and z; the
+# installed pages carry the values of this build. A placeholder that is gone
+# fails the configure rather than installing a page without the version.
+if(INSTALL_MAN)
+    set(_jent_man_pages
+        jitterentropy.3
+        jent_entropy_collector_alloc.3
+        jent_entropy_init.3
+        jent_entropy_switch_notime_impl.3
+        jent_read_entropy.3
+        jent_set_fips_failure_callback.3
+        jent_status.3)
+    if(ENABLE_TOOLS)
+        list(APPEND _jent_man_pages jitterentropy-flags.1
+             jitterentropy-hashtime.1 jitterentropy-osr.1 jitterentropy-rng.1)
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        list(APPEND _jent_man_pages jitter_rng.4)
+    endif()
+    if(ENABLE_KERNEL_LIB)
+        list(APPEND _jent_man_pages jitterentropy-kernel.3 jitter_rng.1)
+    endif()
+    if(ENABLE_RECORDING)
+        list(APPEND _jent_man_pages jitterentropy-record.3)
+    endif()
+    if(ENABLE_RNGD)
+        list(APPEND _jent_man_pages jitterentropy-rngd.1)
+    endif()
+    foreach(_jent_man_file ${_jent_man_pages})
+        string(REGEX REPLACE "\\.([0-9])$" ";\\1" _jent_man_pair "${_jent_man_file}")
+        list(GET _jent_man_pair 0 _jent_man_page)
+        list(GET _jent_man_pair 1 _jent_man_sec)
+        set(_jent_man_installed)
+        set(_jent_man_src ${CMAKE_CURRENT_SOURCE_DIR}/doc/${_jent_man_file})
+        set(_jent_man_out ${CMAKE_CURRENT_BINARY_DIR}/${_jent_man_file})
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                     ${_jent_man_src})
+        file(READ ${_jent_man_src} _jent_man)
+
+        set(_jent_man_from "\"jitterentropy x.y.z\"")
+        set(_jent_man_to "\"jitterentropy ${PROJECT_VERSION}\"")
+        if(_jent_man_page STREQUAL "jitterentropy")
+            foreach(_jent_man_macro MAJVERSION:x MINVERSION:y PATCHLEVEL:z)
+                string(REPLACE ":" ";" _jent_man_pair "${_jent_man_macro}")
+                list(GET _jent_man_pair 0 _jent_man_name)
+                list(GET _jent_man_pair 1 _jent_man_placeholder)
+                list(APPEND _jent_man_from
+                     "#define JENT_${_jent_man_name} ${_jent_man_placeholder}\"")
+                list(APPEND _jent_man_to
+                     "#define JENT_${_jent_man_name} ${JENT_${_jent_man_name}}\"")
+            endforeach()
+        endif()
+        foreach(_jent_man_f _jent_man_t IN ZIP_LISTS _jent_man_from _jent_man_to)
+            string(FIND "${_jent_man}" "${_jent_man_f}" _jent_man_at)
+            if(_jent_man_at EQUAL -1)
+                message(FATAL_ERROR
+                        "doc/${_jent_man_file} lacks '${_jent_man_f}'")
+            endif()
+            string(REPLACE "${_jent_man_f}" "${_jent_man_t}"
+                   _jent_man "${_jent_man}")
+        endforeach()
+        # Removed first: a build directory from before the split has this name
+        # as a symlink to jitterentropy.3, and writing would go through it.
+        file(REMOVE ${_jent_man_out})
+        file(WRITE ${_jent_man_out} "${_jent_man}")
+        list(APPEND _jent_man_installed ${_jent_man_out})
+
+        # An alias per further function the NAME section lists, so that
+        # "man jent_read_entropy_safe" finds its page. Symlinks rather than .so
+        # pages: man opens a link given as a path too, while it resolves a .so
+        # against the current directory then.
+        if(NOT _jent_man MATCHES "\\.SH NAME\n([^\n]*) \\\\- ")
+            message(FATAL_ERROR "doc/${_jent_man_file} has no NAME line")
+        endif()
+        string(REPLACE ", " ";" _jent_man_names "${CMAKE_MATCH_1}")
+        list(REMOVE_ITEM _jent_man_names ${_jent_man_page})
+        # Made here and installed with install(FILES), which copies a symlink as
+        # one, so that install_manifest.txt lists them. The link is made on the
+        # build host, though, and a Windows host - a cross build for Linux, or
+        # INSTALL_MAN forced on - needs a privilege to create a symlink and to
+        # install one, so there the alias is a copy of the page instead.
+        foreach(_jent_man_alias ${_jent_man_names})
+            set(_jent_man_link
+                ${CMAKE_CURRENT_BINARY_DIR}/${_jent_man_alias}.${_jent_man_sec})
+            if(CMAKE_HOST_WIN32)
+                file(COPY_FILE ${_jent_man_out} ${_jent_man_link}
+                     ONLY_IF_DIFFERENT)
+            else()
+                file(CREATE_LINK ${_jent_man_file} ${_jent_man_link} SYMBOLIC)
+            endif()
+            list(APPEND _jent_man_installed ${_jent_man_link})
+        endforeach()
+        install(FILES ${_jent_man_installed}
+                DESTINATION ${CMAKE_INSTALL_MANDIR}/man${_jent_man_sec})
+    endforeach()
+endif()

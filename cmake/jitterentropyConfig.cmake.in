@@ -1,5 +1,10 @@
 @PACKAGE_INIT@
 
+# What a static archive built with EXTERNAL_CRYPTO names in its link interface
+# and a consumer has to find again. Empty otherwise.
+include(CMakeFindDependencyMacro)
+@JENT_CONFIG_DEPENDENCIES@
+
 include(${CMAKE_CURRENT_LIST_DIR}/jitterentropyTargets.cmake)
 
 check_required_components(jitterentropy)

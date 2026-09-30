@@ -7,12 +7,29 @@ tests/raw-entropy/results-measurements/*.data
 /.vs
 build*/
 coverage/
+# The symlink "nix build" leaves.
+/result
 
 # Programs and objects the Makefile fallbacks build in place. The CMake build
 # puts its own outputs under build*/, which is covered above.
 *.o
+*.d
+# Coverage data of "make gcov" and the analyzer reports of "make scan" in the
+# Makefiles here and under tests/.
+*.gcda
+*.gcno
+*.gcov
+*.plist
+/libjitterentropy.a
+/libjitterentropy.so*
+/libjitterentropy.*dylib
+/libjitterentropy-record.a
+/libjitterentropy-record.so*
+/libjitterentropy-record.*dylib
 tests/gcd/gcd
+tests/gcd/build.flags
 tests/health/health
+tests/health/build.flags
 tests/unit/unit-*
 !tests/unit/unit-*.c
 !tests/unit/unit-*.h
@@ -44,3 +61,4 @@ crash-*
 leak-*
 timeout-*
 slow-unit-*
+__pycache__/

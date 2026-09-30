@@ -18,6 +18,7 @@ global:
 	jent_entropy_collector_memsize;
 	jent_entropy_collector_osr;
 	jent_entropy_collector_read_invocations;
+	jent_entropy_collector_reinitializations;
 	jent_entropy_collector_uuid;
 	jent_entropy_init;
 	jent_entropy_init_ex;
