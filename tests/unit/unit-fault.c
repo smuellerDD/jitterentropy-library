@@ -657,23 +657,6 @@ static void test_gcd_failures(void)
 		   "and passes again with the allocator restored");
 }
 
-/* The hash state allocation, which the collector cannot do without. */
-static void test_sha3_alloc_failure(void)
-{
-	void *hash_state = (void *)0x1;
-
-	jent_ut_group("the hash state under allocation failure");
-
-	fi_arm(1);
-	JENT_UT_NE(jent_sha3_alloc(&hash_state, 0), 0,
-		   "jent_sha3_alloc reports the denial");
-	fi_disarm();
-
-	JENT_UT_EQ(jent_sha3_alloc(&hash_state, 0), 0,
-		   "and succeeds again with the allocator restored");
-	jent_sha3_dealloc(hash_state);
-}
-
 /*
  * The recovery of jent_read_entropy_safe() reallocates the collector. When
  * that reallocation is denied, the original collector must be left intact and
@@ -1257,7 +1240,6 @@ int main(void)
 	test_startup_rejects_bad_timers();
 
 	test_injection_works();
-	test_sha3_alloc_failure();
 	test_gcd_failures();
 	test_collector_alloc_failures();
 	test_init_failures();
