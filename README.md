@@ -28,10 +28,10 @@ The API is documented in the man pages: jitterentropy.3 is the overview, and
 jent_entropy_init.3, jent_entropy_collector_alloc.3, jent_read_entropy.3,
 jent_status.3, jent_set_fips_failure_callback.3 and
 jent_entropy_switch_notime_impl.3 document the groups of functions. The tools
-jitterentropy-rng, jitterentropy-hashtime, jitterentropy-osr and
-jitterentropy-flags and the daemon jitterentropy-rngd have pages in section 1,
-the Linux kernel module jitter_rng.4, and the optional recording library
-jitterentropy-record.3.
+jitterentropy-rng, jitterentropy-hashtime, jitterentropy-osr,
+jitterentropy-flags and jitter_rng and the daemon jitterentropy-rngd have pages
+in section 1, the Linux kernel module jitter_rng.4, and the two optional
+libraries jitterentropy-record.3 and jitterentropy-kernel.3.
 
 To use the Jitter RNG, the header file jitterentropy.h must be included.
 

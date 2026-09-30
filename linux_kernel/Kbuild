@@ -1,4 +1,18 @@
 # Linux kernel build system: central build definition
 
-include $(src)/Kbuild.config
-include $(src)/Kbuild.source
+# The source directory of this Kbuild (linux_kernel/), usable from the
+# compiler's working directory, which is also make's. It is taken from the
+# path kbuild included this file by, which is usable from there on every
+# kernel. $(src) alone is not: up to 6.9 it is relative to the source tree
+# for an in-tree build (e.g. crypto/jitterentropy-library/linux_kernel),
+# which an O= build does not compile from, and kbuild stopped rewriting
+# relative -I paths before 5.10 - the kernel's own Makefiles of that era
+# spell -I$(srctree)/$(src). 6.10 to 6.12 put the $(srctree)/ prefix in
+# front of $(src) themselves. Since 6.13 kbuild changes into the external
+# module directory and $(src) is relative to it (./.), while $(srctree) is
+# still the kernel tree - so prefixing it as on 5.10-6.9 points into the
+# kernel tree.
+jent_srcdir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+
+include $(jent_srcdir)/Kbuild.config
+include $(jent_srcdir)/Kbuild.source

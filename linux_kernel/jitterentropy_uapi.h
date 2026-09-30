@@ -4,6 +4,7 @@
  * the debugfs raw entropy test interface (jent_raw_hires).
  *
  * Copyright (C) 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 #ifndef _UAPI_JITTERENTROPY_H
@@ -51,12 +52,26 @@ struct jent_status_ioctl {
  * The argument points to a __u64 holding the loop count. A value of 0 (the
  * default of every fresh instance) selects the loop count the instance was
  * configured with; any other value is passed as the loop_cnt parameter of
- * every subsequent raw noise measurement (see the jent_measure_jitter*()
- * functions), overriding the configured hash and memory access loop counts.
- * Values above UINT_MAX are rejected with -EINVAL, mirroring the bound of the
- * userspace recording tools.
+ * the raw noise measurements of every read that starts after it (see the
+ * jent_measure_jitter*() functions), overriding the configured hash and
+ * memory access loop counts; a read already running keeps its count.
+ * Values above JENT_LOOPCNT_MAX are rejected with -EINVAL.
  */
 #define JENT_IOCLOOPCNT _IOW(JENT_IOC_MAGIC, 0x02, __u64)
+
+/*
+ * Largest loop count JENT_IOCLOOPCNT accepts. One measurement runs both loops
+ * without a reschedule point - the recording yields between samples, but a
+ * measurement is the unit being timed and cannot be split - and a sample after
+ * a reschedule is preceded by a priming at the same count, so the count bounds
+ * how long two measurements hold the CPU. 1 << 16, far above any loop count
+ * the library runs itself (at most 384), takes about 0.6 seconds per
+ * measurement on current x86. That leaves room for a CPU some 15 times slower
+ * (a small 32-bit ARM core running the unoptimized Keccak) before the 20
+ * second softlockup watchdog and RCU stall detector of a non-preemptible
+ * kernel fire; 1 << 18 left less than a factor of five.
+ */
+#define JENT_LOOPCNT_MAX (1U << 16)
 
 /*
  * The single fields of the status document, for callers that want one value
@@ -105,6 +120,15 @@ struct jent_output_ioctl {
 #define JENT_IOCREINIT	_IOR(JENT_IOC_MAGIC, 0x09, __u32)
 
 /*
+ * The memory access region in bytes, as "memoryBlockSizeBytes": 0 without
+ * memory access.
+ */
+#define JENT_IOCMEMSIZE	_IOR(JENT_IOC_MAGIC, 0x0a, __u64)
+
+/* The hash loop count per measurement, as "hashLoopCount.runtime". */
+#define JENT_IOCHASHLOOPS _IOR(JENT_IOC_MAGIC, 0x0b, __u32)
+
+/*
  * Run the cryptographic self test - the SHA3-256 and XDRBG-256 known answer
  * tests of the conditioning component - and report the verdict. Implemented by
  * the character device and the debugfs test interface; takes no argument. An
@@ -122,6 +146,6 @@ struct jent_output_ioctl {
  * noise that never passes the conditioning component, so there is no output to
  * stop, and only the verdict of this run is returned.
  */
-#define JENT_IOCSELFTEST _IO(JENT_IOC_MAGIC, 0x0a)
+#define JENT_IOCSELFTEST _IO(JENT_IOC_MAGIC, 0x0c)
 
 #endif /* _UAPI_JITTERENTROPY_H */
