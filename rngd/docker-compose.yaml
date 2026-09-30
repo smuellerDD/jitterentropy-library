@@ -1,0 +1,12 @@
+name: jitterentropy
+
+services:
+    rngd:
+        build:
+            context: https://github.com/smuellerDD/jitterentropy-rngd.git
+        cap_add:
+            - SYS_ADMIN
+        cap_drop:
+            - ALL
+        network_mode: none
+        restart: always

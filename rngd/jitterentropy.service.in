@@ -1,0 +1,58 @@
+# Systemd configuration file
+#
+# The Jitterentropy RNGd does not depend on any other system
+# services. Futhermore, we want to start it as early as possible
+# in the boot cycle so that other services requiring
+# random numbers (like SSHD, TLS-based services) benefit
+# from a properly seeded /dev/?random
+
+[Unit]
+Description=Jitterentropy Gatherer Daemon
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+# The daemon reports READY=1 once it has seeded the kernel for the first time.
+# Units ordered after this one can therefore rely on /dev/random having been
+# seeded by the time they start. -F above keeps the main process in the
+# foreground, which Type=notify requires in order to track it.
+Type=notify
+NotifyAccess=main
+CapabilityBoundingSet=CAP_SYS_ADMIN
+DeviceAllow=/dev/null rw
+DeviceAllow=/dev/random rw
+DevicePolicy=strict
+ExecStart=@PATH@/jitterentropy-rngd -F
+IPAddressDeny=any
+LimitMEMLOCK=2M
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+MountFlags=private
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateMounts=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+PrivateUsers=no
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+ReadOnlyPaths=-/
+RemoveIPC=yes
+# AF_UNIX is required for the READY=1 notification to reach the service
+# manager, and for --syslog. An empty setting here denies every address
+# family, which would make Type=notify time out.
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@chown @clock @cpu-emulation @debug @ipc @module @mount @obsolete @privileged @raw-io @reboot @resources @swap memfd_create mincore mlockall personality
+UMask=0077
+
+[Install]
+WantedBy=basic.target
+Alias=jitterentropy-rngd.service
