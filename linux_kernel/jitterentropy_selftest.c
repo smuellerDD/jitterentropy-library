@@ -70,7 +70,9 @@ void jent_selftest_get_stats(struct jent_selftest_stats *stats)
  * acts as a FIPS 140 module and must panic on it, as it does on a permanent
  * health test failure (see jitterentropy_error.h). Otherwise a bound run
  * marks its instance (the library's JENT_ERR_SELFTEST gate), which from then
- * on refuses output - every other instance keeps delivering.
+ * on refuses output: the library would lift the gate on a later passing run,
+ * but the module runs none on the instance. Every other instance keeps
+ * delivering.
  */
 static int jent_selftest_execute(struct rand_data *ec)
 {
@@ -147,8 +149,8 @@ static void jent_selftest_instance_work_fn(struct work_struct *work)
 
 	/*
 	 * Not rescheduled after a failure (of this run, or of an on-demand
-	 * run since this one was queued): the instance is out of service and
-	 * further runs could not lift that.
+	 * run since this one was queued): the module keeps the instance out
+	 * of service rather than let a later passing run bring it back.
 	 */
 	if (!failed)
 		jent_selftest_instance_schedule(st);
@@ -189,8 +191,9 @@ int jent_selftest_instance_run(struct jent_selftest_instance *st)
 		return -ERESTARTSYS;
 
 	/*
-	 * The failure is sticky, so another run could only confirm it.
-	 * Report it without spending the work or repeating the log message.
+	 * The module keeps a failure: report it without running the tests
+	 * again, which could bring the instance back, and without repeating
+	 * the log message.
 	 */
 	if (st->failed) {
 		ret = -EFAULT;

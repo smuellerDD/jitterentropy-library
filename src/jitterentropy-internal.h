@@ -620,7 +620,7 @@ struct rand_data
 	 * mode. A full word rather than a bitfield: the self test may run on
 	 * another thread, and setting a bitfield would rewrite its neighbors.
 	 */
-	unsigned int selftest_failed:1;
+	int selftest_failed;
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	unsigned int notime_running:1;		/* a started thread to stop */

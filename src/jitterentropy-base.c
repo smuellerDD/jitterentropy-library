@@ -328,7 +328,7 @@ static void jent_stack_scrub_frame(void)
  *	JENT_ERR_RCT_MEM		(-9)  RCT with memory failed
  *	JENT_ERR_RCT_MEM_PERMANENT	(-10) RCT with memory permanent failure
  *	JENT_ERR_SELFTEST		(-11) A bound jent_selftest run failed,
- *					      permanently
+ *					      until a later bound run passes
  */
 JENT_PRIVATE_STATIC
 ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
@@ -380,7 +380,7 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		 * self test failing on another thread stops a request already
 		 * in flight.
 		 */
-		if (ec->selftest_failed) {
+		if (jent_atomic_load_int(&ec->selftest_failed)) {
 			ret = JENT_ERR_SELFTEST;
 			goto err;
 		}
@@ -1240,26 +1240,27 @@ out:
  * They run on stack-local state alone, touching nothing of the library, of a
  * collector or of the operating system, and are therefore reentrant: callable
  * at any time, from any thread, in parallel with entropy collection,
- * allocating nothing and never blocking. Only a failure writes to the bound
- * collector, and nothing but this function ever sets that word.
+ * allocating nothing and never blocking. Only the verdict is written to the
+ * bound collector.
  *
  * @param[in] ec Entropy collector the verdict is bound to: a failure puts the
- *		 instance permanently out of service, jent_read_entropy*()
- *		 returning JENT_ERR_SELFTEST instead of output from then on.
- *		 May be NULL to obtain the verdict without binding it.
+ *		 instance out of service, jent_read_entropy*() returning
+ *		 JENT_ERR_SELFTEST instead of output, until a later run bound
+ *		 to it passes. May be NULL to obtain the verdict without
+ *		 binding it.
  *
  * @return 0 on success, EHASH if a known answer test failed.
  */
 JENT_PRIVATE_STATIC
 int jent_selftest(struct rand_data *ec)
 {
-	if (jent_sha3_tester()) {
-		if (ec)
-			ec->selftest_failed = 1;
-		return EHASH;
-	}
+	int ret = jent_sha3_tester() ? EHASH : 0;
 
-	return 0;
+	/* A pass brings an instance a failed run stopped back into service. */
+	if (ec)
+		jent_atomic_store_int(&ec->selftest_failed, ret ? 1 : 0);
+
+	return ret;
 }
 
 /*

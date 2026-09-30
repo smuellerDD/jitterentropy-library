@@ -507,7 +507,7 @@ static void test_selftest_failure_stops_output(void)
 	unsigned char buf[32], zero[32];
 	size_t i;
 
-	jent_ut_group("a failed jent_selftest stops the output");
+	jent_ut_group("a failed jent_selftest stops the output until one passes");
 
 	ec = jent_entropy_collector_alloc(0, 0);
 	if (!ec) {
@@ -541,6 +541,12 @@ static void test_selftest_failure_stops_output(void)
 		   "jent_read_entropy_safe does not recover from it");
 	JENT_UT_EQ(ec->reinit_count, 0u,
 		   "and no reallocation was attempted");
+
+	JENT_UT_EQ(jent_selftest(ec), 0, "a later bound run passes");
+	JENT_UT_EQ(ec->selftest_failed, 0u,
+		   "and brings the instance back into service");
+	JENT_UT_EQ(jent_read_entropy(ec, (char *)buf, sizeof(buf)),
+		   (ssize_t)sizeof(buf), "jent_read_entropy delivers again");
 
 	jent_entropy_collector_free(ec);
 }

@@ -481,10 +481,11 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags);
  * They run on stack-local state alone: callable at any time, from any thread,
  * in parallel with entropy collection, allocating nothing and never blocking.
  *
- * ec binds the verdict to an instance: on failure that instance permanently
- * stops producing output - jent_read_entropy and jent_read_entropy_safe
- * return JENT_ERR_SELFTEST from then on, in every mode, not only under FIPS.
- * ec may be NULL to obtain the verdict without binding it to an instance.
+ * ec binds the verdict to an instance: on failure that instance stops
+ * producing output - jent_read_entropy and jent_read_entropy_safe return
+ * JENT_ERR_SELFTEST, in every mode, not only under FIPS - until a later run
+ * bound to it passes. ec may be NULL to obtain the verdict without binding it
+ * to an instance.
  * Returns 0, or EHASH on failure as jent_entropy_init* does.
  */
 JENT_PRIVATE_STATIC
@@ -657,8 +658,8 @@ void jent_notime_fini(void *ctx);
 #define JENT_ERR_RCT_MEM_PERMANENT (-10) /* Permanent RCT with memory
 					    failure */
 #define JENT_ERR_SELFTEST	(-11) /* A jent_selftest run bound to this
-					 instance failed; the failure is
-					 permanent */
+					 instance failed; a later passing
+					 bound run clears it */
 /* -- END error codes for jent_read_entropy / jent_read_entropy_safe -- */
 
 /* -- BEGIN error masks for health tests -- */
