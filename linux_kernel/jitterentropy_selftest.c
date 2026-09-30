@@ -21,7 +21,7 @@
 #include "jitterentropy_selftest.h"
 
 /* Shared with the other interfaces, see jitterentropy_mod.c. */
-extern unsigned int verbose;
+extern unsigned int jent_verbose;
 
 /*
  * Seconds between two runs of the known answer tests of each instance. 0 by
@@ -94,7 +94,7 @@ static int jent_selftest_execute(struct rand_data *ec)
 	atomic64_inc(&jent_selftest_runs);
 
 	if (!ret) {
-		if (verbose)
+		if (jent_verbose)
 			pr_info("jitterentropy: cryptographic self test passed%s\n",
 				instance);
 

@@ -13,8 +13,13 @@
 #   $(src)        -> linux_kernel/       (kernel interface headers)
 #   $(src)/..     -> project root        (jitterentropy.h, arch/*.h)
 #   $(src)/../src -> src/                (library internal headers)
+#
+# The kernel interfaces get no src/: they use the library through
+# jitterentropy.h alone, and the test interface the recording library's
+# jitterentropy-record.h.
 jitter_rng_c_args = -DLINUX_KERNEL					       \
-		    -I$(src) -I$(src)/.. -I$(src)/../src
+		    -I$(src) -I$(src)/..
+jitter_rng_lib_c_args = $(jitter_rng_c_args) -I$(src)/../src
 jent_recorddir = tests/raw-entropy/recording_library
 
 # The interface options are boolean: 'y' enables, anything else (unset, empty,
@@ -63,21 +68,22 @@ jitter_rng-y += ../src/jitterentropy-base.o				       \
 		jitterentropy_mod.o					       \
 		jitterentropy_ioctl.o					       \
 		jitterentropy_proc.o					       \
-		jitterentropy_selftest.o
+		jitterentropy_selftest.o				       \
+		jitterentropy_status.o
 
-jitter_rng_c_args_zero = -O0 $(jitter_rng_c_args)
+jitter_rng_c_args_zero = -O0 $(jitter_rng_lib_c_args)
 
 CFLAGS_../src/jitterentropy-base.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-gcd.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-health.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-noise.o = $(jitter_rng_c_args_zero)
-CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_c_args)
+CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_lib_c_args)
 # The UUID is formatting, not measurement: it needs no -O0.
-CFLAGS_../src/jitterentropy-uuid.o = $(jitter_rng_c_args)
+CFLAGS_../src/jitterentropy-uuid.o = $(jitter_rng_lib_c_args)
 CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
-CFLAGS_../arch/jitterentropy-arch-atomic.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-atomic.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_lib_c_args)
 # Deliberately not $(jitter_rng_c_args_zero), unlike the entropy core above.
 # This object is the one place <linux/timex.h> is included, and that header does
 # not compile at -O0 on current kernels: x86's random_get_entropy() reaches
@@ -92,16 +98,17 @@ CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_c_args)
 # loongarch64 read their counter with the instruction directly and would build
 # at -O0 as well. The flags are kept uniform for the object rather than made
 # conditional on the target architecture.
-CFLAGS_../arch/jitterentropy-arch-timer.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-ncpu.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-random.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-timer.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-ncpu.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-random.o = $(jitter_rng_lib_c_args)
 CFLAGS_jitterentropy_mod.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_ioctl.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_selftest.o = $(jitter_rng_c_args)
+CFLAGS_jitterentropy_status.o = $(jitter_rng_c_args)
 
 ################### Kernel Crypto API Interface Compilation ####################
 
@@ -136,4 +143,4 @@ jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE)		       \
 CFLAGS_jitterentropy_testing.o = $(jitter_rng_c_args)			       \
 				 -I$(src)/../$(jent_recorddir)
 CFLAGS_../$(jent_recorddir)/jitterentropy-record-session.o =		       \
-	$(jitter_rng_c_args)
+	$(jitter_rng_lib_c_args)

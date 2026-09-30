@@ -21,6 +21,7 @@
  * already-created file are refused once lockdown is raised at runtime.
  *
  * Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 #include <linux/debugfs.h>
@@ -39,6 +40,7 @@
 #include "jitterentropy.h"
 #include "jitterentropy-record.h"
 #include "jitterentropy_ioctl.h"
+#include "jitterentropy_status.h"
 #include "jitterentropy_testing.h"
 #include "jitterentropy_uapi.h"
 
@@ -99,15 +101,11 @@ static unsigned int logged_flags = 0xffffffff;
  * Verbose logging switch, configurable via the module parameter of the same
  * name (see jitterentropy_mod.c).
  */
-extern unsigned int verbose;
+extern unsigned int jent_verbose;
 
 static int jent_testing_log(struct rand_data *ec)
 {
-	char *line, *p;
-	char *buf;
-	int ret;
-
-	if (!verbose)
+	if (!jent_verbose)
 		return 0;
 
 	if (logged_osr == testing_osr && logged_flags == testing_flags)
@@ -123,29 +121,13 @@ static int jent_testing_log(struct rand_data *ec)
 	logged_osr = testing_osr;
 	logged_flags = testing_flags;
 
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	ret = jent_status(ec, buf, JENT_STATUS_MAX_LEN);
-	if (ret < 0)
-		goto err;
-
 	/*
-	 * printk truncates records at about 1 kB; emit the multi-line JSON
-	 * status line by line so it arrives intact. Rate-limit the status as
-	 * a whole, not per line, so an emitted status is never cut short.
+	 * NULL lock: the caller already holds jent_testing_read_lock, which is
+	 * also what serializes the logged_osr/logged_flags bookkeeping above.
+	 * The collector of a test instance is never reallocated, so the
+	 * indirection the shared renderer takes is a formality here.
 	 */
-	p = buf;
-	while ((line = strsep(&p, "\n")) != NULL) {
-		if (*line) {
-			pr_notice("%s\n", line);
-		}
-	}
-
-err:
-	kvfree(buf);
-	return ret;
+	return jent_status_to_log(NULL, &ec);
 }
 
 /************** Raw High-Resolution Timer Entropy Data Handling **************/
@@ -394,76 +376,6 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 }
 
 /*
- * Serialize the JSON status string of the per-open Jitter RNG instance into a
- * user-provided buffer. Same ABI and semantics as the JENT_IOCSTATUS handler
- * of the character device (see jitterentropy_chardev.c).
- *
- * The status is derived from mutable collector state (health test and output
- * accounting), so the extract-session lock is held while jent_status() runs
- * to keep a concurrent extract session from mutating it mid-serialization.
- * Unlike the character device, the collector is never reallocated during the
- * lifetime of the open file, so ctx->ec itself is stable.
- */
-static long jent_testing_ioctl_status(struct jent_testing_ctx *ctx,
-				      void __user *arg)
-{
-	struct jent_status_ioctl status;
-	char *buf;
-	size_t slen;
-	long ret;
-
-	if (copy_from_user(&status, arg, sizeof(status)))
-		return -EFAULT;
-
-	buf = kvzalloc(JENT_STATUS_MAX_LEN, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	if (mutex_lock_interruptible(&jent_testing_read_lock)) {
-		ret = -ERESTARTSYS;
-		goto out;
-	}
-
-	ret = jent_status(ctx->ec, buf, JENT_STATUS_MAX_LEN);
-	mutex_unlock(&jent_testing_read_lock);
-
-	if (ret) {
-		ret = -EIO;
-		goto out;
-	}
-
-	/* Number of bytes to copy out, including the terminating NUL. */
-	slen = strlen(buf) + 1;
-
-	if (status.length < slen) {
-		/* Buffer too small: report the required size to userspace. */
-		status.length = slen;
-		if (copy_to_user(arg, &status, sizeof(status)))
-			ret = -EFAULT;
-		else
-			ret = -EOVERFLOW;
-		goto out;
-	}
-
-	if (copy_to_user(u64_to_user_ptr(status.buf), buf, slen)) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	status.length = slen;
-	if (copy_to_user(arg, &status, sizeof(status))) {
-		ret = -EFAULT;
-		goto out;
-	}
-
-	ret = 0;
-
-out:
-	kvfree(buf);
-	return ret;
-}
-
-/*
  * Set the loop count applied to the raw noise measurements of this open
  * instance (see the loop_cnt member of struct jent_testing_ctx). Taking the
  * extract-session lock defers the update until a running extract session has
@@ -489,30 +401,6 @@ static long jent_testing_ioctl_loopcnt(struct jent_testing_ctx *ctx,
 	return 0;
 }
 
-/*
- * As the character device does. JENT_IOCUUID gives -ENODATA here: ctx->ec is a
- * raw instance and skips the startup that assigns the UUID.
- */
-static long jent_testing_ioctl_field(struct jent_testing_ctx *ctx,
-				     unsigned int cmd, void __user *arg)
-{
-	struct jent_ioctl_field field;
-	int ret;
-
-	if (mutex_lock_interruptible(&jent_testing_read_lock))
-		return -ERESTARTSYS;
-	ret = jent_ioctl_field_get(ctx->ec, cmd, &field);
-	mutex_unlock(&jent_testing_read_lock);
-
-	if (ret)
-		return ret;
-
-	if (copy_to_user(arg, &field.value, field.size))
-		return -EFAULT;
-
-	return 0;
-}
-
 static long jent_testing_ioctl(struct file *file, unsigned int cmd,
 			       unsigned long arg)
 {
@@ -521,9 +409,21 @@ static long jent_testing_ioctl(struct file *file, unsigned int cmd,
 	if (!ctx)
 		return -EFAULT;
 
+	/*
+	 * The status and field handlers take the extract-session lock
+	 * themselves, which keeps a concurrent extract session from mutating
+	 * the state being reported. Unlike the character device the collector
+	 * is never reallocated during the lifetime of the open file, so ctx->ec
+	 * itself is stable and the indirection they take is a formality here.
+	 *
+	 * JENT_IOCSTATUS has the same ABI and semantics as on the character
+	 * device; JENT_IOCUUID gives -ENODATA, as ctx->ec is a raw instance and
+	 * skips the startup that assigns the UUID.
+	 */
 	switch (cmd) {
 	case JENT_IOCSTATUS:
-		return jent_testing_ioctl_status(ctx, (void __user *)arg);
+		return jent_status_to_user(&jent_testing_read_lock, &ctx->ec,
+					   (void __user *)arg);
 	case JENT_IOCLOOPCNT:
 		return jent_testing_ioctl_loopcnt(ctx, (void __user *)arg);
 	case JENT_IOCSELFTEST:
@@ -531,7 +431,8 @@ static long jent_testing_ioctl(struct file *file, unsigned int cmd,
 		return jent_ioctl_selftest(NULL);
 	default:
 		if (jent_ioctl_is_field(cmd))
-			return jent_testing_ioctl_field(ctx, cmd,
+			return jent_ioctl_field_to_user(&jent_testing_read_lock,
+							&ctx->ec, cmd,
 							(void __user *)arg);
 		return -ENOTTY;
 	}

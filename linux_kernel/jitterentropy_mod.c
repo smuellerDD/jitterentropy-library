@@ -7,6 +7,7 @@
  * interface) together in the module init/exit paths.
  *
  * Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 /*
@@ -36,12 +37,17 @@
  *
  * osr, flags and verbose are non-static as they are shared with the kernel
  * interfaces: osr and flags with the crypto API, hwrng and character device
- * interfaces, verbose with the crypto API and test interfaces (see
- * jitterentropy_kcapi.c and jitterentropy_testing.c).
+ * interfaces and procfs, verbose with the crypto API, self test and test
+ * interfaces (see jitterentropy_kcapi.c and jitterentropy_testing.c).
+ *
+ * Being global, the variables carry the jent_ prefix: built into vmlinux
+ * (CONFIG_BUILTIN_JITTERENTROPY) they share one symbol namespace with the
+ * whole kernel, where names like flags or verbose risk a multiple definition.
+ * module_param_named() keeps the parameter names users set.
  */
-unsigned int osr = 0;
-unsigned int flags = 0;
-unsigned int verbose = 0;
+unsigned int jent_osr = 0;
+unsigned int jent_flags = 0;
+unsigned int jent_verbose = 0;
 
 /*
  * Shortcut parameters for common operation modes. They are folded into the
@@ -53,11 +59,11 @@ static bool ntg1 = false;
 static bool force_fips = false;
 static bool cache_all = false;
 
-module_param(osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
+module_param_named(osr, jent_osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(osr, "Jitter RNG OSR parameter");
-module_param(flags, uint, S_IRUSR | S_IRGRP | S_IROTH);
+module_param_named(flags, jent_flags, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(flags, "Jitter RNG flags parameter");
-module_param(verbose, uint, S_IRUSR | S_IRGRP | S_IROTH);
+module_param_named(verbose, jent_verbose, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(verbose, "Jitter RNG verbose logging");
 module_param(ntg1, bool, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(ntg1, "Enable AIS 20/31 NTG.1 compliant operation (shortcut for the JENT_NTG1 bit in flags)");
@@ -77,13 +83,13 @@ static int __init jent_mod_init(void)
 	 * time, and the sysfs flags file then reports the effective value.
 	 */
 	if (ntg1)
-		flags |= JENT_NTG1;
+		jent_flags |= JENT_NTG1;
 	if (force_fips)
-		flags |= JENT_FORCE_FIPS;
+		jent_flags |= JENT_FORCE_FIPS;
 	if (cache_all)
-		flags |= JENT_CACHE_ALL;
+		jent_flags |= JENT_CACHE_ALL;
 
-	ret = jent_entropy_init_ex(osr, flags);
+	ret = jent_entropy_init_ex(jent_osr, jent_flags);
 	if (ret) {
 		/* Handle permanent health test error */
 		if (fips_enabled)
@@ -170,6 +176,7 @@ module_exit(jent_mod_exit);
 
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_AUTHOR("Stephan Mueller <smueller@chronox.de>");
+MODULE_AUTHOR("Markus Theil <theil.markus@gmail.com>");
 MODULE_DESCRIPTION("Non-physical True Random Number Generator based on CPU Jitter");
 /*
  * The crypto API name depends on the build mode (see jent_alg.base.cra_name

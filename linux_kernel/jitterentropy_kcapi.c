@@ -3,6 +3,7 @@
  * Kernel crypto API interface for Jitter RNG.
  *
  * Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
  */
 
 
@@ -19,15 +20,16 @@
 #include "jitterentropy_error.h"
 #include "jitterentropy_kcapi.h"
 #include "jitterentropy_selftest.h"
+#include "jitterentropy_status.h"
 
 /*
  * The OSR and flags used to allocate the per-tfm Jitter RNG instances and the
  * verbose logging switch are configurable via the module parameters of the
  * same name (see jitterentropy_mod.c).
  */
-extern unsigned int osr;
-extern unsigned int flags;
-extern unsigned int verbose;
+extern unsigned int jent_osr;
+extern unsigned int jent_flags;
+extern unsigned int jent_verbose;
 
 /***************************************************************************
  * Kernel crypto API interface
@@ -64,44 +66,20 @@ static int jent_kcapi_log(struct jitterentropy *rng)
 {
 	static DEFINE_RATELIMIT_STATE(jent_log_rs, DEFAULT_RATELIMIT_INTERVAL,
 				      DEFAULT_RATELIMIT_BURST);
-	char *line, *p;
-	char *buf;
-	int ret;
 
-	if (!verbose)
+	if (!jent_verbose)
 		return 0;
 
-#define JENT_STATUS_BUF_SIZE 4096
-	buf = kvzalloc(JENT_STATUS_BUF_SIZE, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
+	/*
+	 * Rate-limit the status as a whole, not per line, so an emitted status
+	 * is never cut short. Asked before the document is rendered: a
+	 * suppressed status is not worth serializing.
+	 */
+	if (!__ratelimit(&jent_log_rs))
+		return 0;
 
 	/* The collector pointer must not be read without the lock. */
-	mutex_lock(&rng->jent_lock);
-	if (rng->entropy_collector)
-		ret = jent_status(rng->entropy_collector, buf,
-				  JENT_STATUS_BUF_SIZE);
-	else
-		ret = 0;
-	mutex_unlock(&rng->jent_lock);
-	if (ret || !buf[0])
-		goto err;
-
-	/*
-	 * printk truncates records at about 1 kB; emit the multi-line JSON
-	 * status line by line so it arrives intact. Rate-limit the status as
-	 * a whole, not per line, so an emitted status is never cut short.
-	 */
-	if (__ratelimit(&jent_log_rs)) {
-		p = buf;
-		while ((line = strsep(&p, "\n")) != NULL)
-			if (*line)
-				pr_notice("%s\n", line);
-	}
-
-err:
-	kvfree(buf);
-	return ret;
+	return jent_status_to_log(&rng->jent_lock, &rng->entropy_collector);
 }
 
 static int jent_kcapi_tfm_init(struct crypto_tfm *tfm)
@@ -110,7 +88,8 @@ static int jent_kcapi_tfm_init(struct crypto_tfm *tfm)
 
 	mutex_init(&rng->jent_lock);
 
-	rng->entropy_collector = jent_entropy_collector_alloc(osr, flags);
+	rng->entropy_collector =
+		jent_entropy_collector_alloc(jent_osr, jent_flags);
 	if (!rng->entropy_collector) {
 		mutex_destroy(&rng->jent_lock);
 		return -ENOMEM;
@@ -172,7 +151,7 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 
 	mutex_unlock(&rng->jent_lock);
 
-	if (verbose && reallocated) {
+	if (jent_verbose && reallocated) {
 		/*
 		 * The entropy collector was reallocated
 		 *
