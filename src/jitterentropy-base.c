@@ -236,6 +236,49 @@ static inline unsigned int jent_update_secure_mem(unsigned int flags)
 }
 
 /***************************************************************************
+ * Stack Scrubbing
+ ***************************************************************************/
+
+/*
+ * Clear the stack the noise source left behind, at the end of every entry
+ * point that runs it. 4 kB covers the deepest path. Hosted only.
+ */
+#define JENT_STACK_SCRUB_LEN	4096
+
+#if !defined(LINUX_KERNEL) && !defined(__KERNEL__) && !defined(JENT_BAREMETAL) && \
+    !(defined(_KERNEL) && defined(__FreeBSD__))
+
+/* Not instrumented: ASan would move the array away from the stack below. */
+static JENT_NO_SANITIZE_ADDRESS void jent_stack_scrub_array(void)
+{
+	unsigned char scrub[JENT_STACK_SCRUB_LEN];
+
+	jent_memset_secure(scrub, sizeof(scrub));
+}
+
+/* The padding between that array and the stack canary. */
+static void jent_stack_scrub_frame(void)
+{
+	volatile unsigned long z0 = 0, z1 = 0, z2 = 0, z3 = 0;
+	volatile unsigned long z4 = 0, z5 = 0, z6 = 0, z7 = 0;
+
+	(void)z0; (void)z1; (void)z2; (void)z3;
+	(void)z4; (void)z5; (void)z6; (void)z7;
+}
+
+#define jent_stack_scrub()						       \
+	do {								       \
+		jent_stack_scrub_array();				       \
+		jent_stack_scrub_frame();				       \
+	} while (0)
+
+#else /* freestanding */
+
+#define jent_stack_scrub()	do { } while (0)
+
+#endif
+
+/***************************************************************************
  * Random Number Generation
  ***************************************************************************/
 
@@ -244,9 +287,9 @@ static inline unsigned int jent_update_secure_mem(unsigned int flags)
  *
  * This function invokes the entropy gathering logic as often to generate
  * as many bytes as requested by the caller. The entropy gathering logic
- * creates 64 bit per invocation.
+ * creates 256 bit per invocation.
  *
- * This function truncates the last 64 bit entropy value output to the exact
+ * This function truncates the last 256 bit entropy value output to the exact
  * size specified by the caller.
  *
  * @param[in] ec Reference to entropy collector
@@ -303,8 +346,10 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 		len = ssize_max;
 	orig_len = len;
 
-	if (jent_notime_settick(ec))
+	if (jent_notime_settick(ec)) {
+		jent_stack_scrub();
 		return JENT_ERR_NOTIME;
+	}
 
 	while (len > 0) {
 		size_t tocopy;
@@ -384,11 +429,16 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 err:
 	jent_notime_unsettick(ec);
 
-	/* Count only the bytes actually delivered to the caller. */
+	/* A failure outputs nothing: wipe what earlier blocks copied. */
+	if (ret && p != data)
+		jent_memset_secure(data, (size_t)(p - data));
+
 	if (!ret) {
 		ec->read_invocations++;
 		ec->bytes_output += orig_len;
 	}
+
+	jent_stack_scrub();
 
 	return ret ? ret : (ssize_t)orig_len;
 }

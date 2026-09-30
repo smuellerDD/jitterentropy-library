@@ -169,11 +169,16 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 # define JENT_FALLTHROUGH	do {} while (0)
 #endif
 
-/*
- * 64-bit division / modulo with a 64-bit divisor; see the kernel branch
- * above for the rationale. Userspace links against libgcc (or an
- * equivalent), so the plain operators are used directly.
- */
+/* Keep AddressSanitizer's redzones and fake stack out of a function. */
+#if defined(__has_attribute)
+# if __has_attribute(__no_sanitize_address__)
+#  define JENT_NO_SANITIZE_ADDRESS	__attribute__((__no_sanitize_address__))
+# endif
+#endif
+#ifndef JENT_NO_SANITIZE_ADDRESS
+# define JENT_NO_SANITIZE_ADDRESS
+#endif
+
 static inline uint64_t jent_udiv64(uint64_t dividend, uint64_t divisor)
 {
 	return dividend / divisor;
