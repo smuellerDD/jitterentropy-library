@@ -29,15 +29,10 @@
  * lost measurement: too large truncates the jitter away, too small leaves the
  * deltas un-normalized for the minimum-variation check below.
  *
- * 64 bits are not atomically accessible everywhere, so each divisor is
- * published through two 32-bit flags (see arch/jitterentropy-arch-atomic.h):
- * claimed is exchanged, so of several threads analyzing one clock exactly one
- * writes - they need not agree on the value - and set is stored with release
- * after that write and loaded with acquire before every read.
+ * 32 bits (see the bound in jent_gcd_analyze()) for atomic access, zero is not
+ * established.
  */
-static uint64_t jent_common_timer_gcd[JENT_GCD_CLOCKS] = { 0 };
-static int jent_common_timer_gcd_claimed[JENT_GCD_CLOCKS] = { 0 };
-static int jent_common_timer_gcd_set[JENT_GCD_CLOCKS] = { 0 };
+static uint32_t jent_common_timer_gcd[JENT_GCD_CLOCKS] = { 0 };
 
 /* Takes enable_notime as it stands, so that no call site has to translate. */
 static inline unsigned int jent_gcd_clock(unsigned int notime)
@@ -47,7 +42,7 @@ static inline unsigned int jent_gcd_clock(unsigned int notime)
 
 static inline int jent_gcd_tested(unsigned int clock)
 {
-	return jent_atomic_load_int(&jent_common_timer_gcd_set[clock]);
+	return !!jent_atomic_load_u32(&jent_common_timer_gcd[clock]);
 }
 
 /* A straight forward implementation of the Euclidean algorithm for GCD. */
@@ -145,22 +140,23 @@ int jent_gcd_analyze(uint64_t *delta_history, size_t nelem, size_t osr,
 	}
 
 	/*
-	 * Adjust all deltas by the observed (small) common factor.
+	 * Adjust all deltas by the observed (small) common factor. The first
+	 * startup on the clock sets it, and it is fixed from then on: startups
+	 * racing on the same clock each measure one, and a later store would
+	 * change the divisor under the collectors already dividing by the
+	 * first - a compare-and-swap against the unset 0, not a check and a
+	 * store.
 	 *
-	 * A zero divisor is not established, as it was not while the flag was
-	 * the value itself: every caller of jent_gcd_get() divides by what it
-	 * is given, and the "not established yet" answer is what makes it use
-	 * a divisor of one instead. It takes an all-zero delta history to
-	 * arrive here with one, which the variation check above rejects before
-	 * this point - the guard states the invariant rather than covering a
-	 * reachable case.
+	 * A zero divisor is not established, zero being the unset value: a
+	 * collector divides by what jent_gcd_get() gives it, and the "not
+	 * established yet" answer has one measuring the clock divide by one and
+	 * refuses any other. It takes an all-zero delta history to arrive here
+	 * with one, which the variation check above rejects before this point -
+	 * the guard states the invariant rather than covering a reachable case.
 	 */
-	if (running_gcd && !jent_gcd_tested(clock) &&
-	    !jent_atomic_exchange_int(&jent_common_timer_gcd_claimed[clock],
-				      1)) {
-		jent_common_timer_gcd[clock] = running_gcd;
-		jent_atomic_store_int(&jent_common_timer_gcd_set[clock], 1);
-	}
+	if (running_gcd)
+		(void)jent_atomic_cmpxchg_u32(&jent_common_timer_gcd[clock], 0,
+					      (uint32_t)running_gcd);
 
 out:
 	return ret;
@@ -190,7 +186,7 @@ int jent_gcd_get(uint64_t *value, unsigned int notime)
 	if (!jent_gcd_tested(clock))
 		return 1;
 
-	*value = jent_common_timer_gcd[clock];
+	*value = jent_atomic_load_u32(&jent_common_timer_gcd[clock]);
 	return 0;
 }
 
