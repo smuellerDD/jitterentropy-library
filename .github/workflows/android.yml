@@ -1,0 +1,82 @@
+name: Android
+
+# Android: the library and the example app, built through the nix flake.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  nix-android:
+    name: library
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths .#android)
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          find "$OUT/lib" -name '*.so' -print0 |
+            xargs -0 --no-run-if-empty nix shell nixpkgs#file -c file
+          for abi in arm64-v8a x86_64; do
+            test -f "$OUT/lib/$abi/libjitterentropy.so" || {
+              echo "::error::no libjitterentropy.so for ABI $abi"
+              exit 1
+            }
+          done
+
+  # The example app in tests/android: the library built through CMake by
+  # Gradle, as an app embeds it, rather than by ndk-build as above.
+  nix-android-example:
+    name: example app
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths .#android-example)
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Check the APK
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          apk="$OUT/jitterentropy-example.apk"
+          unzip -l "$apk"
+          for abi in arm64-v8a x86_64; do
+            unzip -l "$apk" "lib/$abi/libjitterentropy_jni.so" > /dev/null || {
+              echo "::error::no libjitterentropy_jni.so for ABI $abi"
+              exit 1
+            }
+          done

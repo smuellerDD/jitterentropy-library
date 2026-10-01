@@ -1,0 +1,176 @@
+name: Apple
+
+# Apple platforms: macOS, iOS and the other embedded targets.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  macos:
+    name: ${{ matrix.os }}, ${{ matrix.shared == 'ON' && 'shared' || 'static' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, macos-15-intel ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      - name: Run tests
+        run: |
+          ctest --test-dir build --output-on-failure -LE unreliable
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo --json > /dev/null
+          export DYLD_LIBRARY_PATH="$PWD/build:$DYLD_LIBRARY_PATH"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  # The example app in tests/ios, built for the simulator: no signing needed.
+  ios:
+    name: iOS example app
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: cmake -S tests/ios -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS
+
+      - name: Build
+        run: |
+          cmake --build build-ios --config Debug -- \
+            -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO
+
+      - name: Check the app
+        run: |
+          app=build-ios/Debug-iphonesimulator/JitterEntropyExample.app
+          test -x "$app/JitterEntropyExample" || {
+            echo "::error::no app binary in $app"
+            exit 1
+          }
+          plutil -p "$app/Info.plist"
+
+  apple-embedded:
+    name: ${{ matrix.platform }} cross build
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: watchOS
+            device_sdk: watchos
+            sim_sdk: watchsimulator
+          - platform: tvOS
+            device_sdk: appletvos
+            sim_sdk: appletvsimulator
+          - platform: visionOS
+            device_sdk: xros
+            sim_sdk: xrsimulator
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the SDKs are installed
+        run: |
+          for sdk in '${{ matrix.device_sdk }}' '${{ matrix.sim_sdk }}'; do
+            xcrun --sdk "$sdk" --show-sdk-path || {
+              echo "::error::no $sdk SDK in $(xcode-select -p)"
+              xcodebuild -showsdks
+              exit 1
+            }
+          done
+
+      - name: Cross-build the library
+        run: |
+          platform='${{ matrix.platform }}'
+          # WATCHOS, TVOS, VISIONOS - the token vtool prints for the device
+          # SDK; the simulator SDKs append SIMULATOR to it.
+          platform_uc=$(printf '%s' "$platform" | tr '[:lower:]' '[:upper:]')
+
+          for sdk in '${{ matrix.device_sdk }}' '${{ matrix.sim_sdk }}'; do
+            case "$sdk" in
+            *simulator)	expect="${platform_uc}SIMULATOR" ;;
+            *)		expect="$platform_uc" ;;
+            esac
+
+            for shared in ON OFF; do
+              build="build-$sdk-$shared"
+              echo "::group::$platform / $sdk / shared=$shared"
+
+              #
+              # The test programs are left out: CMake makes an executable a
+              # MACOSX_BUNDLE target on every embedded Apple platform, and a
+              # bundle is no program to run here. The tools are off by
+              # default on these platforms for the same reason, and that
+              # default is what is configured - not asked for.
+              #
+              cmake -S . -B "$build" \
+                -DCMAKE_SYSTEM_NAME="$platform" \
+                -DCMAKE_OSX_SYSROOT="$sdk" \
+                -DBUILD_SHARED_LIBS="$shared" \
+                -DBUILD_TESTING=OFF
+              cmake --build "$build" -j "$(sysctl -n hw.ncpu)"
+
+              if [ "$shared" = ON ]; then
+                lib="$build/libjitterentropy.dylib"
+                #
+                # The dynamic link is what makes this job worth running: the
+                # Apple back-ends reach for Mach and BSD interfaces
+                # (thread_policy_set, pthread_mach_thread_np, sysctlbyname,
+                # arc4random_buf, mlock) through a plain __APPLE__ guard that
+                # tells these platforms apart from macOS in no way at all.
+                # One of them missing here is a link error rather than a
+                # consumer's problem.
+                #
+                test -f "$lib" || {
+                  echo "::error::$sdk shared build produced no $lib"
+                  exit 1
+                }
+                xcrun vtool -show-build "$lib"
+                got=$(xcrun vtool -show-build "$lib" |
+                      awk '$1 == "platform" { print $2 }')
+                [ "$got" = "$expect" ] || {
+                  echo "::error::$lib is stamped $got, expected $expect"
+                  exit 1
+                }
+                syms=$(xcrun nm -gU "$lib")
+                grep -q ' _jent_read_entropy$' <<<"$syms" || {
+                  echo "::error::$lib exports no jent_read_entropy"
+                  exit 1
+                }
+              else
+                lib="$build/libjitterentropy.a"
+                test -f "$lib" || {
+                  echo "::error::$sdk static build produced no $lib"
+                  exit 1
+                }
+                xcrun lipo -info "$lib"
+              fi
+
+              echo "::endgroup::"
+            done
+          done

@@ -1,0 +1,574 @@
+name: Nix
+
+# The nix flake: kernel VM tests, EFI, output entropy, raw entropy recordings,
+# the daemon, cross builds, consumers, crypto backends and musl.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  nix-list:
+    name: list outputs
+    runs-on: ubuntu-latest
+    outputs:
+      pairs: ${{ steps.list.outputs.pairs }}
+      intree: ${{ steps.intree.outputs.attrs }}
+      cross: ${{ steps.cross.outputs.attrs }}
+      consumers: ${{ steps.consumers.outputs.attrs }}
+      crypto: ${{ steps.crypto.outputs.attrs }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: List the kernel module outputs and their VM tests
+        id: list
+        run: |
+          modules=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "jitterentropy-module.*" n != null)
+                   (builtins.attrNames ps)')
+          vms=$(nix eval --json .#checks.x86_64-linux --apply \
+            'cs: builtins.attrNames cs')
+
+          pairs=$(jq -cn --argjson modules "$modules" --argjson vms "$vms" '
+            $modules
+            | map({ attr: ., vm: sub("^jitterentropy-module"; "vm") })
+            | map(select([.vm] | inside($vms)))')
+
+          missing=$(jq -rn --argjson modules "$modules" --argjson pairs "$pairs" \
+            '($modules - ($pairs | map(.attr))) | join(" ")')
+          if [ -n "$missing" ]; then
+            echo "::error::no VM test in .#checks.x86_64-linux for: $missing"
+            exit 1
+          fi
+
+          jq -r '.[] | "\(.attr) -> \(.vm)"' <<<"$pairs"
+          echo "pairs=$pairs" >> "$GITHUB_OUTPUT"
+
+      - name: List the in-tree kernel build outputs
+        id: intree
+        run: |
+          intree=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "jitterentropy-in-tree.*" n != null)
+                   (builtins.attrNames ps)')
+
+          if [ "$(jq 'length' <<<"$intree")" -eq 0 ]; then
+            echo "::error::no jitterentropy-in-tree-* outputs in" \
+                 ".#packages.x86_64-linux"
+            exit 1
+          fi
+
+          jq -r '.[]' <<<"$intree"
+          echo "attrs=$intree" >> "$GITHUB_OUTPUT"
+
+      - name: List the cross-compilation outputs
+        id: cross
+        run: |
+          cross=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "cross-.*" n != null)
+                   (builtins.attrNames ps)')
+
+          if [ "$(jq 'length' <<<"$cross")" -eq 0 ]; then
+            echo "::error::no cross-* outputs in .#packages.x86_64-linux"
+            exit 1
+          fi
+
+          jq -r '.[]' <<<"$cross"
+          echo "attrs=$cross" >> "$GITHUB_OUTPUT"
+
+      - name: List the downstream consumer outputs
+        id: consumers
+        run: |
+          consumers=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "consumer-.*" n != null)
+                   (builtins.attrNames ps)')
+
+          if [ "$(jq 'length' <<<"$consumers")" -eq 0 ]; then
+            echo "::error::no consumer-* outputs in .#packages.x86_64-linux"
+            exit 1
+          fi
+
+          jq -r '.[]' <<<"$consumers"
+          echo "attrs=$consumers" >> "$GITHUB_OUTPUT"
+
+      - name: List the external crypto backend outputs
+        id: crypto
+        run: |
+          crypto=$(nix eval --json .#packages.x86_64-linux --apply \
+            'ps: builtins.filter
+                   (n: builtins.match "crypto-.*" n != null)
+                   (builtins.attrNames ps)')
+
+          if [ "$(jq 'length' <<<"$crypto")" -eq 0 ]; then
+            echo "::error::no crypto-* outputs in .#packages.x86_64-linux"
+            exit 1
+          fi
+
+          jq -r '.[]' <<<"$crypto"
+          echo "attrs=$crypto" >> "$GITHUB_OUTPUT"
+
+  nix-kmod:
+    name: ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.nix-list.outputs.pairs) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            # Nix only advertises kvm if /dev/kvm existed at daemon start.
+            system-features = nixos-test benchmark big-parallel kvm
+
+      - name: Build
+        run: nix build --no-link --print-build-logs ".#${{ matrix.attr }}"
+
+      - name: Show the result
+        run: |
+          ko=$(find "$(nix path-info ".#${{ matrix.attr }}")" -name '*.ko')
+          ls -l "$ko"
+          nix shell nixpkgs#kmod -c modinfo "$ko"
+
+      # /dev/kvm is root-only on the runners; without this QEMU uses TCG.
+      - name: Enable KVM for the unprivileged builder
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot the VM integration test
+        run: |
+          nix build --no-link --print-build-logs \
+            ".#checks.x86_64-linux.${{ matrix.vm }}"
+
+  nix-in-tree:
+    name: ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        attr: ${{ fromJSON(needs.nix-list.outputs.intree) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#${{ matrix.attr }}")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          grep -E '^CONFIG_(CRYPTO_JITTERENTROPY|MODULES|HW_RANDOM|PROC_FS)' \
+            "$OUT/config" || true
+          ls -l "$OUT/vmlinux"
+          wc -l < "$OUT/jent-symbols"
+          grep -E ' (jent_status|jent_entropy_collector_alloc)$' \
+            "$OUT/jent-symbols"
+
+  nix-efi:
+    name: EFI application
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # The library with nothing under it: no operating system, no libc, no
+      # scheduler, no CSPRNG. Building it is one thing the cross-compilation
+      # jobs already do in spirit; booting it is the part that says whether the
+      # counter the freestanding path reads actually moves and whether the
+      # startup health tests pass on what it measures. See tests/efi/README.md.
+      #
+      # No KVM on a GitHub runner, so QEMU runs the firmware under TCG. The
+      # whole boot is under two seconds either way.
+      #
+      # x86_64 only here. The flake builds and boots the aarch64 image as well
+      # (.#efi-aarch64 and .#checks.x86_64-linux.efi-vm-aarch64), but it is
+      # cross-built, and a runner with no aarch64 toolchain in its cache spends
+      # an hour building one before it reaches the two seconds that are the
+      # point. Run it by hand, or from a job that has that cache.
+      - name: Build and boot it under OVMF
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#checks.x86_64-linux.efi-vm")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      # The transcript is the evidence, and it is worth having in the log
+      # whether or not the assertions passed: the status document says what the
+      # collector settled on with no platform to ask.
+      - name: Show the console transcript
+        if: always() && steps.build.outputs.out != ''
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: cat "$OUT/console.txt"
+
+  nix-output-entropy:
+    name: output entropy
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # 1 MiB of output through the NIST estimators. Not a noise source
+      # assessment - the bytes are conditioned, so this is the whole chain
+      # answering, and what it catches is a collector that comes up, reports
+      # success and hands out something degenerate. Generation is minutes: the
+      # measurement loop runs at -O0 by construction.
+      - name: Generate and assess 1 MiB of output
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#checks.x86_64-linux.output-entropy")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      # The estimates are the evidence, and worth having in the log whether or
+      # not the floor was met: which estimator bound the result is in there.
+      - name: Show the assessment
+        if: always() && steps.build.outputs.out != ''
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: cat "$OUT/result.json"
+
+  nix-raw-entropy:
+    name: raw entropy tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            # Nix only advertises kvm if /dev/kvm existed at daemon start.
+            system-features = nixos-test benchmark big-parallel kvm
+
+      # /dev/kvm is root-only on the runners; without this QEMU uses TCG.
+      - name: Enable KVM for the unprivileged builder
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The tests/raw-entropy recording and validation scripts, run in a
+      # NixOS VM against the userspace library and the kernel module.
+      - name: Record and validate raw entropy
+        run: |
+          nix build --no-link --print-build-logs \
+            ".#checks.x86_64-linux.raw-entropy-vm"
+
+  nix-rngd:
+    name: jitterentropy-rngd service
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            # Nix only advertises kvm if /dev/kvm existed at daemon start.
+            system-features = nixos-test benchmark big-parallel kvm
+
+      # /dev/kvm is root-only on the runners; without this QEMU uses TCG.
+      - name: Enable KVM for the unprivileged builder
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The daemon under the systemd unit it installs, in a NixOS VM.
+      - name: Run the daemon as its systemd service
+        run: |
+          nix build --no-link --print-build-logs \
+            ".#checks.x86_64-linux.rngd-vm"
+
+  nix-raw-entropy-fips:
+    name: kernel raw entropy, FIPS mode
+    runs-on: ubuntu-latest
+    # The small kernel it boots is built here, from source.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            # Nix only advertises kvm if /dev/kvm existed at daemon start.
+            system-features = nixos-test benchmark big-parallel kvm
+
+      # /dev/kvm is root-only on the runners; without this QEMU uses TCG.
+      - name: Enable KVM for the unprivileged builder
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The kernel alone first, so that its build and the VM test show up as
+      # steps of their own.
+      - name: Build the FIPS kernel
+        run: |
+          nix build --no-link --print-build-logs .#fips-kernel
+
+      # recording_runtime_kernelspace and recording_restart_kernelspace with
+      # the vanilla Jitter RNG and with the signed jitter_rng.ko, fips=1.
+      - name: Record raw entropy in FIPS mode
+        run: |
+          nix build --no-link --print-build-logs \
+            ".#checks.x86_64-linux.raw-entropy-fips-vm"
+
+  nix-cross:
+    name: ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        attr: ${{ fromJSON(needs.nix-list.outputs.cross) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#${{ matrix.attr }}")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          find "$OUT" -type f \( -path '*/bin/*' -o -name '*.a' -o -name '*.so*' \
+            -o -name '*.dll' \) -print0 |
+            xargs -0 --no-run-if-empty nix shell nixpkgs#file -c file
+
+  nix-consumers:
+    name: ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        attr: ${{ fromJSON(needs.nix-list.outputs.consumers) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        run: nix build --no-link --print-build-logs ".#${{ matrix.attr }}"
+
+      # The output holding the file, as the libraries split into several and
+      # the build above names only the default ones. OpenSSL's copy is linked
+      # from libjitterentropy.a and hidden by its version script, and
+      # libgcrypt's is a private one: local symbols, so no -D for either.
+      - name: Show the result
+        run: |
+          case "${{ matrix.attr }}" in
+          consumer-rng-tools*) output=out file=bin/rngd nmflags="" ;;
+          consumer-botan) output=out file=lib/libbotan-3.so nmflags="-D" ;;
+          consumer-openssl) output=out file=lib/libcrypto.so nmflags="" ;;
+          consumer-awslc) output=out file=lib/libcrypto.so nmflags="-D" ;;
+          consumer-libgcrypt) output=lib file=lib/libgcrypt.so nmflags="" ;;
+          # Stripped to its integrity-check symbols, and ESDM from 1.2.4 on
+          # hides and strips the library's; the builds check the unstripped
+          # objects instead.
+          consumer-symcrypt|consumer-esdm*)
+            echo "jitterentropy symbols checked by the build"
+            exit 0
+            ;;
+          *)
+            echo "::error::no result check defined for ${{ matrix.attr }}"
+            exit 1
+            ;;
+          esac
+
+          out=$(nix build --no-link --print-out-paths \
+            ".#${{ matrix.attr }}^$output")
+          syms=$(nix shell nixpkgs#binutils -c \
+            nm $nmflags --defined-only "$out/$file")
+          grep -m 20 -E ' [TtWw] jent_' <<<"$syms" || true
+          grep -qE ' [TtWw] jent_entropy_init$' <<<"$syms" || {
+            echo "::error::no jitterentropy symbols in $file"
+            exit 1
+          }
+
+  nix-crypto:
+    name: ${{ matrix.attr }}
+    runs-on: ubuntu-latest
+    needs: nix-list
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        attr: ${{ fromJSON(needs.nix-list.outputs.crypto) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            ".#${{ matrix.attr }}")
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Show the result
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          case "${{ matrix.attr }}" in
+          crypto-openssl|crypto-awslc) needed=libcrypto ;;
+          crypto-libgcrypt)            needed=libgcrypt ;;
+          *)
+            echo "::error::no result check defined for ${{ matrix.attr }}"
+            exit 1
+            ;;
+          esac
+
+          for bin in bin/jitterentropy-hashtime lib/libjitterentropy.so; do
+            echo "==> $bin"
+            nix shell nixpkgs#binutils -c readelf -d "$OUT/$bin" |
+              grep NEEDED
+          done
+
+          nix shell nixpkgs#binutils -c readelf -d \
+            "$OUT/bin/jitterentropy-hashtime" |
+            grep -q "NEEDED.*$needed" || {
+              echo "::error::$needed is not linked into jitterentropy-hashtime"
+              exit 1
+            }
+
+      - name: Run tests
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          "$OUT/bin/jitterentropy-gcd"
+          for opt in "" "--force-internal-timer" "--all-caches"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed"
+          done
+
+  nix-musl:
+    name: musl static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          out=$(nix build --no-link --print-build-logs --print-out-paths \
+            .#musl-static)
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        env:
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          # Each tool's output is captured before it is searched: in a pipe
+          # into grep a failing or silent strings/file leaves grep with
+          # nothing to match, and "no GLIBC" would pass vacuously.
+          nix shell nixpkgs#file nixpkgs#binutils -c sh -c '
+            set -e
+            info=$(file -E "$1")
+            echo "$info"
+            syms=$(strings "$1")
+            [ -n "$syms" ] || {
+              echo "::error::strings printed nothing for $1"; exit 1
+            }
+
+            if printf "%s\n" "$syms" | grep -q GLIBC; then
+              echo "::error::GLIBC symbol versions present, this is not musl"
+              exit 1
+            fi
+
+            printf "%s\n" "$info" | grep -q "statically linked" || {
+              echo "::error::expected a statically linked binary"; exit 1
+            }
+          ' sh "$OUT/bin/jitterentropy-gcd"
+
+          "$OUT/bin/jitterentropy-gcd"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done

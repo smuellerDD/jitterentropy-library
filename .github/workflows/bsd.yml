@@ -1,0 +1,100 @@
+name: BSD
+
+# The BSDs, each in a VM, and the FreeBSD kernel module.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  freebsd:
+    name: FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg install -y bash cmake gmake
+          run: |
+            bash .github/scripts/vm-build-and-test.sh
+
+  freebsd-kmod:
+    name: FreeBSD kernel module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The library built into a .ko with the kernel's own flags and run once
+      # on kldload; see tests/freebsd-kmod/README.md.
+      - name: Build and load the test module in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg install -y bash
+          run: |
+            bash tests/freebsd-kmod/run-in-vm.sh
+
+  openbsd:
+    name: OpenBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test in an OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg_add -I bash cmake gmake
+          run: |
+            bash .github/scripts/vm-build-and-test.sh
+
+  netbsd:
+    name: NetBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test in a NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            /usr/sbin/pkg_add bash cmake gmake
+          run: |
+            bash .github/scripts/vm-build-and-test.sh
+
+  dragonflybsd:
+    name: DragonFly BSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test in a DragonFly BSD VM
+        uses: vmactions/dragonflybsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg install -y bash cmake gmake
+          run: |
+            bash .github/scripts/vm-build-and-test.sh

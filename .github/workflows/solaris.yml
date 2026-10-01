@@ -1,0 +1,36 @@
+name: Solaris
+
+# Solaris in a VM.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  solaris:
+    name: Solaris 11.4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build and test in a Solaris VM
+        uses: vmactions/solaris-vm@v1
+        with:
+          release: "11.4-gcc"
+          usesh: true
+          copyback: false
+          prepare: |
+            # pkg(1) exits 4 for "nothing to do".
+            pkg install shell/bash developer/build/cmake developer/build/gnu-make || [ $? -eq 4 ]
+          run: |
+            CC=gcc bash .github/scripts/vm-build-and-test.sh

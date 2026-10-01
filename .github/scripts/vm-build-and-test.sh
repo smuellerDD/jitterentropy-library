@@ -1,10 +1,11 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Build and test where there is no hosted GitHub runner: the VM and container
-# jobs in ci.yml. Both CMake linkages and the Makefile build run in one boot.
+# jobs of .github/workflows/*.yml. Both CMake linkages and the Makefile build
+# run in one boot.
 #
-# Strictly POSIX sh - ash, pdksh, ksh93 and bash are all in play.
+# bash, which those jobs install on the guests that lack it.
 
-set -e
+set -euxo pipefail
 
 os=$(uname -s)
 
@@ -21,8 +22,8 @@ case "$ncpu" in
 ''|*[!0-9]*) ncpu=2 ;;
 esac
 
-# Exported so all three builds agree: the Makefile's "CC ?=" loses to make's
-# built-in default but not to the environment.
+# Exported so all three builds agree: the Makefiles take make's built-in CC
+# unless the environment names one.
 if [ -z "${CC:-}" ]; then
 	for c in cc gcc clang; do
 		if command -v "$c" > /dev/null 2>&1; then CC=$c; break; fi
@@ -50,7 +51,7 @@ for shared in OFF ON; do
 	cmake --build "$build" -j "$ncpu"
 
 	# Not on the guests' default search path.
-	LD_LIBRARY_PATH="$PWD/$build:$LD_LIBRARY_PATH"
+	LD_LIBRARY_PATH="$PWD/$build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 	export LD_LIBRARY_PATH
 
 	# Cygwin resolves its DLL through PATH, not LD_LIBRARY_PATH.
@@ -145,3 +146,28 @@ fi
 # shellcheck disable=SC2086
 $CC -std=c11 -I. smoke.c libjitterentropy.a $smoke_libs -o smoke
 ./smoke
+
+# The Makefile test suites (make check), the fallback for a tree without CMake.
+# Gated on everywhere the suites can be linked at all, which on Cygwin is the
+# only run of them under a Windows-ish toolchain.
+#
+# Solaris and Haiku are the exception, and skipped: -fstack-protector-strong is
+# unconditional in the tests/ Makefiles, unlike the top level one which probes
+# for it, and neither guest resolves __stack_chk_fail without help (Solaris'
+# libc has no SSP runtime, Haiku none at all), so every link there fails.
+#
+# NetBSD, DragonFly BSD and Cygwin used to be reported with ::warning:: rather
+# than gated on, because the gcd and health Makefiles passed -flto and those
+# toolchains are not known to carry the GCC LTO plugin. Both dropped it - it
+# buys nothing for programs this small, one of which is a single translation
+# unit - so there is nothing left to excuse them with, and a regression there
+# now fails the job.
+case "$os" in
+SunOS|Haiku)
+	echo "==> $MAKE check skipped on $os"
+	;;
+*)
+	echo "==> $MAKE check"
+	"$MAKE" check
+	;;
+esac
