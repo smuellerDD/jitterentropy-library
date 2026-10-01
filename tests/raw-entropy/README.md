@@ -14,6 +14,11 @@ analysis. The tool set consists of the following individual tools:
   the user space Jitter RNG implementation for the SP800-90B runtime and
   restart data. Also, this directory contains tools supporting NTG.1 analysis.
 
+- `recording_library`: The recording as a library, `libjitterentropy-record`,
+  which `jitterentropy-hashtime` records with as well. The Android and iOS
+  example apps use it to gather the same data as `recording_userspace` inside
+  an app, where no recording tool can run.
+
 - `validation-runtime`: This tool is used to calculate the minimum entropy
   values compliant to SP800-90B section 3.1.3. This tool tool is to be used
   with the user space and kernel space runtime data obtained from the
@@ -32,7 +37,7 @@ See the README files in the different subdirectories.
 ## Runtime Tests
 
 The result of the data analysis performed with `validation-runtime` contains
-in the file `jent-raw-noise-0001.minentropy_FF_8bits.var.txt` at the bottom data
+in the file `jent-raw-noise-0001.minentropy_FF_8bits.txt` at the bottom data
 like the following:
 
 ```
@@ -54,26 +59,33 @@ entropy is more than what the Jitter RNG heuristic applies.
 ## Restart Tests
 
 The results of the restart tests obtained with `validation-restart` contains
-in the file `jent-raw-noise-restart-consolidated.minentropy_FF_8bits.var.txt`
+in the file `jent-raw-noise-restart-consolidated.minentropy_FF_8bits.txt`
 at the bottom data like the following:
 
 ```
 H_r: 0.545707
 H_c: 1.363697
+H_I: 0.333000
+
+min(H_r, H_c, H_I): 0.333000
 ```
 
 The `H_r` provides the entropy rate for the row-wise calculation, `H_c` for
-the column-wise calculation - Ignore `H_I` in this output. To get to the actual
-entropy rate, you have to obtain the heuristic entropy rate `H_I` applying 1/OSR
-(common case) and 8/OSR (NTG.1).
+the column-wise calculation. `H_I` is the heuristic entropy rate, which
+`processdata_helper.sh` passes as 1/3, i.e. 1/OSR with the default OSR. For
+another OSR or for NTG.1 (8/OSR), calculate `min(H_r, H_c, H_I)` with that
+`H_I` instead to obtain the entropy rate for the restart tests. For the same
+reason, `validation-restart/analyze_options.sh` tabulates `min(H_r, H_c)`.
 
-Now, to get to the final entropy rate, calculate:
+If the restart sanity check or the validation test fails, the file instead
+ends with `*** Restart Sanity Check Failed ***` (with `X_max` above
+`X_cutoff`) or `*** min(H_r, H_c) < H_I/2, Validation Testing Failed ***`,
+and `processdata.sh` exits non-zero. On a good noise source the sanity check
+still fails in about 1% of the runs, so repeat it with new data first.
 
-```
-min(H_r, H_c, H_I)
-```
-
-to obtain the entropy rate for the restart tests.
+The same verdict is written as JSON next to it (`.json` instead of `.txt`):
+`h_r`, `h_c` and `h_i` in the `Overall` test case, or `errorMessage` on a
+failure.
 
 Per default, the Jitter RNG heuristic applies 1/3 bit of entropy per
 time delta (common case). This implies that the measurement must show that 1/3
@@ -140,11 +152,11 @@ time delta obtained.
 
 Runtime configuration: Use the `osr` parameter during initialization
 
-Compile time configuration: Apply `-DJENT_MIN_OSR=<VALUE>` during compilation.
-
 Default value: 3
 
-Note: Runtime configuration value takes precedence over compile-time value.
+Note: `JENT_MIN_OSR` (3) is a floor, not a default the runtime value
+overrides: a runtime `osr` below it (including 0) is raised to
+`JENT_MIN_OSR`, a higher one is used as given, up to `JENT_MAX_OSR` (20).
 
 ### Memory Access Buffer Size
 
@@ -162,7 +174,10 @@ Default value: 18 (resulting in 2^18 bytes)
 
 Note: Runtime configuration value takes precedence over compile-time value.
 
-Note: Compile-time value applied only if no L1-cache size is detected.
+Note: Compile-time value applied only if no cache size is detected (the L1
+data cache, or all caches with `JENT_CACHE_ALL`), or if the memory size derived
+from it - four times the L1 data cache, or the sum of all caches with
+`JENT_CACHE_ALL` - is 512 bytes or less.
 
 ### Hash Loop Iteration Count
 
@@ -195,9 +210,8 @@ sufficient entropy. It is possible to adjust the memory access part of the
 Jitter RNG which may deliver more entropy.
 
 To support analysis of insufficient entropy, the following tools are provided.
-The goal of those test tools is to detect the proper memory setting that is
-appropriate for your environment. One memory setting consists of two values,
-one for the number of memory blocks and one for the memory block size.
+The goal of those test tools is to detect the proper memory buffer size and
+hash loop iteration count that are appropriate for your environment.
 
 - `recording_userspace/invoke_testing_hashloop.sh`: This tool generates a large
   number of different test results for different settings for the hash loop
@@ -214,18 +228,33 @@ one for the number of memory blocks and one for the memory block size.
 - `validation-runtime/processdata_hashloop.sh`: This tool analyzes all test
   results created by the `recording_userspace/invoke_testing_hashloop.sh` for
   the runtime data. It generates an overview file with all test results in
-  `minentropy_collected_hashloop.txt` as well as it provides a graphical
-  display of the entropy rates in `minentropy_collected_hashloop.pdf`. Analyze
+  `minentropy_collected_hashloop` in the results directory as well as it
+  provides a graphical display of the entropy rates in
+  `minentropy_collected_hashloop.pdf` beside it. Analyze
   it and extract the hash loop iteration count that gives you the intended
   entropy rate.
 
 - `validation-runtime/processdata_memloop.sh`: This tool analyzes all test
   results created by the `recording_userspace/invoke_testing_memloop.sh` for
   the runtime data. It generates an overview file with all test results in
-  `minentropy_collected_memloop.txt` as well as it provides a graphical
-  display of the entropy rates in `minentropy_collected_memloop.pdf`. Analyze
+  `minentropy_collected_memloop` in the results directory as well as it
+  provides a graphical display of the entropy rates in
+  `minentropy_collected_memloop.pdf` beside it. Analyze
   it and extract the memory buffer size that gives you the intended entropy
-  rate.
+  rate. A sweep that ended early (see the header of
+  `recording_runtime_kernelspace/invoke_testing_memloop.sh`) is analyzed up to
+  its largest recorded size, with a warning for each larger one; a gap in the
+  recorded sizes fails, as does a missing hash loop count in
+  `processdata_hashloop.sh`.
+
+- `validation-runtime/analyze_options.sh` and
+  `validation-restart/analyze_options.sh`: These tools analyze the complete
+  runtime and restart data of `invoke_testing.sh` recorded once per memory
+  buffer size into the directories `results-measurements-maxmem<N>`, where
+  `<N>` is the `--max-mem` value 1 to 20 given with `MAX_MEMORY_SIZE=<N>` (the
+  header of the scripts shows the recording loop). They tabulate the entropy
+  rate per memory buffer size in `results-runtime-multi` and
+  `results-restart-multi`, and fail when no such directory exists.
 
 After you concluded the testing you have a memory buffer size and a hash loop
 iteration count that should be appropriate for you. Note, it is perfectly fine

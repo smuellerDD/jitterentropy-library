@@ -8,7 +8,12 @@ all environments and on a lot of CPU architectures.
 The implementation of the Jitter RNG is independent of any operating system.
 As such, it can run on baremetal without any operating system: build it with
 `-ffreestanding` and supply `memcpy`, `memset`, `malloc`, `free`, `strlen` and
-`snprintf`, which is the whole of the porting interface. `tests/efi` is that
+`snprintf`. Every build needs lock-free 32-bit atomics, so a core without them
+(ARMv6-M, RISC-V without the A extension) fails to compile.
+On aarch64 such a build also needs `-mno-outline-atomics`, and an
+architecture without a known counter instruction needs the internal timer
+(`JENT_CONF_ENABLE_INTERNAL_TIMER`) with a counting thread handler registered
+through `jent_entropy_switch_notime_impl()` (see `jitterentropy.h`). `tests/efi` is that
 build, as an EFI application on x86_64 and aarch64, and `nix flake check` boots
 it and reads what it reports.
 
@@ -18,22 +23,35 @@ assessment of the SP800-90B compliance as well as all required test code.
 
 ## API
 
-The API is documented in the man page jitterentropy.3.
+The API is documented in the man pages: jitterentropy.3 is the overview and
+names the page of each group of functions. The tools jitterentropy-rng,
+jitterentropy-hashtime, jitterentropy-osr, jitterentropy-flags and jitter_rng
+and the daemon jitterentropy-rngd have pages in section 1, the Linux kernel
+module jitter_rng.4, and the two optional libraries jitterentropy-record.3 and
+jitterentropy-kernel.3.
 
 To use the Jitter RNG, the header file jitterentropy.h must be included.
 
 That header is the whole of the API: on the platforms whose linker takes a
 version script the shared library exports exactly the functions declared in
 it, listed in `version.lds`, and nothing else. The list is checked against the
-header at configure time, so the two cannot drift apart unnoticed.
+header when CMake configures, so the two cannot drift apart unnoticed there;
+the Makefile applies the list without that check.
 
 # Build Instructions
 
-To generate the shared library `make` followed by `make install`.
+To generate the shared library `make` followed by `make install`, which
+installs the library, its header, the man pages and the pkg-config file;
+`make install-static` adds the archive. The man pages go to
+`$(PREFIX)/$(MANDIR)/man3`; `MANDIR` defaults to `share/man`, and to `man` on
+OpenBSD, NetBSD and DragonFly as CMake's GNUInstallDirs chooses there, and can
+be overridden. The CMake package for
+`find_package(jitterentropy)` is installed by the CMake build only.
+`ENABLE_RECORDING=1` and, on Linux, `ENABLE_RNGD=1` add what the CMake options
+of the same name add.
 
 Besides the Makefile based build system, CMake support is also provided.
-This may eases cross compiling or setting the relevant options for BSI's
-functionality class NTG.1, like:
+This may ease cross compiling or setting build options, like:
 
 ```sh
 cmake -S . -B build -DINTERNAL_TIMER=off -DEXTERNAL_CRYPTO=OPENSSL
@@ -41,9 +59,25 @@ cmake --build build
 ```
 CMake may also be used on platforms like Windows or MacOS to ease compilation.
 
-On Linux you may omit the `EXTERNAL_CRYPTO` setting, as the default
-memory handling implementation already implements secure erase and swap
-prevention.
+Neither option is needed for BSI's functionality class NTG.1 (see
+[AIS 20/31 NTG.1 Compliance](#ais-2031-ntg1-compliance)): the internal timer is
+refused at runtime for `JENT_NTG1` whatever the build, and secure memory -
+memory wiped on release - is what every build provides. The built-in
+allocator on Linux, FreeBSD, NetBSD, OpenBSD, macOS and Windows also locks the
+collector state, the extra that NTG.1 requires where the platform offers it;
+where the platform offers no memory lock, the requirement is satisfied without
+it, so `EXTERNAL_CRYPTO` is not needed for NTG.1 either.
+
+A build system of your own has to compile the library without optimization, as
+both provided ones do: `-O0` with GCC and Clang, where the entropy core -
+`src/jitterentropy-{base,health,noise,sha3,timer}.c`, which the kernel builds
+compile at `-O0` together with the GCD analysis - refuses anything else, and
+`/Od /Ob0` with MSVC, where nothing in the source can check it. `/Od` alone is
+not enough there - an explicit `/Ob1` or `/Ob2`, which the usual release
+configurations carry, still inlines into the timed loop - and `/GL` with
+`/LTCG` must not be used either, as it moves code generation into the linker.
+The CMake build rewrites `/O*` to `/Od` and `/Ob*` to `/Ob0` and refuses `/GL`,
+`/LTCG` and interprocedural optimization.
 
 ## Build Options
 
@@ -55,19 +89,26 @@ prevention.
 | `STACK_PROTECTOR` | `ON` | Compile with the stack protector enabled |
 | `AARCH64_NSTIME_REGISTER` | unset | Name of the register `jent_get_nstime()` should read on AArch64 |
 | `ENABLE_SANITIZERS` | `OFF` | Address and undefined behavior sanitizers (development only) |
+| `ENABLE_THREAD_SANITIZER` | `OFF` | Thread sanitizer, which `unit-concurrency` is written for (development only; see `tests/README.md`) |
 | `ENABLE_COVERAGE` | `OFF` | Instrument for code coverage and add the `coverage` target (development only) |
 | `ENABLE_FUZZING` | `OFF` | Instrument for libFuzzer and build the coverage-guided harness under `tests/fuzz` (Clang only, development) |
-| `MOCK_TIMER` | `OFF` | Let the caller replace the time source with a callback (testing only - such a build produces no entropy of its own) |
-| `ENABLE_TOOLS` | `ON` | Build and install the recording and validation tools, which live under `tests/` |
+| `MOCK_TIMER` | `OFF` | Let the test programs that compile the library sources in replace the time source with a callback (`jent_set_mock_timer()`, declared in the internal `arch/jitterentropy-arch-timer.h` and not exported). An installed library offers a consumer nothing to call; `jent_status()` reports the build. Testing only - such a build produces no entropy of its own |
+| `ENABLE_TOOLS` | `ON`, but `OFF` for iOS/tvOS/watchOS/visionOS | Build and install the recording and validation tools, which live under `tests/`. Those platforms build executables as app bundles, which the tools are not |
+| `ENABLE_RECORDING` | `OFF` | Also build and install `libjitterentropy-record`, shared or static as the library: the raw noise recording of `jitterentropy-record.h`, for recording in an app (see `tests/raw-entropy/recording_library/README.md`). It exports nothing else and links beside `libjitterentropy`; not for production |
+| `ENABLE_KERNEL_LIB` | `OFF` | Also build and install `libjitterentropy-kernel`, its header `jitterentropy-kernel.h`, the module's `jitterentropy_uapi.h` and the `jitter_rng` tool: user space access to the `jitter_rng` Linux kernel module (Linux only, see `linux_kernel/README.md`) |
+| `ENABLE_RNGD` | `OFF` | Also build and install `jitterentropy-rngd`, the daemon feeding the Jitter RNG into the Linux `/dev/random`, with its systemd unit and man page (Linux only, see `rngd/README.md`) |
 | `BUILD_TESTING` | `ON` | Build the test programs and register the CTest suite |
+| `INSTALL_MAN` | `ON`, but `OFF` for Windows (MinGW included), Android, iOS/tvOS/watchOS/visionOS, bare metal (`Generic`) and Emscripten | Generate and install the man pages and an alias for each function without a page of its own |
+| `JENT_REQUIRE_CUTOFF_CHECK` | `OFF` | Fail the configure instead of skipping `health-cutoff-tables` when python3 with mpmath is missing |
 
 The two are independent. `ENABLE_TOOLS` decides what is installed for a user
 to run - `jitterentropy-rng`, `jitterentropy-osr`, `jitterentropy-hashtime`,
-`getrawentropy`, `extractlsb`, `gcd`, `jitterentropy-health` and the
-`jitterentropy-chardev-*` tools - and `BUILD_TESTING`, the name CMake projects
-conventionally use, decides what CTest is given. Three of the tools are also
-what the suite drives, so they are built whenever either option is on and
-installed only for the first:
+`jitterentropy-cpuinfo`, `jitterentropy-flags`, `extractlsb`,
+`jitterentropy-gcd` (the `gcd` target of `tests/gcd`), `jitterentropy-health`
+and, on Linux only, `getrawentropy` and the `jitterentropy-chardev-*` tools - and
+`BUILD_TESTING`, the name CMake projects conventionally use, decides what CTest
+is given. Four of the tools are also what the suite drives, so they are built
+whenever either option is on and installed only for the first:
 
 ```sh
 cmake -S . -B build -DENABLE_TOOLS=OFF    # the suite, nothing installed but the library
@@ -76,7 +117,8 @@ cmake -S . -B build -DENABLE_TOOLS=OFF -DBUILD_TESTING=OFF   # the library alone
 ```
 
 With both off the install tree is the library, its header, the pkg-config and
-CMake package files and the man page.
+CMake package files, and - where `INSTALL_MAN` is on - the man pages with
+their aliases.
 
 Packaging commonly passes `-DBUILD_TESTING=OFF` on its own - the nixpkgs cmake
 hook does - and that is now exactly what it says: the tools keep being built
@@ -94,8 +136,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 The suite has two halves. The deterministic tests - the GCD self test, the unit
-tests for `src/` and `arch/`, and the induced failure tests of the health tests
-- compute over fixed inputs and answer the same everywhere. The entropy
+tests for `src/` and `arch/`, the induced failure tests of the health tests,
+and `exported-symbols`, which reads the built shared library and asserts that
+it exports the functions of `version.lds` and nothing else - compute over
+fixed inputs and answer the same everywhere. The entropy
 generation tests exercise the real noise source and can fail for reasons that
 are properties of the machine rather than defects in the code: a memory lock
 limit lower than the collector needs, or a startup whose health tests do not
@@ -120,8 +164,11 @@ ctest --test-dir build -j "$(nproc)"   # in parallel
 On a multi-configuration generator such as Visual Studio, name the
 configuration that was built: `ctest --test-dir build -C Release`.
 
-Each test directory also carries a standalone Makefile for trees without CMake:
-`make -C tests/unit check` and `make -C tests/health check`.
+`tests/unit`, `tests/health` and `tests/gcd` also carry a standalone Makefile
+for trees without CMake: `make -C tests/unit check` and
+`make -C tests/health check`. The fuzzing harnesses (`tests/fuzz`), the
+character device tests (`tests/chardev`) and the linking tests
+(`tests/linking`) are built by CMake only.
 
 See `tests/README.md` for what the individual test programs cover.
 
@@ -171,18 +218,74 @@ Please keep the following aspects regarding jitterentropy's usage in mind:
 * While jitterentropy is a rather fast noise source, don't expect multiple MB/s or GB/s. Use it as seed
   source for another deterministic RNG if such speeds are needed.
 
-# Android
+# Supported Platforms
 
-To compile the code on Android, use the following Makefile:
+The tiers say how much CI covers a platform and how quickly a breakage there
+is addressed.
 
-arch/android/Android.mk	-- NDK make file template that can be used to directly
-			   compile the CPU Jitter RNG code into Android binaries
+**Tier 1** - the platforms the library is developed against. The test suite
+runs on every push. A regression blocks a release.
+
+| Platform | Toolchain/Notes |
+| --- | --- |
+| Linux x86-64 | gcc, clang |
+| Windows x86-64 | MSVC, clang-cl |
+| macOS arm64 | clang |
+
+**Tier 2** - built and tested in CI, but not developed against day to day.
+Breakage is fixed, possibly not immediately. On Android and iOS CI only builds
+the library and the example app, so the suite is run by hand on a device there.
+
+| Platform | Toolchain/Notes |
+| --- | --- |
+| macOS x86-64 | clang |
+| Linux arm64 | gcc, clang |
+| Linux x86-64 musl, i686 | i686 as gcc -m32 |
+| Linux kernel module | out-of-tree, DKMS and in-tree, every non-EOL kernel.org release |
+| FreeBSD kernel module | built and loaded in a VM |
+| FreeBSD, OpenBSD, NetBSD, DragonFly BSD | in a VM |
+| Windows arm64 | MSVC, clang-cl |
+| Android arm64 | NDK, build only |
+| iOS arm64 | Xcode, build only |
+| Solaris | in a VM |
+| Cygwin, MinGW-w64 | |
+| Freestanding / EFI | x86-64, booted under OVMF |
+
+**Tier 3** - compiled and linked in CI, but not run there, or not covered at
+all. Best effort; a report should come with the compilation errors and/or test
+results from the machine.
+
+| Platform | Toolchain/Notes |
+| --- | --- |
+| Linux s390x, ppc64, riscv64, loongarch64, armv7 | cross-build only |
+| watchOS, tvOS, visionOS | cross-build only |
+| Freestanding / EFI aarch64 | not in CI; `nix flake check` builds and boots it under AAVMF (see `tests/efi/README.md`) |
+| Everything else | no CI |
+
+RISC-V machine mode (M-mode) is currently supported only in the Linux kernel.
+A freestanding build running in M-mode reads the `time` CSR with `rdtime`,
+which traps on cores that do not implement it in hardware, as no SBI below
+M-mode emulates it.
+
+# Android and iOS
+
+The library builds for both with its `CMakeLists.txt`, included into the app's
+own build. `tests/android` and `tests/ios` hold an example app for each that
+does exactly that, with the build commands in their READMEs.
+
+For ndk-build, `tests/android/Android.mk` compiles the library alone into
+Android binaries.
+
+Both apps also record the raw noise data for the entropy assessment on the
+phone itself; see `tests/raw-entropy/recording_library/README.md`.
 
 ## Direct CPU instructions
 
 If the high-resolution timer needed by jent_get_nstime is not available
-on your target, add a new branch to arch/jitterentropy-arch-timer.h
-guarded by the appropriate architecture macros.
+on your target, add a new branch to arch/jitterentropy-arch-timer.c: a
+`JENT_ARCH_TIMER_*` selection in its platform detection, guarded by the
+appropriate architecture macros, and the matching branch in
+`jent_get_nstime()`.
 
 # Testing and Entropy Rate Validation
 
@@ -219,9 +322,11 @@ The following flags are to be considered:
 
 - `JENT_NTG1` may be set (i.e. the SP800-90B configuration and the [AIS 20/31 NTG.1 configuration](#ais-2031-ntg1-compliance) can be jointly enabled).
 
-- Either `JENT_FORCE_FIPS` must be set or base OS is in FIPS mode (i.e. the helper function jent_fips_enabled returns true).
+- Either `JENT_FORCE_FIPS` must be set or base OS is in FIPS mode (i.e. the helper function jent_fips_enabled returns true). Either way `JENT_FORCE_SECURE_MEM` is implied, with what it requires of the memory backend as described for `JENT_NTG1` below: the lock where the built-in allocator offers one, arena memory with the crypto library backends.
 
 - `JENT_FORCE_INTERNAL_TIMER` must not be set.
+
+- `JENT_DISABLE_MEMORY_ACCESS` must not be set; with FIPS mode it is refused (`jent_entropy_init_ex` returns `EPROGERR`, `jent_entropy_collector_alloc` NULL).
 
 - All other flags may be set at the caller's discretion.
 
@@ -257,7 +362,32 @@ In order for the Jitter RNG to be NTG.1 compliant, the following usage constrain
 
 ### Compilation
 
-No special considerations.
+No special build options. `INTERNAL_TIMER=OFF` is not required: a collector
+allocated with `JENT_NTG1` never uses the internal timer, whether or not it is
+compiled in, and `JENT_NTG1` together with `JENT_FORCE_INTERNAL_TIMER` is
+refused (`jent_entropy_init_ex` returns `ENOTIME`,
+`jent_entropy_collector_alloc` NULL).
+
+`JENT_NTG1` implies `JENT_FORCE_SECURE_MEM`. Secure memory - wiped on release -
+is what every build provides; the flag requires the extras on top of it,
+locking the collector state and excluding it from core dumps, where the
+platform offers them. The built-in allocator does on Linux, FreeBSD, NetBSD,
+OpenBSD, macOS and Windows, and a refused lock there fails the allocation.
+With `EXTERNAL_CRYPTO=LIBGCRYPT` or `OPENSSL`, set up their secure memory arena;
+without it, the allocation fails. With libgcrypt, initialize it first: its
+secure memory pool is used once the application has declared its
+initialization finished (`gcry_check_version()`, `GCRYCTL_INIT_SECMEM`,
+`GCRYCTL_INITIALIZATION_FINISHED`), and its FIPS mode is taken once
+`gcry_check_version()` has run - before, the Jitter RNG takes the decision
+libgcrypt will take, from the same inputs (`LIBGCRYPT_FORCE_FIPS_MODE`,
+`/etc/gcrypt/fips_enabled`, `/proc/sys/crypto/fips_enabled`). This applies to
+FIPS mode as well, which implies the flag: on a system in FIPS mode, a
+collector allocated before libgcrypt's initialization is finished fails. Whether the arena is locked
+is the crypto library's decision - libgcrypt hands out its pool with a warning
+where the lock was refused - so with these backends the flag guarantees memory
+from the arena, not the lock. A platform without a memory lock, and
+AWS-LC, offer no extras, and the flag is satisfied without them. The
+`secureMemoryBackend` field of `jent_status` names the backend in use.
 
 ### Initialization
 
@@ -299,7 +429,7 @@ The following test evidence must be provided to the German BSI for proving the c
 
 	* Common behavior (SP800-90B restart + runtime tests)
 
-- If the selected OSR after applying the methodology is larger than 20, the Jitter RNG cannot be used on the particular system.
+- If the selected OSR after applying the methodology is larger than `JENT_MAX_OSR` - 20, the highest oversampling rate the Jitter RNG is allowed to run at - the Jitter RNG cannot be used on the particular system.
 
 # Version Numbers
 

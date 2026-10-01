@@ -16,11 +16,11 @@ machine off.
 
 ## Why an application and not a compile test
 
-`flake.nix` already cross-compiles the library for a dozen targets, which
-proves the backends select and the sources translate. It cannot prove that the
-counter the freestanding path reads actually moves, that the startup health
-tests pass on what that counter measures, or that a collector can be built
-where the only allocator is the firmware's `AllocatePool()`. Those are
+`nix/userspace.nix` already cross-compiles the library for a dozen targets,
+which proves the backends select and the sources translate. It cannot prove
+that the counter the freestanding path reads actually moves, that the startup
+health tests pass on what that counter measures, or that a collector can be
+built where the only allocator is the firmware's `AllocatePool()`. Those are
 properties of running.
 
 The failure this guards against is not a build error. It is a Jitter RNG that
@@ -62,7 +62,7 @@ disappearing.
 ## What the output means
 
 ```
-jitterentropy-efi: start, library version 3070100
+jitterentropy-efi: start, library version 4000000
 jitterentropy-efi: startup passed
 jitterentropy-efi: default collector allocated
 jitterentropy-efi: default entropy c7d00293f4319cdb936828498734704393f6b4389666c0081c6dc42e4c222cbb
@@ -94,9 +94,8 @@ three ways with no operating system under it.
 Two things in the status document are properties of having no operating system
 rather than defects, and the VM check asserts both so that they stay stated:
 
-* `"uuid": "00000000-..."` - the instance identifier is drawn from the
-  platform CSPRNG, and there is none. The library says so rather than inventing
-  one.
+* `"uuid"` is a version 8 UUID - there is no platform CSPRNG to draw the
+  identifier from, so it is hashed from a counter and the time.
 * `"internalTimer": false` - the counting thread needs a thread. Asking for it
   anyway, with `JENT_FORCE_INTERNAL_TIMER`, has to be *refused*, and the last
   line of the run checks that it is on both entry points that accept the flag.
@@ -135,9 +134,11 @@ that each was attempted and answered, not which way it went; where one does
 come up, it holds it to the same 32 bytes and status document as the default.
 
 Both imply `JENT_FORCE_SECURE_MEM`, and here that is satisfied rather than
-waived: `"secureMemory": true` above is not a locked page but the absence of
-anything that could page it out - no swap device, no second process, no core
-dump - which is the same ground the Linux kernel backend claims it on.
+waived. Secure memory - `"secureMemory": true` above - is memory wiped on
+free, which every build provides. The extras the flag asks for, a lock and a
+core dump exclusion, are here not a locked page but the absence of anything
+that could page it out - no swap device, no second process, no core dump -
+which is the same ground the Linux kernel backend claims them on.
 
 **Neither line is a compliance claim**: FIPS 140-3 and AIS 20/31 are about a
 validated module on assessed hardware, and what this shows is that the code
@@ -197,14 +198,19 @@ relying on their startup code carrying a hand-written PE header, wherever
 `pei-aarch64-little` - and the fallback does not produce an image this firmware
 will load at all, so the real thing is written instead.
 
-`-mno-outline-atomics` is the other one that is not optional, and it is a fact
-about porting this library to aarch64 rather than about EFI. GCC 10 and later
-default to `-moutline-atomics` there, which turns an atomic access into a call
-to a libgcc helper - `__aarch64_swp4_acq_rel` for the one read-modify-write in
-`arch/jitterentropy-arch-atomic.c` - that selects the LSE or the LL/SC
-implementation at run time through a libgcc ifunc. A `-nostdlib` link has no
-libgcc, so the symbol stays undefined and the first
-`jent_atomic_exchange_int()` of the startup jumps into nothing.
+`-mno-outline-atomics` is required, and it is a fact about porting this
+library to aarch64 rather than about EFI. GCC 10 and later default to
+`-moutline-atomics` there, which turns an atomic read-modify-write into a call
+to a libgcc helper that selects the LSE or the LL/SC implementation at run
+time through a libgcc ifunc. The library has two such operations in
+`arch/jitterentropy-arch-atomic.c`, both on the path every EFI startup takes:
+`jent_atomic_cmpxchg_u32()` stores the common timer divisor
+(`src/jitterentropy-gcd.c`), and `jent_atomic_inc_u32()` advances the counter
+the instance UUID is derived from where no CSPRNG answers
+(`src/jitterentropy-uuid.c`); outlined, they become `__aarch64_cas4_*` and
+`__aarch64_ldadd4_*`. A `-nostdlib` link has no libgcc, so the symbol stays
+undefined and the first such access jumps into nothing - as it once did for
+`__aarch64_swp4_acq_rel`, the exchange the file had then.
 
 What that looks like is worth recording, because the console says almost
 nothing: one line, `Synchronous Exception at 0x0000000000013780`, and no

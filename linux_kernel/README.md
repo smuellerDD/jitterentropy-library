@@ -19,13 +19,18 @@ All of the following discussions assume you are in the directory `linux_kernel`.
 For each compilation, the file `Kbuild.config` contains configuration options
 that can be set accordingly.
 
+The man page `doc/jitter_rng.4` summarizes the module's parameters, interfaces
+and files.
+
 ## Supported Kernel Versions
 
 The kernel support builds against Linux 5.10 and every newer release. 5.10 is a
 conservative baseline; all kernel APIs used by these interfaces (including
-`kvfree_sensitive()`, available since 5.7, used by the character-device and test
-interfaces) predate it. Building against an older kernel is rejected at compile
-time with an explicit error (see `jitterentropy_compat.h`).
+`kvfree_sensitive()`, available since 5.8, used by the test interface) predate
+it. Building against an older kernel is rejected at compile time with an
+explicit error (see `jitterentropy_compat.h`). On MIPS and m68k the time stamp
+comes from `random_get_entropy_fallback()`, which needs 5.10.119, 5.15.44 or
+5.19 and later.
 
 ## Build as Standalone Kernel Module
 
@@ -58,9 +63,17 @@ Compilation:
 The module offers the following load-time parameters:
 
 * `osr`: OSR applied to all Jitter RNG instances (0 selects the default).
+  The library accepts `JENT_MIN_OSR` to `JENT_MAX_OSR`, 3 to 20: a lower
+  value is raised to the minimum, a higher one is refused and takes the
+  module load with it.
 
 * `flags`: numeric flags value applied to all Jitter RNG instances, using the
-  `JENT_*` flag bits from `jitterentropy.h`.
+  `JENT_*` flag bits from `jitterentropy.h`. The module refuses to load with
+  `EINVAL` when the value sets an undefined bit or a field above its maximum,
+  sets `JENT_FORCE_INTERNAL_TIMER` (the kernel build has no internal timer),
+  or sets `JENT_DISABLE_MEMORY_ACCESS` in FIPS or NTG.1 mode (`force_fips=1`,
+  `ntg1=1`, the corresponding bits, or a kernel booted with `fips=1`), whose
+  startup needs the memory access noise source.
 
 * `ntg1`: boolean shortcut enabling AIS 20/31 NTG.1 compliant operation
   without knowing the numeric value of the `JENT_NTG1` flag bit. Equivalent to
@@ -77,9 +90,73 @@ The module offers the following load-time parameters:
 
 * `selftest_interval`: seconds between two runs of the cryptographic self test
   of each Jitter RNG instance (default `0`, no periodic runs; maximum
-  2592000). See
+  2592000, i.e. 30 days, lower on 32-bit kernels with `HZ` of 500 or more,
+  where the delay in jiffies would overflow the timer wheel: 1073741 at
+  `HZ=1000`). See
   [Periodic Cryptographic Self Test](#linux-kernel-jitter-rng-periodic-cryptographic-self-test)
   below.
+
+* `max_instances`: maximum number of concurrently open `/dev/jitterentropy`
+  instances an unprivileged caller is allowed (default `256`, `0` for
+  unlimited). The device is world readable and every `open()` allocates a
+  Jitter RNG instance whose memory access region is hundreds of kB - up to
+  512 MB with `cache_all=1` - so the cap bounds what an unprivileged caller
+  can allocate through opens alone. An `open()` beyond it fails with `ENFILE`.
+  The kernel allocations are also charged to the caller's memory cgroup.
+
+  It bounds the number of instances, not the memory one of them ends up with:
+  a reallocation on health-test recovery doubles the memory access region, so
+  a dozen recoveries take an instance to the 512 MB ceiling whatever it
+  started at and with `cache_all` unset. Recovery runs in a compliance mode
+  only (`fips=1`, `force_fips=1` or `ntg1=1`), the only one whose health tests
+  report a failure to recover from. Use `max_memsize` below to bound it.
+
+  A caller with `CAP_SYS_RESOURCE` is not held to the cap, which keeps a full
+  device administrable and diagnosable. The cap is global rather than per
+  user, so one unprivileged caller holding every slot does keep the next one
+  out: that trades a memory bound for an availability one. Where local users
+  must not be able to lock each other out at all, restrict the device to a
+  group with a udev rule, or set `max_instances=0` and let each caller's
+  memory cgroup be the bound.
+
+* `max_kcapi_instances`: maximum number of concurrently instantiated kernel
+  crypto API tfms each unprivileged user is allowed (default `256`, `0` for
+  unlimited). Any local user can instantiate the RNG through `AF_ALG` - a
+  `bind()` to `rng`/`jitter_rng`, or to a DRBG where that seeds from this
+  module; from Linux 7.3 only with `/proc/sys/crypto/af_alg_restrict` set
+  to `0` - and each tfm
+  allocates a Jitter RNG instance like an `open()` of `/dev/jitterentropy`
+  does. An instantiation beyond the cap fails with `ENFILE`, which the
+  `AF_ALG` `bind()` returns (`ENOMEM` means memory ran out or the startup
+  health tests of the new instance failed, not the cap). The count is separate
+  from `max_instances`, so
+  filling one interface does not lock the other out. A caller with
+  `CAP_SYS_RESOURCE` is not held to it, and neither are kernel threads. The cap
+  is per user because an in-kernel user such as the DRBG, which seeds from
+  `jitterentropy_rng` when built with `CONFIG_BUILTIN_JITTERENTROPY` and
+  refuses to instantiate without it under `fips=1`, allocates in its caller's
+  context: one user filling the cap must not refuse it to everyone else. In
+  user namespaces, the outermost owner that is not root is charged, so the uids
+  a user maps there share that user's cap; namespaces only root created
+  (container runtimes) charge the caller's uid as mapped. The cap is also kept
+  per outermost PID namespace created by a privileged process (a container
+  runtime, `PrivatePIDs=`), so rootful containers, which all run as the same
+  global uids, do not share one: root in one container cannot exhaust root's
+  cap in another or on the host. Namespaces nested inside such a container
+  share its cap. An unprivileged user cannot create such a namespace, but a
+  privileged helper creates one on the user's behalf - setuid `firejail` or
+  `bwrap`, a `PrivatePIDs=` unit - and each such sandbox brings a fresh cap.
+
+* `max_memsize`: size of the memory access region of every instance, in kB - a
+  power of two up to `524288` (512 MB), or `65536` (64 MB) on a 32-bit kernel,
+  whose small vmalloc area would fail every larger allocation. The default `0` leaves the size to the
+  library, which derives it from the CPU cache size and doubles it on every
+  health-test recovery, within the same bound. Setting it pins the size against both: the derivation
+  is skipped and a recovery keeps the size it finds, raising only the
+  oversampling rate and the hash loop count. A value that is not such a power
+  of two refuses the module load, as does a larger size given through `flags`. It takes precedence over a
+  size given through `flags`, and the effective size is reported by
+  `/proc/jitterentropy/config/flags`.
 
 * `verbose`: enable verbose logging.
 
@@ -160,14 +237,40 @@ steps have to be taken:
 3. Configure the Linux kernel as usual and ensure that the Jitter RNG is
    selected as needed.
 	
-4. tell the Jitter RNG to be compiled statically into the kernel by editing the 
-   file `crypto/jitterentropy-library/linux_kernel/Kbuild.config` and modify the
-   option `CONFIG_EXTERNAL_JITTERENTROPY` to `y` as well as enable the
-   option `CONFIG_BUILTIN_JITTERENTROPY`.
-   
-At this point, the Jitter RNG will now be built statically into the Linux kernel
-when compiling it. Naturally, all Linux kernel options can be set as
-the Jitter RNG does not depend on specific kernel options.
+4. tell the Jitter RNG that it replaces the kernel's own copy by editing the
+   file `crypto/jitterentropy-library/linux_kernel/Kbuild.config` and enabling
+   the option `CONFIG_BUILTIN_JITTERENTROPY`.
+
+   Built in tree, whether the Jitter RNG goes into the kernel image or becomes
+   a module follows `CONFIG_CRYPTO_JITTERENTROPY` of the kernel configuration:
+   with `CONFIG_CRYPTO_JITTERENTROPY=y` it is linked into the kernel image,
+   with `CONFIG_CRYPTO_JITTERENTROPY=m` it is built as the module
+   `jitter_rng.ko` (loaded on demand under the crypto API name
+   `jitterentropy_rng`). `CONFIG_EXTERNAL_JITTERENTROPY` in `Kbuild.config`
+   is ignored for an in-tree build and needs no change; it only applies to
+   the standalone and DKMS builds.
+
+At this point, the Jitter RNG will now be built as part of the Linux kernel
+when compiling it. It depends on no specific kernel option; only its hwrng
+interface needs the `hw_random` core, and built into the kernel image it needs
+it built in as well (`CONFIG_HW_RANDOM=y`) - with `hw_random` only a module the
+interface is left out. Built as a module itself, the Jitter RNG also takes
+`CONFIG_HW_RANDOM=m` (see the hwrng section below). The crypto API interface
+follows the same rule for the crypto RNG type (`CONFIG_CRYPTO_RNG2`, selected
+by `CONFIG_CRYPTO_RNG`): left out without it, and built into the kernel image
+only when that is built in too. `/proc/jitterentropy/interfaces/kcapi` and
+`interfaces/hwrng` report what a build ended up with.
+
+Built into the kernel image, the hwrng interface registers from an initcall of
+its own (`device_initcall_sync()`) that runs after every device initcall,
+rather than with the rest of the module: the library sits below `crypto/`,
+which is initialized before `drivers/`, and the `hw_random` core of 5.10 and
+5.15 initializes at the device initcall level too, so registering from there
+would reach it before it allocated its buffers and lose the early randomness
+the registration feeds to the random pool. The crypto API and the character
+device still register at the device initcall level. Should the hwrng fail to
+come up, the kernel logs `hwrng unavailable, continuing without it` and the
+other interfaces stay registered.
 
 # Linux Kernel Jitter RNG Character Device
 
@@ -183,13 +286,23 @@ Its semantics are:
 
 * `open`: a dedicated Jitter RNG instance (entropy collector) is allocated using
   the `osr` and `flags` module parameters. Each open obtains its own independent
-  instance.
+  instance. It fails with `ENOMEM` when memory runs out and also when the
+  startup health tests of the new instance fail (e.g. on a clock too coarse
+  for the configured oversampling rate) - the library reports both alike, and
+  the kernel log names the two possibilities.
 
 * `read`: delivers Jitter RNG entropy bytes generated by the instance associated
   with the open file description. Arbitrary read sizes are supported. With
-  `O_NONBLOCK`, a read returns `-EAGAIN` instead of waiting for a concurrent
-  reader of the same file description, and at most 256 bytes are delivered per
-  call (a short read); callers are expected to retry for the remainder.
+  `O_NONBLOCK`, a read returns `-EAGAIN` instead of waiting while the instance
+  is busy - a concurrent reader of the same file description, its self test, or
+  a status ioctl or `/proc` read of it - and at most 32 bytes are delivered per
+  call (a short read); callers are expected to retry for the remainder. A read
+  on an instance with a permanent health test or self test failure fails with
+  `-EIO`, as does one whose intermittent health test failure the instance could
+  not recover from. A later blocking read retries the recovery and may succeed,
+  but nothing says when, and `-EAGAIN` would have a nonblocking reader spin. An
+  `O_NONBLOCK` read never attempts it, as it reallocates the instance and runs
+  its startup again.
 
 * `close`: the Jitter RNG instance allocated on open is destroyed.
 
@@ -239,6 +352,8 @@ debugfs test interface alike:
 | `JENT_IOCHEALTH` | `__u32` | `healthFailure`, as the raw `JENT_*_FAILURE` bit mask |
 | `JENT_IOCOUTPUT` | `struct jent_output_ioctl` | `output.invocations` and `output.bytes` |
 | `JENT_IOCREINIT` | `__u32` | `reinitializations` |
+| `JENT_IOCMEMSIZE` | `__u64` | `configuration.memoryBlockSizeBytes` |
+| `JENT_IOCHASHLOOPS` | `__u32` | `configuration.hashLoopCount.runtime` |
 
 `JENT_IOCVERSION` describes the library and always answers. The rest describe
 an instance and fail with `-ENODATA` when there is none, as does
@@ -261,9 +376,9 @@ its argument, so it serves both interfaces.
 
 ### Self test ioctl
 
-`JENT_IOCSELFTEST` runs the cryptographic self test - the SHA3-256 and
-XDRBG-256 known answer tests of the conditioning component - and reports the
-verdict. It is an action rather than a query and therefore requires
+`JENT_IOCSELFTEST` runs the cryptographic self test - the known answer tests
+of the conditioning component: SHA3-256, SHAKE-256 and XDRBG-256 - and
+reports the verdict. It is an action rather than a query and therefore requires
 `CAP_SYS_ADMIN`, failing with `-EPERM` without it. Both the character device
 and the debugfs test interface implement it, and it takes no argument:
 
@@ -278,11 +393,13 @@ On the character device the run is that of the instance the ioctl arrives on,
 handled exactly as a failing periodic run of that instance is, panic under
 `fips=1` included: the call returns 0 when the tests pass, and a failure gives
 `-EFAULT` and permanently stops the output of this instance - reads on this
-open file description fail from then on, while every other instance keeps
+open file description fail with `-EIO` from then on, while every other instance keeps
 delivering (see
 [Periodic Cryptographic Self Test](#linux-kernel-jitter-rng-periodic-cryptographic-self-test)
 below). A call made after a failed run of this instance gives `-EFAULT`
-without running anything.
+without running anything, as does one on an instance the library has already
+stopped because a self test of a health-test recovery (the conditioning KAT or
+the GCD self test) failed; that call is logged and counted as a failed run.
 
 On the debugfs test interface the run is unbound: its instances record raw,
 unconditioned noise, so there is no output to stop and only the verdict of
@@ -293,6 +410,21 @@ Each instance runs the same tests on a timer by itself when
 a moment of its own choosing - after resume, say, or on the schedule of an
 audit regime that is not the module's.
 
+## User space library and tool
+
+`linux_kernel/userspace` wraps the character device, these ioctls and the
+files of `/proc/jitterentropy` in a small library, `libjitterentropy-kernel`
+(`jitterentropy-kernel.h`, man page `jitterentropy-kernel.3`), and uses it in
+the `jitter_rng` tool:
+
+	jitter_rng              # the module and an instance of it
+	jitter_rng --status     # the JSON status document
+	jitter_rng -r 32 -x     # 32 random bytes as hexadecimal digits
+
+CMake builds and installs both with `-DENABLE_KERNEL_LIB=ON`, together with
+`jitterentropy_uapi.h` for a caller issuing the ioctls itself. The library
+holds no Jitter RNG and does not link `libjitterentropy`.
+
 # Linux Kernel Jitter RNG Hardware RNG (hwrng)
 
 The module can also register the Jitter RNG with the kernel `hw_random`
@@ -300,26 +432,97 @@ framework.
 
 This interface is controlled by the `CONFIG_EXTERNAL_JITTERENTROPY_HWRNG`
 option in `Kbuild.config`. It is enabled by default and can be disabled at
-compile time by commenting the option out. It requires the running kernel to
-provide the `hw_random` core (`CONFIG_HW_RANDOM`).
+compile time by commenting the option out. It needs the `hw_random` core
+(`CONFIG_HW_RANDOM`): built against a kernel without it, the interface is left
+out, and so it is for a build into the kernel image when `hw_random` is only a
+module.
 
 When enabled, the Jitter RNG appears under the name `jitterentropy` in
 `/sys/class/misc/hw_random/rng_available`. Once selected as the current hwrng
 (by writing `jitterentropy` to `/sys/class/misc/hw_random/rng_current`), its
 output can be read from `/dev/hwrng`. A single Jitter RNG instance is allocated
 when the module is loaded and freed when it is unloaded; reads are served from
-that instance and serialized.
+that instance and serialized. If that instance cannot be allocated - memory ran
+out, or its startup health tests failed - the load of the module build fails
+with `ENOMEM`; built into the kernel image, the kernel logs `hwrng
+unavailable, continuing without it` instead and the other interfaces stay
+registered (see [Build in Tree](#build-in-tree)).
+
+A read fails with `-EIO` after a permanent health test or self test failure and
+after an intermittent one the instance could not recover from. The first
+persists; after the second a later blocking read retries the recovery, which
+can succeed if it failed on an allocation or the startup test. A non-blocking
+read - `O_NONBLOCK` on `/dev/hwrng`, the hwrng core's early randomness at
+registration - never attempts it and fails with `-EIO` too. Neither is
+`-EAGAIN`, which a nonblocking reader would retry in a tight loop; `-EAGAIN`
+only means the instance is busy - another reader, its periodic self test, or
+a status ioctl or `/proc` read of it. The crypto API interface returns
+the same codes, except `-EFAULT` for a permanent failure, following the
+upstream kernel Jitter RNG. Built in tree, where the DRBG seeds from it, the
+DRBG therefore fails a reseed rather than skipping this source for good as it
+does on `-EAGAIN` under `fips=1`.
 
 The amount of entropy the Jitter RNG declares to the kernel is controlled by
 the `hwrng_quality` module parameter (bits of estimated entropy per 1024 bits
 of output, range 0..1024):
 
-* `0` (default): the device is registered but does not automatically feed the
-  kernel random pool. The output remains available via `/dev/hwrng`.
+* `0` (default): the module declares no entropy of its own. **What the kernel
+  then does with that depends on the kernel version, and on 6.2 and newer it is
+  not what the value suggests** - see the note below.
 
 * non-zero (e.g. `1024`): the in-kernel hwrng thread uses the Jitter RNG to
   feed the kernel random pool. As the Jitter RNG is designed to deliver
   conditioned, full-entropy output, `1024` is a reasonable choice.
+
+> **`hwrng_quality=0` does not mean "do not credit" on kernels >= 6.2.**
+>
+> Since the 6.2 commit *hwrng: core - treat default_quality as a maximum and
+> default to 1024*, the hw_random core computes the device's quality as
+> `min(min(rng_core.default_quality, 1024), rng->quality ?: 1024)`. A device
+> registering with `0` is therefore promoted to `rng_core.default_quality`,
+> which itself defaults to 1024 - so the Jitter RNG is credited with full
+> entropy whenever it is the current rng, and, when the user has not chosen
+> one, is auto-selected at registration if no current rng has a higher
+> quality. The in-kernel hwrng thread then seeds the kernel CSPRNG from it and
+> credits every bit.
+>
+> Up to 6.10 the core applies that formula only when a device becomes the
+> current rng; since 6.11 (and in the 6.6 and 6.10 stable series via a
+> backport) already at registration. On the older behavior a Jitter RNG
+> registered while another hwrng (TPM, virtio-rng, CPU RNG) is current stays
+> at quality 0 - and is not auto-selected - until it is selected later
+> through `rng_current` or because the current rng goes away, at which point
+> it is promoted.
+>
+> The module logs a one-time `pr_notice` when the promoted quality takes
+> effect: at load time if it already applies then, otherwise on the first
+> read after the device became the current rng. The quality of the current
+> rng is shown in `/sys/class/misc/hw_random/rng_quality`.
+>
+> **The promotion also displaces another hwrng.** With a promoted quality of
+> 1024 the core prefers the Jitter RNG over any hwrng that declares a lower
+> one - hardware TRNG drivers setting an explicit quality below 1024
+> included: on 6.11 and newer it becomes the current rng at registration in
+> their place, and whenever the current rng goes away it is picked over them
+> (up to 6.10 only once it has been current before, which is what promotes
+> it there). `/dev/hwrng` and the in-kernel hwrng thread then read the Jitter
+> RNG instead of the hardware device. A device with an equal quality (e.g. one that also
+> registers with `0` and is promoted as well) is not displaced. To keep a
+> hardware rng current, write its name to
+> `/sys/class/misc/hw_random/rng_current` - a choice made there sticks across
+> later registrations - load this module with a `hwrng_quality` below that
+> device's quality, or build without the hwrng interface. The module does not
+> lower the default itself: the kernel offers no quality that avoids both the
+> promotion and the credit, and any fixed non-zero one would decide for every
+> system which hardware it outranks.
+>
+> To genuinely not credit the output on such a kernel, boot with
+> `rng_core.default_quality=0` (or set it at runtime via
+> `/sys/module/rng_core/parameters/default_quality`). The device stays
+> registered and readable through `/dev/hwrng` either way.
+>
+> On kernels before 6.2 the parameter means what the list above says: `0`
+> registers the device without feeding the pool.
 
 Example usage:
 
@@ -350,24 +553,33 @@ delivered to the reader exactly.
 When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 `/proc/jitterentropy/` that collects its read-only status and statistics files:
 
-* `version`: the Jitter RNG library version (e.g. `3.7.1`).
+* `version`: the Jitter RNG library version (e.g. `4.0.0`).
 
 * `config/`: a subdirectory grouping the effective runtime configuration
   shared by the kernel interfaces:
 
     * `config/flags`: human-readable breakdown of the effective flags value
-      (raw value, the state of every used `JENT_*` flag bit and the decoded
-      memory-size and hash-loop fields):
+      (raw value, the state of every `JENT_*` flag bit the module accepts
+      and the decoded memory-size and hash-loop fields):
 
 			flags:                       0x00000060
+			JENT_DISABLE_STIR:           off
+			JENT_DISABLE_UNBIAS:         off
 			JENT_DISABLE_MEMORY_ACCESS:  off
-			JENT_FORCE_INTERNAL_TIMER:   off
 			JENT_DISABLE_INTERNAL_TIMER: off
 			JENT_FORCE_FIPS:             on
 			JENT_NTG1:                   on
 			JENT_CACHE_ALL:              off
+			JENT_FORCE_SECURE_MEM:       off
 			max memory size:             auto (derived from cache size)
 			hash loop count:             default
+
+      The library itself adds `JENT_FORCE_SECURE_MEM` for FIPS and NTG.1, so
+      those modes require secure memory although the bit reads `off` here.
+      `JENT_DISABLE_STIR` and `JENT_DISABLE_UNBIAS` are accepted but have no
+      effect in this library version; a set bit reads `on (no effect)`.
+      `JENT_FORCE_INTERNAL_TIMER` is not listed: the module refuses to load
+      with it.
 
     * `config/flags_raw`: the effective flags value as a plain hexadecimal
       number (e.g. `0x00000060`), directly reusable as the `flags=` module
@@ -391,7 +603,16 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
   `interfaces/chardev` and `interfaces/testing` each report a plain `0`/`1`
   indicating whether the respective optional interface (crypto API, hwrng,
   character device, debugfs test interface) was compiled in (the
-  `CONFIG_EXTERNAL_JITTERENTROPY_*` options in `Kbuild.config`).
+  `CONFIG_EXTERNAL_JITTERENTROPY_*` options in `Kbuild.config`, and for the
+  crypto API and hwrng interfaces the kernel options they depend on). They
+  describe the build, not the running module: an interface that is compiled in
+  but did not come up at load still reads `1`. That concerns the character
+  device and the debugfs test interface, whose failures the module logs and
+  loads without, and the hwrng built into the kernel image (see
+  [Build in Tree](#build-in-tree)). In particular `interfaces/testing` reads
+  `1` although no debugfs file exists on a kernel without `CONFIG_DEBUG_FS`,
+  booted with `debugfs=off` or locked down at load - see
+  [Linux Kernel Jitter RNG Testing](#linux-kernel-jitter-rng-testing).
 
 * `statistics`: module-wide statistics in JSON format. It reports the
   character-device instances (one Jitter RNG entropy collector is allocated per
@@ -410,7 +631,8 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 		}
 
   `openInstances` is the number of instances open right now; `cumulativeOpens`
-  is the total number of opens since the module was loaded.
+  is the total number of opens admitted since the module was loaded - an
+  open refused at the `max_instances` cap is not counted.
 
   `intervalSeconds` is the effective `selftest_interval` module parameter
   (`0` when the periodic runs are disabled) and `runs` the number of self test
@@ -429,8 +651,16 @@ When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
   Files appear on `open()` of `/dev/jitterentropy` and disappear on `close()`
   (only present when the character device interface is enabled).
 
-Every Jitter RNG instance is assigned a stable RFC 4122 version 4 UUID at
-allocation. It is reported in the JSON status output as the `uuid` field and,
+`statistics`, `hwrng_status` and the `instances/` directory with the files
+below it are readable by root only: they report how the device is being used -
+a specific instance's health state and how many bytes it has delivered, the
+number of instances open, and, through the file names, the UUIDs of those
+instances. The remaining files describe the module's own configuration and are
+world readable.
+
+Every Jitter RNG instance is assigned a stable RFC 9562 version 4 UUID at
+allocation, drawn from the kernel RNG whether or not that is seeded yet. It is
+reported in the JSON status output as the `uuid` field and,
 for the character device, used as the `instances/<uuid>` file name. The UUID is
 preserved when an instance's collector is reallocated (e.g. on health-test
 recovery), so it identifies the instance for its whole lifetime.
@@ -443,10 +673,12 @@ Example usage:
 
 # Linux Kernel Jitter RNG Periodic Cryptographic Self Test
 
-The known answer tests of the conditioning component - SHA3-256 and XDRBG-256 -
-run once at module load inside `jent_entropy_init_ex()`, the library's
-initialization; a failure makes the module refuse to load with `EFAULT`. The
-module schedules no additional run of its own at load.
+The known answer tests of the conditioning component - SHA3-256,
+SHAKE-256 and XDRBG-256 - run once at module load inside `jent_entropy_init_ex()`, the library's
+initialization; a failure makes the module refuse to load with `EFAULT`, as
+does any other failure of that initialization - the timer or the startup
+health tests - and under `fips=1` the kernel panics. The module schedules no
+additional run of its own at load.
 
 A module that is loaded once and then keeps running for months can repeat them,
 which bounds the window in which a conditioning component that broke after the
@@ -480,7 +712,8 @@ Should a run of an instance ever fail:
 * Otherwise the failure is logged as `cryptographic self test failed`, naming
   the instance by its UUID where it has one, and that instance permanently
   stops delivering: the library marks it and its reads fail with
-  `JENT_ERR_SELFTEST`, surfacing as `EFAULT`. Every other instance - and every
+  `JENT_ERR_SELFTEST`, surfacing as `EFAULT` on the crypto API and `EIO`
+  on the character device and `/dev/hwrng`. Every other instance - and every
   instance created later - keeps delivering, each vouched for by its own runs.
   The debugfs test interface is not covered: it delivers raw, unconditioned
   noise, which does not involve the conditioning component.
@@ -513,8 +746,54 @@ make command line:
 	make CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y
 
 The same applies to the other interface options
-(`CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV`,
+(`CONFIG_EXTERNAL_JITTERENTROPY_KCAPI`,
+`CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV`,
 `CONFIG_EXTERNAL_JITTERENTROPY_HWRNG`), which can be disabled with `=n`.
+
+The test interface is the root-only (`0400`) debugfs file
+
+	/sys/kernel/debug/jitter_rng/jent_raw_hires
+
+Each `open()` allocates a dedicated raw-noise instance, and `read()` returns
+one 64-bit time delta per measurement (read sizes must be a multiple of 8,
+otherwise `EINVAL`). The file is not created on a kernel without
+`CONFIG_DEBUG_FS`, one booted with `debugfs=off` or one locked down at module
+load (any lockdown level, as the debugfs core itself gates debugfs under
+lockdown); the module logs this and loads without it, and
+`/proc/jitterentropy/interfaces/testing` still reads `1`, as it reports the
+build. Once lockdown is raised at runtime, opens of an existing file fail with
+`EPERM`.
+
+The instance of each `open()` is allocated with the OSR and flags of two
+module parameters that, unlike the others, can be changed at runtime by root:
+
+* `testing_osr`: OSR of the raw-noise instances (default `0`, the library
+  minimum).
+
+* `testing_flags`: flags of the raw-noise instances (default `0`), taking the
+  `JENT_*` bits of the `flags` parameter plus two test interface selectors of
+  the noise source to record: `1 << 15` the NTG.1 hash loop and `1 << 16` the
+  NTG.1 memory access loop (neither: the common measurement).
+
+Both are read on every `open()`, so parameters can be varied between
+recordings without reloading the module, e.g. to NTG.1 (`0x40`) at OSR 3:
+
+	echo 3 > /sys/module/jitter_rng/parameters/testing_osr
+	echo 0x40 > /sys/module/jitter_rng/parameters/testing_flags
+
+The raw-noise instance skips the startup, so its recording matches exactly
+the requested values instead of the oversampling rate, memory size and hash
+loop count a failing startup would escalate to. An `open()` fails with
+`EINVAL` for every value the `osr` and `flags` parameters refuse at module
+load (see [Module Parameters](#module-parameters)), `JENT_FORCE_INTERNAL_TIMER`
+included, and for the memory access loop selector with
+`JENT_DISABLE_MEMORY_ACCESS`, which would record only zeroes - unless the hash
+loop selector is set too, which takes precedence and needs no memory region;
+with `EIO` when
+the self test of the conditioning fails, and with `ENOMEM` when memory runs
+out, including a memory access region the kernel cannot allocate. The size
+bound of the `flags` and `max_memsize` parameters does not apply: the
+recording takes every memory size the library accepts.
 
 The debugfs file `jent_raw_hires` provided by the test interface also
 implements the `ioctl(JENT_IOCSTATUS)` described in the character device
@@ -526,8 +805,20 @@ In addition, the test interface (and only the test interface) implements
 `ioctl(JENT_IOCLOOPCNT)`, which sets the loop count applied to the raw noise
 measurements of the open instance: 0 (the default) selects the loop count the
 instance was configured with, any other value overrides the hash and memory
-access loop counts of every subsequent measurement (`getrawentropy --loopcnt
+access loop counts of the measurements of every read that starts after it - a
+read already running keeps the count it started with (`getrawentropy --loopcnt
 <NUM>` uses it). See `jitterentropy_uapi.h` for the ABI of both ioctls.
+
+The loop count is bounded by `JENT_LOOPCNT_MAX` (`1 << 16`); above it the
+ioctl fails with `EINVAL`. One measurement carries no reschedule point, so it
+is a single uninterruptible stretch of kernel CPU whose length this count
+drives - a recording yields and takes signals per sample. After a reschedule,
+and at the start of each batch, the sample is preceded by a priming at the
+same count without a check in between, so the longest stretch, and what a
+signal waits for, is two measurements. At the ceiling that is around 1.2
+seconds on contemporary x86, proportionally longer on a slower machine; the
+bound keeps it below the 20 second soft lockup watchdog on a CPU up to some
+15 times slower.
 
 ## Test Execution
 
