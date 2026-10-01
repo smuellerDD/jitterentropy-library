@@ -16,17 +16,18 @@
 #include "jitterentropy.h"	/* JENT_ERR_* */
 
 /*
- * Map a jent_read_entropy_safe() return code to a kernel error code. Shared by
- * all interfaces, so the behaviour does not depend on which one observed the
- * failure.
+ * Map a jent_read_entropy{,_safe}() return code to a kernel error code. Shared
+ * by all interfaces, so the behaviour does not depend on which one observed
+ * the failure.
  *
  * The permanent failures - the SP800-90B permanent health test failures and a
  * failed self test bound to the instance - are sticky for the affected
  * instance, and under fips=1 the whole kernel must panic on them. The
- * intermittent ones reach here only after jent_read_entropy_safe() failed to
- * recover them. A later read retries the recovery, which can succeed if it
- * failed on an allocation or the startup test, but never once the instance
- * runs at the maximum oversampling rate. So they map to -EIO rather than the
+ * intermittent ones reach here after jent_read_entropy_safe() failed to
+ * recover them, or from a non-blocking read, which does not try. A later
+ * blocking read retries the recovery, which can succeed if it failed on an
+ * allocation or the startup test, but never once the instance runs at the
+ * maximum oversampling rate. So they map to -EIO rather than the
  * upstream kernel Jitter RNG's -EAGAIN, which invites an immediate retry: a
  * nonblocking /dev/hwrng reader would spin on it, and the DRBG under fips=1
  * tolerates it on reseed, i.e. would go on without this noise source for
