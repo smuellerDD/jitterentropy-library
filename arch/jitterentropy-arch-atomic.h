@@ -79,9 +79,6 @@ JENT_INTERNAL
 void jent_atomic_store_u32(uint32_t *ptr, uint32_t val);
 
 JENT_INTERNAL
-int jent_atomic_exchange_int(int *ptr, int val);
-
-JENT_INTERNAL
 jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr);
 JENT_INTERNAL
 void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val);

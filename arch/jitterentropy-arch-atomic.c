@@ -99,11 +99,6 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 	smp_store_release(ptr, val);
 }
 
-int jent_atomic_exchange_int(int *ptr, int val)
-{
-	return xchg(ptr, val);
-}
-
 jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)
 {
 	return smp_load_acquire(ptr);
@@ -171,11 +166,6 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 	__atomic_store_n(ptr, val, __ATOMIC_RELEASE);
 }
 
-int jent_atomic_exchange_int(int *ptr, int val)
-{
-	return __atomic_exchange_n(ptr, val, __ATOMIC_ACQ_REL);
-}
-
 /* The builtins take any scalar, a pointer to a function included. */
 jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)
 {
@@ -229,11 +219,6 @@ uint32_t jent_atomic_cmpxchg_u32(uint32_t *ptr, uint32_t old, uint32_t val)
 void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 {
 	(void)_InterlockedExchange((volatile long *)ptr, (long)val);
-}
-
-int jent_atomic_exchange_int(int *ptr, int val)
-{
-	return (int)_InterlockedExchange((volatile long *)ptr, (long)val);
 }
 
 jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)
@@ -298,12 +283,6 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 {
 	atomic_store_explicit((_Atomic uint32_t *)ptr, val,
 			      memory_order_release);
-}
-
-int jent_atomic_exchange_int(int *ptr, int val)
-{
-	return atomic_exchange_explicit((_Atomic int *)ptr, val,
-					memory_order_acq_rel);
 }
 
 jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)

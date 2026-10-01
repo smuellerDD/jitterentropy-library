@@ -547,8 +547,8 @@ static void test_alloc_needs_a_measured_clock(void)
 	 */
 	saved_selftest_run = jent_atomic_load_int(&jent_selftest_run);
 	jent_atomic_store_int(&jent_selftest_run, 1);
-	jent_atomic_store_int(
-		&jent_common_timer_gcd_set[JENT_GCD_CLOCK_PLATFORM], 0);
+	jent_atomic_store_u32(&jent_common_timer_gcd[JENT_GCD_CLOCK_PLATFORM],
+			      0);
 
 	ec = jent_entropy_collector_alloc_internal(JENT_MIN_OSR, 0);
 	JENT_UT_TRUE(ec == NULL, "the allocation is refused");
@@ -567,8 +567,8 @@ static void test_alloc_needs_a_measured_clock(void)
 			   "and takes the deltas as the clock produces them");
 	jent_entropy_collector_free(ec);
 
-	jent_atomic_store_int(
-		&jent_common_timer_gcd_set[JENT_GCD_CLOCK_PLATFORM], 1);
+	jent_atomic_store_u32(&jent_common_timer_gcd[JENT_GCD_CLOCK_PLATFORM],
+			      (uint32_t)divisor);
 	jent_atomic_store_int(&jent_selftest_run, saved_selftest_run);
 }
 
