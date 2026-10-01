@@ -162,6 +162,7 @@ static void test_fips_file_eintr(void)
 {
 	struct sigaction sa, saved_sa;
 	struct itimerval it, saved_it;
+	struct stat st;
 	char path[64];
 	int fds[2];
 
@@ -169,6 +170,20 @@ static void test_fips_file_eintr(void)
 
 	if (pipe(fds)) {
 		JENT_UT_SKIP("an interrupted read is retried", "no pipe");
+		return;
+	}
+
+	/*
+	 * A sandbox or chroot without /proc mounted cannot name the pipe, and
+	 * the read below would then fail on the open instead of testing the
+	 * retry. The node has to be the pipe's read end, a FIFO.
+	 */
+	snprintf(path, sizeof(path), "/proc/self/fd/%d", fds[0]);
+	if (stat(path, &st) || !S_ISFIFO(st.st_mode)) {
+		JENT_UT_SKIP("an interrupted read is retried",
+			     "/proc/self/fd is not available");
+		close(fds[0]);
+		close(fds[1]);
 		return;
 	}
 	jent_test_pipe_w = fds[1];
@@ -192,7 +207,6 @@ static void test_fips_file_eintr(void)
 	it.it_interval.tv_usec = 50000;
 	setitimer(ITIMER_REAL, &it, &saved_it);
 
-	snprintf(path, sizeof(path), "/proc/self/fd/%d", fds[0]);
 	JENT_UT_EQ(jent_fips_enabled_file(path), 1,
 		   "the indicator is read on the attempt after the interruption");
 

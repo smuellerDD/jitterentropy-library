@@ -47,7 +47,7 @@
  *   - LIBGCRYPT  -> gcry_fips_mode_active()
  *   - AWSLC      -> FIPS_mode()
  *   - OPENSSL    -> EVP_default_properties_is_fips_enabled(NULL)
- *   - Windows    -> 0 (no kernel switch to query)
+ *   - Windows    -> BCryptGetFipsAlgorithmMode(), the system FIPS policy
  *   - POSIX      -> read /proc/sys/crypto/fips_enabled (Linux); on systems
  *                   that lack the file the open() fails and we report 0.
  *   - Linux Kernel -> fips_enabled flag
@@ -63,6 +63,7 @@
  * Return non-zero when FIPS mode is active for the active backend.
  * Defined in arch/jitterentropy-arch-fips.c.
  */
+JENT_INTERNAL
 int jent_fips_enabled(void);
 
 #endif /* _JITTERENTROPY_ARCH_FIPS_H */
