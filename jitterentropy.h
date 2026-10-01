@@ -269,8 +269,43 @@ extern "C" {
 #define JENT_HASHLOOP_128		JENT_HASHLOOP_TO_FLAGS(UINT32_C(8))
 #define JENT_MAX_HASHLOOP		JENT_HASHLOOP_128
 
+/* Every bit of the flags word given a meaning above. */
+#define JENT_FLAGS_DEFINED						       \
+	(JENT_DISABLE_STIR | JENT_DISABLE_UNBIAS |			       \
+	 JENT_DISABLE_MEMORY_ACCESS | JENT_FORCE_INTERNAL_TIMER |	       \
+	 JENT_DISABLE_INTERNAL_TIMER | JENT_FORCE_FIPS | JENT_NTG1 |	       \
+	 JENT_CACHE_ALL | JENT_FORCE_SECURE_MEM |			       \
+	 JENT_MAX_HASHLOOP_MASK | JENT_MAX_MEMSIZE_MASK)
+
 /*
- * JENT_PRIVATE_COMPILE: the sources are compiled as one translation unit into
+ * Flags every allocation refuses: an undefined bit, or a memory size / hash
+ * loop field above its maximum. Lets a caller tell a configuration error
+ * apart from a failed startup before jent_entropy_init_ex().
+ */
+static inline int jent_flags_invalid(unsigned int flags)
+{
+	return (flags & ~(unsigned int)JENT_FLAGS_DEFINED) ||
+	       JENT_FLAGS_TO_MAX_MEMSIZE(flags) >
+			JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX) ||
+	       JENT_FLAGS_TO_HASHLOOP(flags) >
+			JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP);
+}
+
+/*
+ * Oversampling rate bounds. JENT_MIN_OSR is a floor, not a default: an
+ * instance asked for a lower OSR - 0 included - runs at this one.
+ *
+ * During initial health tests or jent_read_entropy_safe, the RNG instance
+ * may re-initialize with an incremented OSR, which stops at JENT_MAX_OSR
+ * and returns a failure condition. Otherwise this would run "forever".
+ * Not configurable: the health test cutoff tables hold one entry per OSR up
+ * to JENT_MAX_OSR (tests/health/cutoffs.py).
+ */
+#define JENT_MIN_OSR	3
+#define JENT_MAX_OSR	20
+
+/*
+ * JENT_PRIVATE_COMPILE:the sources are compiled as one translation unit into
  * a program or library of their own - a private copy - and every function of
  * the library is static there, the API through JENT_PRIVATE_STATIC and the
  * internals one source file calls in another through JENT_INTERNAL. Nothing of

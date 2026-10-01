@@ -376,49 +376,11 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 #endif
 
 /*
- * Oversampling rate: This value defines the default oversampling rate. The
- * OSR defines the global heuristic entropy rate of 1/OSR.
- *
- * It is permissible to configure this value differently at compile time.
- *
- * This value is applied if the Jitter RNG:
- * - is instantiated with an OSR of 0 provided to the initialization API
- *
- * During initial health tests or jent_read_entropy_safe, the RNG instance
- * may re-initialize with an incremented OSR, which stops at JENT_OSR_MAX
- * and returns a failure condition. Otherwise this would run "forever".
- * Set another value instead of the default 20, if necessary.
+ * The oversampling rate bounds JENT_MIN_OSR / JENT_MAX_OSR and
+ * jent_flags_invalid() are in jitterentropy.h. The OSR defines the global
+ * heuristic entropy rate of 1/OSR; ensure_osr_is_at_least_minimal() applies
+ * the floor.
  */
-#ifndef JENT_MIN_OSR
-#define JENT_MIN_OSR	3
-#endif
-
-#ifndef JENT_MAX_OSR
-#define JENT_MAX_OSR	20
-#endif
-
-/* Every bit of the flags word jitterentropy.h gives a meaning. */
-#define JENT_FLAGS_DEFINED						       \
-	(JENT_DISABLE_STIR | JENT_DISABLE_UNBIAS |			       \
-	 JENT_DISABLE_MEMORY_ACCESS | JENT_FORCE_INTERNAL_TIMER |	       \
-	 JENT_DISABLE_INTERNAL_TIMER | JENT_FORCE_FIPS | JENT_NTG1 |	       \
-	 JENT_CACHE_ALL | JENT_FORCE_SECURE_MEM |			       \
-	 JENT_MAX_HASHLOOP_MASK | JENT_MAX_MEMSIZE_MASK)
-
-/*
- * An undefined bit, or a memory size / hash loop field above its maximum.
- * Caller flags only: the kernel test interface uses the unused bits. Also
- * checked by the kernel module before jent_entropy_init_ex(), which would
- * report them as a failed startup.
- */
-static inline int jent_flags_invalid(unsigned int flags)
-{
-	return (flags & ~(unsigned int)JENT_FLAGS_DEFINED) ||
-	       JENT_FLAGS_TO_MAX_MEMSIZE(flags) >
-			JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX) ||
-	       JENT_FLAGS_TO_HASHLOOP(flags) >
-			JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP);
-}
 
 /***************************************************************************
  * Jitter RNG State Definition Section
