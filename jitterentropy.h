@@ -264,7 +264,20 @@ extern "C" {
 #define JENT_MAX_HASHLOOP		JENT_HASHLOOP_128
 
 /*
- * JENT_PRIVATE_COMPILE: the sources are compiled as one translation unit into
+ * Oversampling rate bounds. JENT_MIN_OSR is a floor, not a default: an
+ * instance asked for a lower OSR - 0 included - runs at this one.
+ *
+ * During initial health tests or jent_read_entropy_safe, the RNG instance
+ * may re-initialize with an incremented OSR, which stops at JENT_MAX_OSR
+ * and returns a failure condition. Otherwise this would run "forever".
+ * Not configurable: the health test cutoff tables hold one entry per OSR up
+ * to JENT_MAX_OSR (tests/health/cutoffs.py).
+ */
+#define JENT_MIN_OSR	3
+#define JENT_MAX_OSR	20
+
+/*
+ * JENT_PRIVATE_COMPILE:the sources are compiled as one translation unit into
  * a program or library of their own - a private copy - and every function of
  * the library is static there, the API through JENT_PRIVATE_STATIC and the
  * internals one source file calls in another through JENT_INTERNAL. Nothing of
