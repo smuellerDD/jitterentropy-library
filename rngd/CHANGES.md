@@ -1,3 +1,6 @@
+The history of jitterentropy-rngd as a project of its own, up to its integration
+into this tree at 1.3.3-prerelease. Later changes are in `../CHANGES.md`.
+
 1.3.2:
  * Add --exit-on-error option
 
