@@ -1,3 +1,4 @@
+'\" t
 .\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
 .\"
 .\" Permission is granted to make and distribute verbatim copies of this
@@ -12,33 +13,25 @@
 .\" Formatted or processed versions of this manual, if unaccompanied by
 .\" the source, must acknowledge the copyright and authors of this work.
 .\" License.
-.TH JITTERENTROPY 3  2021-03-08
+.TH JITTERENTROPY 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
 .SH NAME
-jitterentropy \- CPU Jitter Random Number Generator
+jitterentropy, jent_version \- CPU Jitter Random Number Generator
+.SH LIBRARY
+Jitter RNG library
+.RI ( libjitterentropy ", " \-ljitterentropy ).
+.BR pkg\-config (1)
+knows it as
+.IR jitterentropy ,
+and where the library was installed by its CMake build, CMake's
+.B find_package(jitterentropy)
+provides the imported target
+.IR jitterentropy::jitterentropy .
 .SH SYNOPSIS
 .nf
 .B #include <jitterentropy.h>
-.sp
-.BI "int jent_entropy_switch_notime_impl(struct jent_notime_thread *" new_thread );
-.sp
-.BI "int jent_set_fips_failure_callback(jent_fips_failure_cb " cb ");
-.sp
-.BI "int jent_entropy_init(" void ");
-.sp
-.BI "int jent_entropy_init_ex(unsigned int " osr ", unsigned int " flags );
-.sp
-.BI "int jent_selftest(struct rand_data *" entropy_collector );
-.sp
-.BI "struct rand_data *jent_entropy_collector_alloc(unsigned int " osr ",
-.BI "                                               unsigned int " flags );
-.sp
-.BI "void jent_entropy_collector_free(struct rand_data *" entropy_collector );
-.sp
-.BI "ssize_t jent_read_entropy(struct rand_data *" entropy_collector ",
-.BI "                          char *" data ", size_t " len );
-.sp
-.BI "ssize_t jent_read_entropy_safe(struct rand_data **" entropy_collector ",
-.BI "                               char *" data ", size_t " len );
 .sp
 .BI "#define JENT_MAJVERSION x"
 .sp
@@ -74,298 +67,27 @@ on a centrally maintained source of entropy like
 or
 .IR /dev/urandom .
 .LP
-.BR jent_entropy_switch_notime_impl ()
-allows the caller to set a thread handler that is used by the
-Jitter RNG if it operates in the timer-less mode. See
-.IR jitterentropy.h
-for a documentation of
-.IR new_thread .
-This function must be called before
-.BR jent_entropy_init ()
-as after this call, the change of the thread handler is denied.
-.LP
-.BR jent_set_fips_failure_callback ()
-allows the caller to set a callback that is invoked by the
-Jitter RNG when a health test failure is detected. The callback
-specified with the parameter
-.BR cb
-to the API function receives the Jitter RNG state with the parameter
-.BR ec
-and the FIPS health test failure with the parameter
-.BR health_failure .
-his function must be called before
-.BR jent_entropy_init ()
-as after this call, the change of the callback is denied.
-.LP
-.BR jent_entropy_init ()
-initializes the CPU Jitter Random Number Generator. The function
-performs statistical tests to verify that the underlying system
-offers the properties needed for measuring and collecting entropy.
-If the initialization is successful, which implies that the
-statistical tests indicate the underlying system is appropriate,
-the call returns with
-.IR 0 .
-A return code other than
-.IR 0
-indicates a failure where the calling application
-.B MUST NOT
-use the CPU Jitter Random Number Generator. Also note that,
-specifically error codes
-.IR ERCT
-and
-.IR EHEALTH
-indicate health test failure.
-.LP
-.BR jent_entropy_init_ex ()
-behaves identically to
-.BR jent_entropy_init ()
-except that it allows the caller to provide the
-.IR osr
-and
-.IR flags
-parameters which should be identical to the subsequent invocation of
-.BR jent_entropy_collector_alloc ().
-When specifying an oversampling rate
-.IR osr
-different than the default, the startup test honor this value and adjust
-the self-test cut-off thresholds to the same values as used at runtime.
-.LP
-.BR jent_selftest ()
-runs the known answer tests of the conditioning component, SHA3-256 and
-XDRBG-256. These are the tests
-.BR jent_entropy_init ()
-performs before any other, offered separately for callers that have to repeat
-them periodically over the lifetime of a long-running process, as FIPS 140-3
-requires of a module that is not restarted. The call returns
-.IR 0
-on success and
-.IR EHASH
-on failure, the same code
-.BR jent_entropy_init ()
-reports for it. The tests run on stack-local state alone, allocate nothing and
-never block; they may therefore be called from any thread at any time,
-including in parallel with entropy collection and before initialization.
-The
-.IR entropy_collector
-argument binds the verdict to an instance: on failure, that instance is
-permanently taken out of service and
-.BR jent_read_entropy ()
-and
-.BR jent_read_entropy_safe ()
-return
-.B JENT_ERR_SELFTEST
-instead of data from then on, in every mode of operation, not only under
-FIPS. It may be
-.I NULL
-to obtain the verdict without binding it to an instance.
-.LP
-.BR jent_entropy_collector_alloc ()
-allocates a CPU Jitter entropy collector instance and returns the handle
-to the caller. If the allocation fails, including memory
-constraints, the call returns
-.IR NULL .
-The function requires two arguments, the oversampling rate
-.IR osr
-and a set of flags with
-.IR flags .
-The
-.IR osr
-value defines the amount of oversampling performed by the entropy
-collector. Usually, a caller wants to provide the value 0 here to
-apply the default oversampling. The call ensures that any value
-lower than
-.B JENT_MIN_OSR
-is converted to
-.B JENT_MIN_OSR
-automatically.
-.LP
-The
-.IR flags
-value is either zero or one or more of the following flags.
+The API is documented in these pages:
 .TP
-.B JENT_DISABLE_MEMORY_ACCESS
-If the system is constrained with memory, this flag
-disables the allocation of that memory and therefore memory accesses. But
-that also implies that the entropy collection process only relies on the
-complexity of the CPU. Note, if somebody knows all details of that CPU
-complexity, that person may potentially reduce the entropy delivered by the CPU
-complexity. If that person can push the generated entropy below a threshold,
-the CPU Jitter random number generator starts overestimating entropy from the
-noise source. Thus, disabling memory accesses and relying only on the CPU
-complexity should only be done if you really know what you are doing.
+.BR jent_entropy_init (3)
+the startup tests of the platform, run once per process, and the self test
+of the conditioning component;
 .TP
-.B JENT_FORCE_INTERNAL_TIMER
-This flag can be used to force the Jitter RNG to use the internal
-high-resolution timer instead of using the hardware time stamp. Commonly,
-the startup self test performed with
-.BR jent_entropy_init ()
-uses the hardware timer with precedence if it is identified to be appropriate
-for entropy collection. If the internal timer is not compiled, requesting
-this flag returns an error. Even though a separate thread is spawned
-to provide a high-resolution time stamp, this entire operation is completely
-thread-safe as all relevant data is maintained as part of the
-.IR entropy_collector
-data structure.
+.BR jent_entropy_collector_alloc (3)
+allocating and freeing an entropy collector, and the flags configuring it;
 .TP
-.B JENT_DISABLE_INTERNAL_TIMER
-This flag can be used to ensure that the internal timer is not used.
-If this flag is used together with
-.B JENT_FORCE_INTERNAL_TIMER
-this is treated as an error and the allocation returns NULL. Also,
-in case
-.BR jent_entropy_init ()
-detects that the internal timer shall be used but the disable flag
-is set, the allocation returns NULL.
+.BR jent_read_entropy (3)
+generating random numbers, and recovering from a health test failure;
 .TP
-.B JENT_FORCE_FIPS
-Force full FIPS 140 and SP800-90B compliance irrespective of the
-FIPS setting of the underlying operating system.
+.BR jent_status (3)
+the status document, the identifier and the single values of a collector;
 .TP
-.B JENT_NTG1
-Enable the BSI AIS 20/31 v3.0 NTG.1 compliant behavior.
+.BR jent_entropy_switch_notime_impl (3)
+the timer-less mode: its thread handler and the CPU of its counting thread;
 .TP
-.B JENT_FORCE_SECURE_MEM
-Require the memory of the entropy collector to be secure memory.
-The Jitter RNG always asks for it - a memory lock from the operating
-system, or an allocation from the secure memory arena of the crypto
-library it was built against; this flag decides what happens when that
-request cannot be granted. Without it - the default - the collector is
-created regardless, at the price of a state that may be written to the
-swap space. It is then treated as insecure memory: the
-.I secureMemory
-entry of
-.BR jent_status ()
-reports
-.IR false .
-With the flag the
-allocation fails instead, which is what an environment not permitting
-locking - a CI system or a restricted container with a too small
-.IR RLIMIT_MEMLOCK ,
-say - will run into, as will an application that has not configured the
-secure memory arena of libgcrypt (GCRYCTL_INIT_SECMEM) or OpenSSL
-.RB ( CRYPTO_secure_malloc_init ()),
-each of which is process-wide state the library does not establish
-itself.
-.IP
-The flag is implied by
-.B JENT_NTG1
-and
-.BR JENT_FORCE_FIPS ,
-whose compliance claims cover the protection of the collector state.
-It has no effect in the Linux kernel, where the memory is secure by
-construction, nor with AWS-LC, which wipes its memory but does not lock
-it and therefore never claims to be secure.
-.TP
-.B JENT_MAX_MEMSIZE_*
-Define the maximum amount of memory that the Jitter RNG will use
-for its operation supporting the collection of raw noise. Without
-using one of these flags, the Jitter RNG uses a built-in limit.
-The larger the amount of memory is the more entropy is collected.
-Yet, the default value is safe on most CPUs. If you have memory
-pressure but the entropy rate of your CPU is sufficient a lower
-memory size may be used. Contrary when having sufficient memory
-but insufficient entropy, larger memory sizes may be specified.
-In any case, the Jitter RNG uses at most as much memory as the
-sum of the CPU's data caches.
-.LP
-.BR jent_entropy_collector_free()
-zeroizes and frees the given CPU Jitter entropy collector instance.
-.LP
-.BR jent_read_entropy ()
-generates a random bit stream and returns it to the caller.
-.IR entropy_collector
-is the CPU Jitter entropy collector instance which shall be used
-to obtain random numbers.
-.IR data
-is the destination memory location where the random bit stream
-is written to. The memory must have already been allocated by the
-caller.
-.IR len
-is a length value provided by the caller indicating the number
-of bytes the CPU Jitter Random Number Generator shall generate.
-The caller can provide any value greater than 0. The caller
-must ensure that
-.IR data
-is at least als big as
-.IR len
-indicates. The function returns the number of bytes generated
-when the request is successfully completed. In case of an error, one of
-the following negative error codes is returned. Each of them has a
-symbolic definition in
-.IR jitterentropy.h .
-If the function returns the error code
-.B JENT_ERR_EINVAL
-.RI ( -1 )
-then the caller handed in a non-initialized (i.e. NULL value)
-for the entropy collector. The return code of
-.B JENT_ERR_RCT
-.RI ( -2 )
-indicates the SP800-90B repetition count online health test failed.
-The error code of
-.B JENT_ERR_APT
-.RI ( -3 )
-specifies that the SP800-90B adaptive proportion online health test
-failed.
-.B JENT_ERR_NOTIME
-.RI ( -4 )
-marks that the internal timer generator cannot be initialized.
-.B JENT_ERR_LAG
-.RI ( -5 )
-specifies that the LAG predictor health test failed.
-.B JENT_ERR_RCT_PERMANENT
-.RI ( -6 )
-indicates that the Repetitive Count Test (RCT) failed permanently.
-.B JENT_ERR_APT_PERMANENT
-.RI ( -7 )
-indicates that the Adaptive Proportion Test (APT) failed permanently.
-.B JENT_ERR_LAG_PERMANENT
-.RI ( -8 )
-indicates that the LAG prediction test failed permanently.
-.B JENT_ERR_RCT_MEM
-.RI ( -9 )
-indicates that the Repetition Count Test with memory failed.
-.B JENT_ERR_RCT_MEM_PERMANENT
-.RI ( -10 )
-indicates that the Repetition Count Test with memory failed permanently.
-.B JENT_ERR_SELFTEST
-.RI ( -11 )
-indicates that a
-.BR jent_selftest ()
-run bound to this instance failed; the failure is permanent.
-.LP
-When either online health test fails the Jitter RNG will not
-have any data provided in
-.IR data .
-The entropy collector instance will remain in error state. To recover,
-the entropy collector instance
-.B MUST
-be deallocated and a fresh instance must be allocated. It is
-recommended that you increase the
-.IR osr
-value at least by one when newly allocating the Jitter RNG with
-.BR jent_entropy_collector_alloc ()
-which implies that the health tests are less sensitive due to the
-fact that the assumed entropy rate of the noise source is lower.
-.LP
-.BR jent_read_entropy_safe ()
-is a service function to and therefore operates identically to
-.BR jent_read_entropy ()
-with the exception that it automatically re-allocates the entropy collector
-if a health test failure is observed. Before reallocation, a
-new power-on health test is performed. The allocation of the new entropy
-collector automatically increases the OSR by one. This is done based
-on the idea that a health test failure indicates that the assumed
-entropy rate is too high.
-.LP
-Note the function returns with an health test error if the OSR is
-getting too large. If an error is returned by this function, the Jitter
-RNG is not safe to be used on the current system.
-.LP
-The function
-.BR jent_read_entropy_safe ()
-has the same error codes as
-.BR jent_read_entropy ().
-.LP
+.BR jent_set_fips_failure_callback (3)
+the callback for health test failures in FIPS mode.
+.SS Version
 .BR JENT_MAJVERSION
 indicates API / ABI incompatible changes, functional changes that require
 consumer to be updated.
@@ -387,9 +109,145 @@ future use.
 .LP
 .BR jent_version ()
 returns
-.BR JENT_VERSION.
-.PP
-.SH FIPS 140-3 Considerations
+.BR JENT_VERSION .
+.SH RETURN VALUE
+.BR jent_version ()
+returns the
+.B JENT_VERSION
+of the library, which may differ from the one of the header an application
+was compiled against.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+See
+.B THREAD SAFETY
+below for the other interfaces.
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_version\fP()
+T}	MT-Safe
+.TE
+.ad
+.SH ENVIRONMENT
+The library reads no environment variables of its own. Built against
+libgcrypt, it reads the one libgcrypt takes its FIPS mode from, as long as
+libgcrypt is not initialized yet:
+.TP
+.B LIBGCRYPT_FORCE_FIPS_MODE
+Set, the FIPS mode is taken as enabled, as libgcrypt will take it.
+.TP
+.B ALLUSERSPROFILE
+On Windows, where libgcrypt 1.12 and later keep the force file below.
+.SH FILES
+.TP
+.I /proc/sys/crypto/fips_enabled
+Enables the FIPS mode on Linux when it reads 1, unless the library was built
+against an external crypto library, whose FIPS mode is asked instead - with
+libgcrypt only once libgcrypt is initialized, until when the file is read as
+libgcrypt reads it.
+.TP
+.I /etc/gcrypt/fips_enabled
+Built against libgcrypt, and until libgcrypt is initialized: its existence
+enables the FIPS mode, as it does libgcrypt's. On Windows, libgcrypt 1.12 and
+later keep it as
+.IR %ALLUSERSPROFILE%\eGNU\eetc\egcrypt\efips_enabled ,
+which is checked as well.
+.TP
+.I /sys/devices/system/cpu
+The data cache sizes, which the memory access noise source is sized from, and
+the online CPUs on Linux.
+.TP
+.I /proc/cpuinfo
+The core types, whose largest caches stand in on Arm systems that report
+none.
+.TP
+.I /dev/urandom
+The random identifier of an instance, on Linux where
+.BR getrandom (2)
+is not available and on other Unix systems without
+.BR arc4random (3).
+The BSDs and macOS use
+.BR arc4random (3),
+Windows
+.BR BCryptGenRandom ().
+.SH STANDARDS
+The noise source and its health tests follow NIST SP 800-90B: the repetition
+count test and the adaptive proportion test, extended by a repetition count
+test with memory and a lag predictor test. The output is conditioned with
+SHAKE-256 of FIPS 202 into an XDRBG-256. The NTG.1 mode follows the
+functionality class NTG.1 of the BSI AIS 20/31 v3.0. The instance identifier
+is an RFC 9562 UUID.
+.SH HISTORY
+.SS Functions
+.TP
+2.1.0 or earlier
+.BR jent_entropy_init (3),
+.BR jent_entropy_collector_alloc (3),
+.BR jent_entropy_collector_free (3),
+.BR jent_read_entropy (3),
+.BR jent_version ()
+.TP
+3.1.0
+.BR jent_entropy_switch_notime_impl (3),
+.BR jent_notime_init (3),
+.BR jent_notime_fini (3)
+.TP
+3.2.0
+.BR jent_read_entropy_safe (3),
+.BR jent_entropy_init_ex (3)
+.TP
+3.4.0
+.BR jent_set_fips_failure_callback (3)
+.TP
+3.7.0
+.BR jent_status (3),
+.BR jent_secure_memory_supported (3)
+.TP
+4.0.0
+.BR jent_selftest (3),
+.BR jent_entropy_collector_uuid (3),
+.BR jent_entropy_set_notime_cpu (3),
+the
+.BR jent_entropy_collector_* ()
+accessors
+.SS Flags and definitions
+.TP
+3.0.0
+.B JENT_FORCE_INTERNAL_TIMER
+.TP
+3.0.2
+.BR JENT_FORCE_FIPS ,
+.B JENT_DISABLE_INTERNAL_TIMER
+.TP
+3.3.0
+.B JENT_MAX_MEMSIZE_32kB
+to
+.B JENT_MAX_MEMSIZE_512MB
+.TP
+3.7.0
+.B JENT_MAX_MEMSIZE_1kB
+to
+.BR JENT_MAX_MEMSIZE_16kB ,
+renumbering the memory size flags;
+.BR JENT_NTG1 ,
+.BR JENT_CACHE_ALL ,
+.B JENT_HASHLOOP_*
+.TP
+4.0.0
+.B JENT_FORCE_SECURE_MEM
+and the
+.B JENT_ERR_*
+definitions;
+.B JENT_HASHLOOP_*
+renumbered, with
+.B JENT_HASHLOOP_1
+now one iteration rather than the default
+.SH FIPS 140-3 CONSIDERATIONS
 In order for the Jitter RNG to execute compliant to FIPS 140-3 and by
 extension also SP800-90B and SP800-90C compliant, the following
 considerations must be applied:
@@ -398,11 +256,15 @@ considerations must be applied:
 The FIPS mode is enabled by using the
 .IR JENT_FORCE_FIPS
 flag during initialization of the Jitter RNG library. On Linux, the
-the FIPS mode is transparently enabled if the entire operating system
+FIPS mode is transparently enabled if the entire operating system
 was booted in FIPS mode, usually by using the "fips=1" Linux kernel
-command line parameter.
+command line parameter. On Windows, it is transparently enabled when the
+system FIPS policy ("System cryptography: Use FIPS compliant algorithms")
+is on, as
+.BR BCryptGetFipsAlgorithmMode ()
+reports it.
 .TP
-.B Perform heursitic entropy analysis
+.B Perform heuristic entropy analysis
 The test tool set provided as part of the Jitter RNG library source
 distribution contains the helper to obtain raw noise data at runtime
 as well as at initialization time to calculate the SP800-90B entropy rate.
@@ -416,20 +278,334 @@ settings - see the test tool set for raw entropy for details. The resulting
 configuration values are expected to be used with the
 .IR flags
 parameter of the calls
-.BR jent_entropy_collector_alloc ()
+.BR jent_entropy_collector_alloc (3)
 and
-.BR jent_entropy_init_ex () .
+.BR jent_entropy_init_ex (3).
 It is recommended that the function
-.BR jent_read_entropy_safe ()
-API call is used for generating random numbers.
-.PP
+.BR jent_read_entropy_safe (3)
+API call is used for generating random numbers. The Jitter RNG must not be
+used after a permanent health test failure.
+.TP
+.B Do not force the internal timer
+.B JENT_FORCE_INTERNAL_TIMER
+must not be set.
+.TP
+.B Verify the status
+.BR jent_status (3)
+must report
+.I fipsMode
+as
+.IR true ,
+.I internalTimer
+and
+.I selftestFailed
+as
+.IR false ,
+and no failure in
+.IR healthFailure .
+.SH AIS 20/31 NTG.1 CONSIDERATIONS
+In order for the Jitter RNG to execute compliant to the functionality class
+NTG.1 of the German BSI's AIS 20/31 v3.0, the following considerations must
+be applied:
+.TP
+.B Enable NTG.1 mode
+The NTG.1 mode is enabled by using the
+.IR JENT_NTG1
+flag with
+.BR jent_entropy_init_ex (3)
+and every
+.BR jent_entropy_collector_alloc (3).
+It implies the FIPS mode with its health tests, where the adaptive
+proportion test, the repetition count test and the repetition count test with
+memory then carry an 8-fold safety margin in their cut-offs and the lag
+predictor keeps the common ones, as well as
+.B JENT_FORCE_SECURE_MEM
+and
+.BR JENT_DISABLE_INTERNAL_TIMER .
+It may be combined with
+.BR JENT_FORCE_FIPS .
+.B JENT_FORCE_INTERNAL_TIMER
+is refused with
+.IR ENOTIME
+and a NULL allocation, and
+.B JENT_DISABLE_MEMORY_ACCESS
+with
+.IR EPROGERR
+and a NULL allocation: NTG.1 requires the hash loop and the memory access
+as two noise sources, each of which is sampled on its own during the
+startup of every collector.
+.TP
+.B Perform entropy analysis
+Each of the two noise sources and their common operation must show an
+entropy rate of 8/OSR or more, both in the SP800-90B runtime and restart
+tests. The test tool set provided as part of the Jitter RNG library source
+distribution records the three data sets and analyzes them - see the
+NTG.1 recording and validation helpers of the test tool set for raw entropy.
+.TP
+.B Resolve insufficient entropy
+If the rate is insufficient, a higher oversampling rate, memory size or hash
+loop count may reach it; the test tool set helps finding them. The resulting
+.IR osr
+and
+.IR flags
+are expected to be used with
+.BR jent_entropy_init_ex (3)
+and
+.BR jent_entropy_collector_alloc (3).
+If the oversampling rate needed is above 20, the Jitter RNG cannot be used on
+that system.
+.TP
+.B Verify the status
+.BR jent_status (3)
+must report
+.I ntg1Mode
+as
+.IR true ,
+.I internalTimer
+and
+.I selftestFailed
+as
+.IR false ,
+and a
+.I memoryBlockSizeBytes
+of at least four times the L1 data cache size.
+.TP
+.B Handle health test failures
+It is recommended that
+.BR jent_read_entropy_safe (3)
+is used for generating random numbers. The Jitter RNG must not be used after
+a permanent health test failure.
+.SH THREAD SAFETY
+The library takes no locks. What is safe concurrently is stated here; anything
+not stated is the caller's to serialize.
+.TP
+.B An entropy collector belongs to one thread at a time
+.BR jent_read_entropy (3),
+.BR jent_read_entropy_safe (3)
+and
+.BR jent_status (3)
+mutate or read the state of the
+.IR entropy_collector
+they are given - the conditioning state, the previous time stamp, the health
+test counters - without any synchronization of their own. Two threads using
+one collector at the same time corrupt that state, and the output is then
+neither unpredictable nor necessarily distinct. Give each thread its own
+collector, or hold a lock of your own across the call. Separate collectors are
+independent and need no lock between them.
+.TP
+.B Configure before any concurrent use
+.BR jent_entropy_set_notime_cpu (3),
+.BR jent_entropy_switch_notime_impl (3)
+and
+.BR jent_set_fips_failure_callback (3)
+write process-wide state that the calls above only read. They must all be made
+before the first
+.BR jent_entropy_init (3)
+or
+.BR jent_entropy_init_ex (3)
+and before any thread generates. Once an initialization has run they return
+.IR \-EAGAIN ,
+which reports that the window has closed - it does not synchronize with a
+thread already inside it. The window closes on the first attempt, not on the
+first success: an initialization that fails leaves the three returning
+.I \-EAGAIN
+as well, so a caller that means to install its own timer thread for a second
+attempt - after the built-in one was refused, say - has to install it before
+the first.
+.TP
+.B Initialization may be called from several threads
+.BR jent_entropy_init (3)
+and
+.BR jent_entropy_init_ex (3)
+publish what they establish - the self test verdict and the common timer
+divisor, per timer - through atomic stores, so
+several threads may run them at once and a thread told the state is
+established also sees what was established. Running one of them once, before
+any concurrent use, remains cheaper: each call measures the timer afresh.
+.TP
+.B jent_selftest() is reentrant
+It runs on stack-local state alone, allocates nothing and never blocks, so it
+may be called from any thread at any time, including in parallel with
+.BR jent_read_entropy (3)
+on the very instance the verdict is bound to. The one exception is
+.BR jent_read_entropy_safe (3)
+on that instance: its recovery frees the collector and replaces it, and a
+verdict bound to the freed pointer would be written into released memory.
+Serialize the two for the same instance, or pass NULL and act on the return
+value.
 .SH NOTES
+.SS Use of the output
 In addition to use the generated random bit stream directly
 for cryptographic operations, the output of
-.BR jent_read_entropy ()
+.BR jent_read_entropy (3)
+or
+.BR jent_read_entropy_safe (3)
 can be used for seeding a deterministic random number generator.
+.SS Stack usage
+Every call that runs the noise source clears the stack it ran over before it
+returns, so that the time stamps, deltas and conditioning temporaries left in
+those frames do not survive the call on a stack that is neither locked,
+guard-paged nor kept out of a core dump. The wipe uses a buffer of its own,
+which sets a floor under what these calls need:
+.BR jent_entropy_init (3),
+.BR jent_entropy_init_ex (3),
+.BR jent_entropy_collector_alloc (3),
+.BR jent_read_entropy (3)
+and
+.BR jent_read_entropy_safe (3)
+descend some 4.5 kB in a hosted build, nearly all of it the wipe.
 .PP
+The wipe is not always the deepest of them, though.
+.BR jent_entropy_collector_alloc (3)
+draws the per-instance identifier from the operating system's CSPRNG once
+the collector is allocated, before its startup runs the noise source, and
+where the first such call in a process has machinery to stand up,
+that draw goes deeper than anything the library itself does: on Windows
+.BR BCryptGenRandom ()
+brings up the system-preferred provider, and the first
+.BR jent_entropy_collector_alloc (3)
+of a process descends some 6.8 kB where a later one takes 4.2 kB. A hosted
+caller should therefore allow
+.B 8 kB
+for these five. That is about a kilobyte over the deepest reach measured
+there, and the deepest is not the usual one: a few per cent of calls take a
+path some 250 bytes further down, so the common figure is not the ceiling. A
+caller invoking them on a thread whose stack it sizes itself has to provide
+it. Kernel and freestanding builds do not scrub and do not need it, their
+stacks already having the properties the wipe is there to make up for.
+.SS Linux kernel
+This C interface is not callable in the Linux kernel: the
+.I jitter_rng
+module of the source distribution exports no symbols and provides the Jitter
+RNG through
+.IR /dev/jitterentropy ,
+the hardware random number generator framework, the crypto API,
+.I /proc/jitterentropy
+and ioctls instead; see
+.BR jitter_rng (4).
+.SH EXAMPLES
+The program below checks the platform, allocates a collector, reads 32 bytes
+with the self-recovering call and prints the status document. Build it with
+.IR "cc example.c -ljitterentropy" .
+.PP
+.EX
+#include <stdio.h>
+#include <jitterentropy.h>
+
+int main(void)
+{
+	struct rand_data *ec;
+	char status[4096];
+	unsigned char buf[32];
+	ssize_t ret;
+	int err;
+
+	/* Once per process, before the first collector. */
+	err = jent_entropy_init();
+	if (err) {
+		fprintf(stderr, "jent_entropy_init: %d\en", err);
+		return 1;
+	}
+
+	ec = jent_entropy_collector_alloc(0, 0);
+	if (!ec) {
+		fprintf(stderr, "jent_entropy_collector_alloc failed\en");
+		return 1;
+	}
+
+	/* Replaces ec with a new instance on an intermittent failure. */
+	ret = jent_read_entropy_safe(&ec, (char *)buf, sizeof(buf));
+	if (ret < 0) {
+		fprintf(stderr, "jent_read_entropy_safe: %zd\en", ret);
+		jent_entropy_collector_free(ec);
+		return 1;
+	}
+	printf("%zd bytes read\en", ret);
+
+	if (!jent_status(ec, status, sizeof(status)))
+		puts(status);
+
+	jent_entropy_collector_free(ec);
+	return 0;
+}
+.EE
+.PP
+A caller with a configuration of its own starts with
+.BR jent_entropy_init_ex (3)
+and allocates every collector with the same
+.I osr
+and
+.IR flags :
+.PP
+.EX
+#include <stdio.h>
+#include <jitterentropy.h>
+
+int main(void)
+{
+	/*
+	 * One configuration for the startup test and every collector.
+	 * An osr of 0 is promoted to the default minimum, 3
+	 * (JENT_MIN_OSR).
+	 */
+	const unsigned int osr = 0;
+	const unsigned int flags = JENT_CACHE_ALL;
+	struct rand_data *ec;
+	int err;
+
+	err = jent_entropy_init_ex(osr, flags);
+	if (err) {
+		fprintf(stderr, "jent_entropy_init_ex: %d\en", err);
+		return 1;
+	}
+
+	ec = jent_entropy_collector_alloc(osr, flags);
+	if (!ec) {
+		fprintf(stderr, "jent_entropy_collector_alloc failed\en");
+		return 1;
+	}
+
+	/* ... read as in the first example ... */
+
+	jent_entropy_collector_free(ec);
+	return 0;
+}
+.EE
+.SH AUTHORS
+Stephan Mueller \(lasmueller@chronox.de\(ra
+.br
+Markus Theil \(latheil.markus@gmail.com\(ra
+.SH REPORTING BUGS
+Report bugs to the issue tracker:
+.PP
+.RS
+.nf
+https://github.com/smuellerDD/jitterentropy-library/issues
+.fi
+.RE
+.SH COPYRIGHT
+Copyright \(co 2013 - 2026 Stephan Mueller.
+The library may be distributed under the terms of the BSD-3-Clause license
+or, alternatively, the GNU General Public License version 2; see the
+.I LICENSE
+file of the source distribution.
 .SH SEE ALSO
-http://www.chronox.de provides the design description,
-the entropy and statistical analyses as well as a number of
-test cases.
+.BR jent_entropy_collector_alloc (3),
+.BR jent_entropy_init (3),
+.BR jent_entropy_switch_notime_impl (3),
+.BR jent_read_entropy (3),
+.BR jent_set_fips_failure_callback (3),
+.BR jent_status (3),
+.BR jitterentropy-hashtime (1),
+.BR jitterentropy-osr (1),
+.BR jitterentropy-rng (1),
+.BR jitter_rng (4),
+.BR getrandom (2),
+.BR mlock (2),
+.BR pthread_create (3),
+.BR random (4),
+.BR attributes (7)
+.PP
+\%https://www.chronox.de/jent/
+provides the design description, the entropy and statistical analyses as
+well as a number of test cases.

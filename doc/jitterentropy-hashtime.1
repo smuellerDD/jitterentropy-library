@@ -1,0 +1,144 @@
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY-HASHTIME 1 2026-09-30 "jitterentropy x.y.z" "User Commands"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitterentropy-hashtime \- record raw noise data of the CPU Jitter RNG
+.SH SYNOPSIS
+.B jitterentropy-hashtime
+.I rounds repeats file
+.RI [ option " ...]"
+.SH DESCRIPTION
+.B jitterentropy-hashtime
+records the raw time deltas of the noise source of the CPU Jitter Random
+Number Generator, before any conditioning - the data an SP800-90B entropy
+assessment of the noise source takes.
+.PP
+It writes
+.I rounds
+time deltas, one decimal number per line, into each of the
+.I repeats
+files
+.IR file \-0001.data,
+.IR file \-0002.data
+and so on. Every file is recorded on a collector of its own, allocated
+anew, so that the files of one run are the rows of the SP800-90B restart
+matrix.
+.PP
+The tool contains its own copy of the library and measures exactly the
+code the library runs. The recordings are analyzed with the scripts in
+.I tests/raw\-entropy
+of the source distribution.
+.SH OPTIONS
+The first eight options set the
+.B JENT_*
+flag of the same name or field, described in
+.BR jent_entropy_collector_alloc (3).
+Options are matched by their prefix.
+.TP
+.B \-\-ntg1
+AIS 20/31 NTG.1 compliant operation
+.RB ( JENT_NTG1 ).
+.TP
+.B \-\-force\-fips
+FIPS 140 and SP800-90B compliant operation
+.RB ( JENT_FORCE_FIPS ).
+.TP
+.B \-\-disable\-memory\-access
+No memory access noise source
+.RB ( JENT_DISABLE_MEMORY_ACCESS ).
+.TP
+.B \-\-disable\-internal\-timer
+Never use the internal timer
+.RB ( JENT_DISABLE_INTERNAL_TIMER ).
+.TP
+.B \-\-force\-internal\-timer
+Use the internal timer instead of the hardware time stamp
+.RB ( JENT_FORCE_INTERNAL_TIMER ).
+.TP
+.B \-\-all\-caches
+Size the memory access region from all data caches
+.RB ( JENT_CACHE_ALL ).
+.TP
+.BI \-\-max\-mem " n"
+Set the memory access region to 2^(\fIn\fR+9) bytes, with
+.I n
+from 1 (1 kB) to 20 (512 MB); 0 leaves the size to the library.
+.TP
+.BI \-\-hloopcnt " n"
+Run 2^\fIn\fR hash loop iterations per measurement, with
+.I n
+from 0 to 7.
+.TP
+.BI \-\-osr " osr"
+The oversampling rate; 0, the default, selects the minimum of 3.
+.TP
+.B \-\-hashloop
+Record the hash loop alone, the first of the two NTG.1 noise sources,
+instead of the common measurement.
+.TP
+.B \-\-memaccess
+Record the memory access loop alone, the second NTG.1 noise source.
+.TP
+.BI \-\-loopcnt " n"
+Run the recorded noise source with a loop count of
+.I n
+instead of the one the collector is configured with.
+.TP
+.BI \-\-cpu " n"
+Pin the measurement to CPU
+.IR n ,
+on hybrid CPUs to record one core type at a time. Not available with the
+internal timer, whose counting thread needs a CPU of its own, and only
+where the platform can pin a thread.
+.TP
+.B \-\-e\-cores
+Confine the measurement to the efficiency cores. macOS only.
+.TP
+.B \-\-p\-cores
+Ask for the performance cores, a preference the scheduler may leave. macOS
+only.
+.BR \-\-cpu ,
+.B \-\-e\-cores
+and
+.B \-\-p\-cores
+are mutually exclusive.
+.TP
+.B \-\-status
+Print the status document of the collector the recording would use, and
+record nothing.
+.SH EXIT STATUS
+0 when every file was recorded in full, 1 otherwise.
+.SH EXAMPLES
+The runtime data set and the restart data sets of an SP800-90B assessment:
+.PP
+.EX
+jitterentropy-hashtime 1000000 1 jent\-raw\-noise
+jitterentropy-hashtime 1000 1000 jent\-raw\-noise\-restart
+.EE
+.PP
+The hash loop alone, in NTG.1 mode:
+.PP
+.EX
+jitterentropy-hashtime 1000000 1 jent\-raw\-noise_hashloop \-\-ntg1 \-\-hashloop
+.EE
+.SH SEE ALSO
+.BR jitterentropy-osr (1),
+.BR jitterentropy-rng (1),
+.BR jent_entropy_collector_alloc (3),
+.BR jitterentropy (3),
+.BR jitterentropy-record (3)

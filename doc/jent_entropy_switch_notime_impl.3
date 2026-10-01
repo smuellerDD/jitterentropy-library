@@ -1,0 +1,157 @@
+'\" t
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JENT_ENTROPY_SWITCH_NOTIME_IMPL 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jent_entropy_switch_notime_impl, jent_entropy_set_notime_cpu, jent_notime_init, jent_notime_fini \- timer-less mode of the CPU Jitter RNG
+.SH LIBRARY
+Jitter RNG library
+.RI ( libjitterentropy ", " \-ljitterentropy ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy.h>
+.sp
+.BI "struct jent_notime_thread {"
+.BI "        int (*jent_notime_init)(void **" ctx );
+.BI "        void (*jent_notime_fini)(void *" ctx );
+.BI "        int (*jent_notime_start)(void *" ctx ", start_routine, void *" arg );
+.BI "        void (*jent_notime_stop)(void *" ctx );
+.BI "};"
+.sp
+.BI "int jent_entropy_switch_notime_impl(struct jent_notime_thread *" new_thread );
+.sp
+.BI "int jent_notime_init(void **" ctx );
+.sp
+.BI "void jent_notime_fini(void *" ctx );
+.sp
+.BI "int jent_entropy_set_notime_cpu(unsigned long " cpu ");
+.fi
+.SH DESCRIPTION
+.BR jent_entropy_switch_notime_impl ()
+allows the caller to set a thread handler that is used by the
+Jitter RNG if it operates in the timer-less mode.
+.I jent_notime_init
+sets up the handler's context in
+.IR *ctx ,
+and
+.I jent_notime_fini
+releases it; it is only invoked with the non-NULL context a successful
+.I jent_notime_init
+stored.
+.I jent_notime_start
+starts a thread running
+.I start_routine
+with
+.IR arg ,
+as the trailing two parameters of
+.BR pthread_create (3)
+do, and
+.I jent_notime_stop
+stops it; it is called exactly once for every start that succeeded. The
+Jitter RNG starts and stops the thread frequently.
+.IR start_routine 's
+type is that of
+.BR pthread_create (3)
+where the library uses POSIX threads, and
+.I "int (*)(void *)"
+otherwise.
+.BR jent_notime_init ()
+and
+.BR jent_notime_fini ()
+are the library's own implementations of the first two, exported so that a
+handler can reuse them rather than duplicate them. They start a thread only
+where the library has a thread backend of its own - not in the kernel builds
+and not in a freestanding one, whose handler has to bring its own.
+.BR jent_entropy_switch_notime_impl ()
+must be called before
+.BR jent_entropy_init (3)
+as after this call, the change of the thread handler is denied.
+.LP
+.BR jent_entropy_set_notime_cpu ()
+pins the counting thread of the timer-less mode to the logical CPU index
+.IR cpu .
+When it is not set, that thread runs on the highest-numbered CPU in the
+affinity set of the thread that starts it - the caller's, which a cpuset or
+job object may confine; outside Linux and Windows, where no affinity set can
+be read, on the CPU count minus one. As with the thread handler above, it must be called before
+.BR jent_entropy_init (3):
+afterwards the call has no effect and returns
+.IR \-EAGAIN .
+The pinning is advisory - an index the platform cannot honor, and a platform
+with no thread-to-CPU affinity API at all (OpenBSD, macOS on Apple Silicon),
+leave the counting thread where the scheduler puts it rather than failing the
+call. A CPU outside the process's affinity mask or cpuset is one such index.
+On Windows the index counts the active processors of all processor groups in
+group order, and a CPU in a processor group other than the counting thread's
+is not honored either. It returns
+.IR 0
+on success and a negative errno otherwise.
+.LP
+Without the internal timer compiled in, both functions above return
+.IR \-EOPNOTSUPP .
+.SH RETURN VALUE
+.BR jent_entropy_switch_notime_impl ()
+and
+.BR jent_entropy_set_notime_cpu ()
+return 0 on success,
+.I \-EAGAIN
+once an initialization has run, and
+.I \-EOPNOTSUPP
+without the internal timer.
+.BR jent_entropy_switch_notime_impl ()
+returns
+.I \-EINVAL
+for a NULL handler or one with a NULL callback.
+.PP
+.BR jent_notime_init ()
+returns 0 on success,
+.I \-ENOENT
+on a system with fewer than two CPUs or without a thread backend of the
+library's own,
+.I \-ENOMEM
+when its context cannot be allocated, and any negative errno the CPU count
+query fails with. Without the internal timer it is a stub returning 0.
+.BR jent_notime_fini ()
+returns no value.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+See
+.B THREAD SAFETY
+in
+.BR jitterentropy (3)
+for the details.
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_entropy_switch_notime_impl\fP(), \%\fBjent_entropy_set_notime_cpu\fP()
+T}	MT-Unsafe init
+T{
+\%\fBjent_notime_init\fP(), \%\fBjent_notime_fini\fP()
+T}	MT-Safe race:ctx
+.TE
+.ad
+.SH SEE ALSO
+.BR jent_entropy_collector_alloc (3),
+.BR jent_entropy_init (3),
+.BR jitterentropy (3),
+.BR pthread_create (3)

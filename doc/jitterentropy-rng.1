@@ -1,0 +1,112 @@
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY-RNG 1 2026-09-30 "jitterentropy x.y.z" "User Commands"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitterentropy-rng \- generate random data with the CPU Jitter RNG
+.SH SYNOPSIS
+.B jitterentropy-rng
+.I blocks
+.RI [ option " ...]"
+.SH DESCRIPTION
+.B jitterentropy-rng
+initializes the CPU Jitter Random Number Generator, allocates one entropy
+collector and writes
+.I blocks
+blocks of 32 bytes of its output to standard output. The data are the
+conditioned output of the Jitter RNG, as
+.BR jent_read_entropy_safe (3)
+delivers them; the raw time deltas of the noise source are recorded with
+.BR jitterentropy-hashtime (1).
+.PP
+The status document of the collector, as
+.BR jent_status (3)
+writes it, is printed to standard error before the first block. In FIPS or
+NTG.1 mode every health test failure is reported there as well, the
+intermittent ones the read recovers from included.
+.SH OPTIONS
+The first eight options set the
+.B JENT_*
+flag of the same name or field, described in
+.BR jent_entropy_collector_alloc (3).
+Options are matched by their prefix.
+.TP
+.B \-\-ntg1
+AIS 20/31 NTG.1 compliant operation
+.RB ( JENT_NTG1 ).
+.TP
+.B \-\-force\-fips
+FIPS 140 and SP800-90B compliant operation
+.RB ( JENT_FORCE_FIPS ).
+.TP
+.B \-\-disable\-memory\-access
+No memory access noise source
+.RB ( JENT_DISABLE_MEMORY_ACCESS ).
+.TP
+.B \-\-disable\-internal\-timer
+Never use the internal timer
+.RB ( JENT_DISABLE_INTERNAL_TIMER ).
+.TP
+.B \-\-force\-internal\-timer
+Use the internal timer instead of the hardware time stamp
+.RB ( JENT_FORCE_INTERNAL_TIMER ).
+.TP
+.B \-\-all\-caches
+Size the memory access region from all data caches
+.RB ( JENT_CACHE_ALL ).
+.TP
+.BI \-\-max\-mem " n"
+Set the memory access region to 2^(\fIn\fR+9) bytes, with
+.I n
+from 1 (1 kB) to 20 (512 MB); 0 leaves the size to the library.
+.TP
+.BI \-\-hloopcnt " n"
+Run 2^\fIn\fR hash loop iterations per measurement, with
+.I n
+from 0 to 7.
+.TP
+.BI \-\-osr " osr"
+The oversampling rate; 0, the default, selects the minimum of 3.
+.TP
+.B \-\-hex
+Write the blocks as hexadecimal digits instead of binary.
+.SH EXIT STATUS
+0 when all blocks were written. When the initialization fails, the exit
+status is the error code of
+.BR jent_entropy_init_ex (3).
+Any other failure - an invalid argument, no collector, a failed read or
+write - exits with 1.
+.SH EXAMPLES
+One megabyte of output for an assessment, the status kept aside:
+.PP
+.EX
+jitterentropy-rng 32768 > output.bin 2> status.json
+.EE
+.PP
+32 bytes in NTG.1 mode, printed as hexadecimal digits:
+.PP
+.EX
+jitterentropy-rng 1 \-\-ntg1 \-\-hex
+.EE
+.SH SEE ALSO
+.BR jitterentropy-hashtime (1),
+.BR jitterentropy-flags (1),
+.BR jitterentropy-osr (1),
+.BR jent_entropy_collector_alloc (3),
+.BR jent_read_entropy (3),
+.BR jent_status (3),
+.BR jitterentropy (3)

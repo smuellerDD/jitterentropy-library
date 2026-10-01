@@ -1,0 +1,213 @@
+'\" t
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY-KERNEL 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitterentropy-kernel, jent_kernel_open, jent_kernel_close, jent_kernel_read, jent_kernel_status, jent_kernel_uuid, jent_kernel_version, jent_kernel_osr, jent_kernel_flags, jent_kernel_memsize, jent_kernel_hashloops, jent_kernel_health_failure, jent_kernel_output, jent_kernel_reinitializations, jent_kernel_selftest, jent_kernel_proc \- user space access to the jitter_rng kernel module
+.SH LIBRARY
+Jitter RNG kernel module access library
+.RI ( libjitterentropy-kernel ", " \-ljitterentropy-kernel ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy-kernel.h>
+.sp
+.BI "int jent_kernel_open(const char *" path );
+.sp
+.BI "int jent_kernel_close(int " fd );
+.sp
+.BI "ssize_t jent_kernel_read(int " fd ", void *" buf ", size_t " len );
+.sp
+.BI "int jent_kernel_status(int " fd ", char *" buf ", size_t " buflen );
+.sp
+.BI "int jent_kernel_uuid(int " fd ", char *" buf ", size_t " buflen );
+.sp
+.BI "int jent_kernel_version(int " fd ", unsigned int *" version );
+.sp
+.BI "int jent_kernel_osr(int " fd ", unsigned int *" osr );
+.sp
+.BI "int jent_kernel_flags(int " fd ", unsigned int *" flags );
+.sp
+.BI "int jent_kernel_memsize(int " fd ", size_t *" memsize );
+.sp
+.BI "int jent_kernel_hashloops(int " fd ", unsigned int *" hashloops );
+.sp
+.BI "int jent_kernel_health_failure(int " fd ", unsigned int *" health_failure );
+.sp
+.BI "int jent_kernel_output(int " fd ", uint64_t *" read_invocations ,
+.BI "                       uint64_t *" bytes_output );
+.sp
+.BI "int jent_kernel_reinitializations(int " fd ", unsigned int *" reinitializations );
+.sp
+.BI "int jent_kernel_selftest(int " fd );
+.sp
+.BI "int jent_kernel_proc(const char *" name ", char *" buf ", size_t " buflen );
+.fi
+.SH DESCRIPTION
+The library wraps the interfaces of the
+.BR jitter_rng (4)
+kernel module: its character device, its ioctls and its files in
+.IR /proc/jitterentropy .
+It contains no Jitter RNG of its own and does not link
+.IR libjitterentropy :
+every instance lives in the kernel.
+.PP
+An instance is a file descriptor, so that
+.BR poll (2),
+.BR fcntl (2)
+and the like apply to it as to any other.
+.PP
+.BR jent_kernel_open ()
+opens
+.IR path ,
+or
+.B JENT_KERNEL_DEVICE
+.RI ( /dev/jitterentropy )
+for NULL, for which the kernel allocates an instance, and
+.BR jent_kernel_close ()
+frees it.
+.PP
+.BR jent_kernel_read ()
+reads
+.I len
+random bytes into
+.IR buf ,
+repeating short and interrupted reads.
+.PP
+.BR jent_kernel_status ()
+copies the JSON status document of the instance, as
+.BR jent_status (3)
+writes it, into
+.IR buf ;
+.B JENT_KERNEL_STATUS_LEN
+bytes hold it. The functions from
+.BR jent_kernel_uuid ()
+to
+.BR jent_kernel_reinitializations ()
+read single values of it, as the
+.BR jent_entropy_collector_* (3)
+accessors of the library do:
+.BR jent_kernel_uuid ()
+needs a buffer of
+.B JENT_KERNEL_UUID_STRLEN
+bytes,
+.BR jent_kernel_version ()
+yields the library version of the module as
+.B JENT_VERSION
+encodes it, and either argument of
+.BR jent_kernel_output ()
+may be NULL.
+.PP
+.BR jent_kernel_selftest ()
+runs the cryptographic self test on the instance, which needs
+.BR CAP_SYS_ADMIN .
+.PP
+.BR jent_kernel_proc ()
+reads the file
+.I name
+below
+.I /proc/jitterentropy
+- such as
+.IR version ,
+.I config/osr
+or
+.I statistics
+- into
+.IR buf ,
+NUL terminated.
+.SH RETURN VALUE
+.BR jent_kernel_open ()
+returns the file descriptor, and
+.BR jent_kernel_read ()
+the number of bytes read:
+.IR len ,
+or fewer where a nonblocking descriptor found the instance busy or an error
+came up after the first byte, which the next call returns. The others return
+0. On failure every function returns a negative errno.
+.SH ERRORS
+Those of
+.BR jitter_rng (4),
+and:
+.TP
+.B EINVAL
+A NULL or too small buffer, or a
+.I name
+leading out of
+.IR /proc/jitterentropy .
+.TP
+.B ENAMETOOLONG
+.I name
+is too long for a path below
+.IR /proc/jitterentropy .
+.TP
+.B ENOENT
+The device or the file does not exist: the module is not loaded.
+.TP
+.B ENOTTY
+.I fd
+is no descriptor of the module.
+.TP
+.B EOVERFLOW
+The status document or the file does not fit the buffer, or the memory size
+does not fit a
+.IR size_t .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_kernel_open\fP(), \%\fBjent_kernel_proc\fP()
+T}	MT-Safe
+T{
+\%\fBjent_kernel_close\fP(), \%\fBjent_kernel_read\fP(), \%\fBjent_kernel_status\fP(), \%\fBjent_kernel_uuid\fP() to \%\fBjent_kernel_selftest\fP()
+T}	MT-Safe
+.TE
+.ad
+The kernel serializes the calls on one instance.
+.SH EXAMPLES
+.EX
+#include <stdio.h>
+#include <jitterentropy-kernel.h>
+
+int main(void)
+{
+	unsigned char buf[32];
+	char uuid[JENT_KERNEL_UUID_STRLEN];
+	int fd = jent_kernel_open(NULL);
+
+	if (fd < 0)
+		return 1;
+	if (!jent_kernel_uuid(fd, uuid, sizeof(uuid)))
+		printf("instance %s\en", uuid);
+	if (jent_kernel_read(fd, buf, sizeof(buf)) != sizeof(buf)) {
+		jent_kernel_close(fd);
+		return 1;
+	}
+	jent_kernel_close(fd);
+	return 0;
+}
+.EE
+.SH SEE ALSO
+.BR jitter_rng (1),
+.BR jent_status (3),
+.BR jitterentropy (3),
+.BR jitter_rng (4)

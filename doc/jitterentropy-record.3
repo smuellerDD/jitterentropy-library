@@ -1,0 +1,233 @@
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY-RECORD 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitterentropy-record, jent_record_raw, jent_record_run, jent_record_report_len, jent_record_health_names, jent_record_alloc, jent_record_prime, jent_record_sample, jent_record_free \- record raw noise data of the CPU Jitter RNG
+.SH LIBRARY
+Jitter RNG recording library
+.RI ( libjitterentropy-record ", " \-ljitterentropy-record ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy-record.h>
+.sp
+.BI "int jent_record_raw(const char *" pathname ", unsigned int " rounds ,
+.BI "                    unsigned int " osr ", unsigned int " flags ,
+.BI "                    unsigned int " source ", unsigned int " loopcnt ,
+.BI "                    struct jent_record_result *" result ,
+.BI "                    char *" status ", size_t " statuslen );
+.sp
+.BI "int jent_record_run(const struct jent_record_config *" config ,
+.BI "                    char *" report ", size_t " reportlen );
+.sp
+.BI "size_t jent_record_report_len(const struct jent_record_config *" config );
+.sp
+.BI "size_t jent_record_health_names(unsigned int " health_failure ,
+.BI "                                char *" buf ", size_t " len );
+.sp
+.BI "int jent_record_alloc(struct jent_record **" rec ", unsigned int " osr ,
+.BI "                      unsigned int " flags ", unsigned int " source );
+.BI "void jent_record_prime(struct jent_record *" rec ", unsigned int " loopcnt );
+.BI "uint64_t jent_record_sample(struct jent_record *" rec ,
+.BI "                            unsigned int " loopcnt );
+.BI "void jent_record_free(struct jent_record *" rec );
+.fi
+.SH DESCRIPTION
+The library records the raw time deltas of the noise source of the CPU Jitter
+Random Number Generator, the data an SP800-90B or NTG.1 assessment takes,
+from within a program - for a process no recording tool can run in, such as
+an Android or iOS app.
+.BR jitterentropy-hashtime (1)
+records through the same code.
+.PP
+It carries a copy of
+.I libjitterentropy
+of its own and exports nothing but the functions below, so it links beside
+.I libjitterentropy
+without either seeing the other. The flags a recording takes are those of
+.IR jitterentropy.h .
+.PP
+It is not for production: a recording bypasses the startup tests and runs
+the noise source without conditioning its output.
+.PP
+.BR jent_record_raw ()
+records
+.I rounds
+time deltas into the file
+.IR pathname ,
+one decimal value per line, on a collector allocated with
+.I osr
+and
+.IR flags ,
+as
+.BR jent_entropy_collector_alloc (3)
+takes them, but without the startup, so that the configuration recorded is
+the one asked for.
+.I source
+selects the noise source:
+.B JENT_RECORD_COMMON
+for the whole measurement,
+.B JENT_RECORD_HASHLOOP
+for the hash loop and
+.B JENT_RECORD_MEMACCESS
+for the memory access loop alone. A
+.I loopcnt
+other than 0 replaces the loop count of the collector.
+.IR result ,
+where not NULL, receives what the collector ran with and the health test
+failures of the recording, which do not end it:
+.PP
+.in +4n
+.EX
+struct jent_record_result {
+    unsigned int health_failure; /* JENT_*_FAILURE bits */
+    unsigned int memsize;        /* memory access region, bytes */
+    unsigned int hashloopcnt;    /* hash loop count */
+    unsigned int internal_timer; /* 1: the timer thread's stamps */
+};
+.EE
+.in
+.PP
+.IR status ,
+where not NULL, receives the status document of that collector;
+.B JENT_RECORD_STATUS_LEN
+bytes hold it.
+.PP
+.BR jent_record_run ()
+is
+.BR jitterentropy-hashtime (1)
+driven by a structure instead of a command line: it pins the calling thread
+as asked and records
+.I repeats
+files through
+.BR jent_record_raw ().
+What the tool prints is written to
+.IR report ;
+.BR jent_record_report_len ()
+returns a
+.I reportlen
+that holds all of it.
+.PP
+.in +4n
+.EX
+struct jent_record_config {
+    const char *file;      /* <file>\-0001.data and so on */
+    unsigned long rounds;  /* time deltas per file */
+    unsigned long repeats; /* files, each from a new collector */
+    unsigned int flags;    /* JENT_* flags */
+    unsigned int osr;      /* 0: the default */
+    unsigned int loopcnt;  /* 0: the collector's own */
+    unsigned int source;   /* JENT_RECORD_* */
+    int cpu;               /* \-1: not pinned */
+    unsigned int cores;    /* JENT_RECORD_CORES_* */
+    int status;            /* print the status, record nothing */
+};
+.EE
+.in
+.PP
+.I cores
+is
+.BR JENT_RECORD_CORES_ANY ,
+or on Apple platforms
+.B JENT_RECORD_CORES_EFFICIENCY
+or
+.BR JENT_RECORD_CORES_PERFORMANCE .
+The memory lock limit and the secure memory of the compliance modes are the
+caller's to set up before the call.
+.PP
+.BR jent_record_health_names ()
+writes the names of the health tests in
+.IR health_failure ,
+such as "RCT APT-permanent", into
+.IR buf .
+.PP
+.BR jent_record_alloc ()
+allocates in
+.I rec
+a recording that writes no file: the caller takes one delta at a time from
+.BR jent_record_sample (),
+on a collector allocated as for
+.BR jent_record_raw ().
+.BR jent_record_prime ()
+takes the time stamp the next delta is measured from, at the
+.I loopcnt
+of the samples to follow; it is needed before the first sample and after any
+pause that is not to be recorded, and does nothing for the hash loop or
+memory access loop alone. Unlike
+.BR jent_record_raw (),
+the deltas keep the division by the timer GCD.
+.BR jent_record_free ()
+releases the recording. The debugfs test interface of the kernel module
+records through these.
+.PP
+None of the functions prints anything, and none is safe to call concurrently
+with another call into the library.
+.SH RETURN VALUE
+.BR jent_record_raw ()
+returns one of:
+.TP
+.BR JENT_RECORD_OK " (0)"
+The file was recorded.
+.TP
+.BR JENT_RECORD_EINVAL " (1)"
+No such noise source, no rounds, or the memory access loop with memory
+access disabled.
+.TP
+.BR JENT_RECORD_ENOMEM " (2)"
+No memory for the samples.
+.TP
+.BR JENT_RECORD_ECOLLECTOR " (3)"
+No collector: the self tests of the conditioning failed, the library refuses
+the flags, or memory could not be allocated or, in a compliance mode, locked.
+.TP
+.BR JENT_RECORD_EIO " (4)"
+The file could not be written;
+.I errno
+says why, and nothing is left of it.
+.PP
+.BR jent_record_alloc ()
+returns the same codes, with
+.B JENT_RECORD_EINVAL
+also for an
+.I osr
+above
+.B JENT_MAX_OSR
+or flags
+.BR jent_flags_invalid ()
+refuses, and
+.BR JENT_RECORD_ESELFTEST " (5)"
+where the self tests of the conditioning failed.
+.BR jent_record_sample ()
+returns the delta.
+.PP
+.BR jent_record_run ()
+returns the exit status of the tool, 0 or 1.
+.BR jent_record_health_names ()
+returns the length the whole list needs, as
+.BR snprintf (3)
+does.
+.SH NOTES
+The build offers the library only when asked to:
+.I \-DENABLE_RECORDING=ON
+with CMake,
+.I ENABLE_RECORDING=1
+with make.
+.SH SEE ALSO
+.BR jitterentropy-hashtime (1),
+.BR jent_entropy_collector_alloc (3),
+.BR jent_status (3),
+.BR jitterentropy (3)

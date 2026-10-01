@@ -1,0 +1,328 @@
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTER_RNG 4 2026-09-30 "jitterentropy x.y.z" "Kernel Interfaces Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitter_rng \- Linux kernel module of the CPU Jitter Random Number Generator
+.SH SYNOPSIS
+.B modprobe jitter_rng
+.RI [ parameter = value " ...]"
+.PP
+.I /dev/jitterentropy
+.br
+.I /proc/jitterentropy/
+.PP
+.B #include <jitterentropy_uapi.h>
+.SH DESCRIPTION
+.B jitter_rng
+is the CPU Jitter Random Number Generator of
+.BR jitterentropy (3)
+built for the Linux kernel, 5.10 or later, from the unchanged library
+sources. The C interface of the library is not exported; the module offers
+the Jitter RNG through the interfaces below instead. Each is a build option
+of the module and may be absent;
+.I /proc/jitterentropy/interfaces/
+says which were compiled in.
+.SS Character device
+Every
+.BR open (2)
+of
+.I /dev/jitterentropy
+allocates an entropy collector of its own with the
+.B osr
+and
+.B flags
+of the module, and
+.BR close (2)
+frees it.
+.BR read (2)
+delivers its output in any size. With
+.B O_NONBLOCK
+a read delivers at most 32 bytes and fails with
+.B EAGAIN
+rather than wait while the instance is busy, see
+.BR ERRORS ;
+it
+leaves the recovery from an intermittent health test failure, which
+reallocates the collector, to the next blocking read and fails with
+.B EIO
+until then.
+.SS Hardware random number generator
+The module registers one collector as
+.I jitterentropy
+with the
+.I hw_random
+framework. Once it is the current device in
+.IR /sys/class/misc/hw_random/rng_current ,
+.I /dev/hwrng
+reads from it.
+.SS Kernel crypto API
+The module registers the random number generator
+.I jitter_rng
+- or
+.IR jitterentropy_rng ,
+the name of the kernel's own copy, when it is built into the kernel in its
+place. Each instantiation allocates a collector. User space reaches it
+through
+.B AF_ALG
+sockets of type
+.IR rng .
+.SS Status in procfs
+.I /proc/jitterentropy/
+holds the version, the effective configuration, the interfaces compiled in,
+statistics, and the status document of
+.BR jent_status (3)
+for the hardware random number generator instance and for every open
+character device instance; see
+.BR FILES .
+.SS Cryptographic self test
+The known answer tests of
+.BR jent_selftest (3)
+run at module load, and for every instance periodically if
+.B selftest_interval
+is set, or on demand with
+.BR JENT_IOCSELFTEST .
+An instance whose run fails stops delivering for good; a kernel booted with
+.I fips=1
+panics instead.
+.SS Test interface
+Off by default and not meant for production: the debugfs file
+.IR /sys/kernel/debug/jitter_rng/jent_raw_hires ,
+readable by root, delivers the raw time deltas of the noise source as 64 bit
+values. Every open allocates a collector with
+.B testing_osr
+and
+.BR testing_flags .
+.BR getrawentropy
+of the source distribution records from it.
+.SH PARAMETERS
+All but
+.B testing_osr
+and
+.B testing_flags
+are set at load time only.
+.TP
+.BR osr =\fIn\fR
+The oversampling rate of every collector. 0, the default, and any value
+below 3 select 3; a value above 20 refuses the load.
+.TP
+.BR flags =\fIn\fR
+The
+.B JENT_*
+flags of every collector, as in
+.BR jent_entropy_collector_alloc (3).
+A reserved bit,
+.B JENT_FORCE_INTERNAL_TIMER
+and, in FIPS or NTG.1 mode,
+.B JENT_DISABLE_MEMORY_ACCESS
+refuse the load.
+.TP
+.BR ntg1 =1
+AIS 20/31 NTG.1 compliant operation; sets
+.BR JENT_NTG1 .
+.TP
+.BR force_fips =1
+FIPS compliant operation; sets
+.BR JENT_FORCE_FIPS .
+A kernel booted with
+.I fips=1
+implies it.
+.TP
+.BR cache_all =1
+Size the memory access region from all data caches; sets
+.BR JENT_CACHE_ALL .
+.TP
+.BR max_memsize =\fIn\fR
+The memory access region of every instance in kB, a power of two up to
+524288, or 65536 on a 32 bit kernel. 0, the default, derives it from the
+cache size and lets a health test recovery double it.
+.TP
+.BR max_instances =\fIn\fR
+The character device instances unprivileged callers may hold open at a
+time, 256 by default, 0 for no limit.
+.TP
+.BR max_kcapi_instances =\fIn\fR
+The crypto API instances each unprivileged user may hold at a time, 256 by
+default, 0 for no limit.
+.TP
+.BR selftest_interval =\fIn\fR
+Seconds between two self test runs of each instance. 0, the default, runs
+none after the load. A larger value than the kernel can time is lowered to
+2592000, on a 32 bit kernel to 2147483 at HZ=500 and 1073741 at HZ=1000, with
+a warning.
+.TP
+.BR hwrng_quality =\fIn\fR
+The entropy declared to
+.IR hw_random ,
+in bits per 1024 bits of output, 0 by default. See
+.BR NOTES .
+.TP
+.BR verbose =1
+Log the status document of each crypto API instance when it is created or
+reallocated, rate-limited, and of the test interface's instance on every
+open, as well as each passed self test.
+.TP
+.BR testing_osr =\fIn\fR ", " testing_flags =\fIn\fR
+The oversampling rate and flags of the test interface, writable by root in
+.I /sys/module/jitter_rng/parameters/
+and read on every open. In
+.BR testing_flags ,
+bit 15 selects the NTG.1 hash loop and bit 16 the NTG.1 memory access loop
+as the noise source to record.
+.SH IOCTLS
+Defined in
+.IR jitterentropy_uapi.h ,
+and wrapped by
+.BR jitterentropy-kernel (3).
+The character device and the test interface implement them, on the instance
+of the open file description.
+.TP
+.B JENT_IOCSTATUS
+Copy the status document into the buffer of a
+.IR "struct jent_status_ioctl" .
+A buffer too small fails with
+.B EOVERFLOW
+and reports the length needed.
+.TP
+.BR JENT_IOCUUID ", " JENT_IOCVERSION ", " JENT_IOCOSR ", " JENT_IOCFLAGS ", " JENT_IOCMEMSIZE ", " JENT_IOCHASHLOOPS ", " JENT_IOCHEALTH ", " JENT_IOCOUTPUT ", " JENT_IOCREINIT
+A single value of the status document: the identifier, the library version,
+the oversampling rate, the flags, the memory size, the hash loop count, the
+health test failures, the output counters and the reinitializations - what
+the
+.BR jent_entropy_collector_* (3)
+accessors report in user space.
+.TP
+.B JENT_IOCSELFTEST
+Run the cryptographic self test. Requires
+.BR CAP_SYS_ADMIN .
+.TP
+.B JENT_IOCLOOPCNT
+Test interface only: set the loop count of the measurements recorded, up to
+65536.
+.SH ERRORS
+.TP
+.B EAGAIN
+A nonblocking read found the instance busy: another reader, its periodic self
+test, or a status ioctl or
+.I /proc
+read of it.
+.TP
+.B EFAULT
+The module load: the startup of the Jitter RNG failed - its self tests, the
+timer or the startup health tests; the kernel log names the error. Under
+.I fips=1
+the kernel panics instead. A failed
+.BR JENT_IOCSELFTEST .
+On the crypto API also a permanent health test failure.
+.TP
+.B EINVAL
+A parameter value the module refuses, at load or on an open of the test
+interface; on the test interface also a read of a size that is not a
+multiple of 8 and a
+.B JENT_IOCLOOPCNT
+above 65536.
+.TP
+.B EIO
+A read on an instance with a permanent health test or self test failure, or
+with an intermittent failure it could not recover from; an open of the test
+interface whose self test of the conditioning failed.
+.TP
+.B ENFILE
+An open or instantiation beyond
+.B max_instances
+or
+.BR max_kcapi_instances .
+.TP
+.B ENODATA
+A single value ioctl on an instance that has none.
+.TP
+.B ENOMEM
+No memory for a collector, or its startup health tests failed.
+.TP
+.B EPERM
+.B JENT_IOCSELFTEST
+without
+.BR CAP_SYS_ADMIN ;
+an open of the test interface on a locked-down kernel.
+.SH FILES
+.TP
+.I /dev/jitterentropy
+The character device.
+.TP
+.I /dev/hwrng
+The output of the current hardware random number generator.
+.TP
+.I /proc/jitterentropy/version
+The library version.
+.TP
+.I /proc/jitterentropy/config/
+.IR flags ,
+.IR flags_raw ,
+.IR osr ,
+.I ntg1
+and
+.IR fips :
+the configuration in effect.
+.TP
+.I /proc/jitterentropy/interfaces/
+.IR kcapi ,
+.IR hwrng ,
+.I chardev
+and
+.IR testing :
+1 for an interface compiled in.
+.TP
+.I /proc/jitterentropy/statistics
+The open instances and the self test runs, as JSON. Root only.
+.TP
+.I /proc/jitterentropy/hwrng_status
+The status document of the hardware random number generator instance. Root
+only.
+.TP
+.I /proc/jitterentropy/instances/
+The status document of every open character device instance, named by its
+UUID. Root only.
+.TP
+.I /sys/module/jitter_rng/parameters/
+The parameters above.
+.TP
+.I /sys/kernel/debug/jitter_rng/jent_raw_hires
+The test interface.
+.SH NOTES
+On Linux 6.2 and later the
+.I hw_random
+core promotes a
+.B hwrng_quality
+of 0 to its own default of 1024: the Jitter RNG is then credited with full
+entropy, feeds the kernel random pool, and is preferred over a hardware
+device declaring less. To keep it from being credited, set
+.I rng_core.default_quality=0
+on the kernel command line.
+.PP
+Building, DKMS, the build into the kernel and the details of every interface
+are described in
+.I linux_kernel/README.md
+of the source distribution.
+.SH SEE ALSO
+.BR jitter_rng (1),
+.BR jent_entropy_collector_alloc (3),
+.BR jent_selftest (3),
+.BR jent_status (3),
+.BR jitterentropy (3),
+.BR jitterentropy-kernel (3),
+.BR random (4),
+.BR modprobe (8)

@@ -1,0 +1,100 @@
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY-OSR 1 2026-09-30 "jitterentropy x.y.z" "User Commands"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitterentropy-osr \- find the oversampling rate a time budget allows the CPU Jitter RNG
+.SH SYNOPSIS
+.B jitterentropy-osr
+.I blocks seconds
+.RI [ option " ...]"
+.SH DESCRIPTION
+.B jitterentropy-osr
+searches for the highest oversampling rate at which the CPU Jitter Random
+Number Generator still generates a 32 byte block within
+.I seconds
+on this machine, and prints it to standard output.
+.PP
+A higher oversampling rate assumes less entropy per measurement and takes
+proportionally longer per block. The tool is for a caller that wants the most
+conservative rate its time budget allows.
+.PP
+Each rate is timed by generating
+.I blocks
+blocks and taking the average.
+.I seconds
+may be a fraction, such as 0.05. The search starts at the minimum rate of 3,
+estimates the answer by linear interpolation and then bisects, up to the
+maximum of 20. Its progress is reported on standard error.
+.SH OPTIONS
+The options set the
+.B JENT_*
+flag of the same name or field, described in
+.BR jent_entropy_collector_alloc (3),
+for every collector the search measures. Options are matched by their prefix.
+.TP
+.B \-\-ntg1
+AIS 20/31 NTG.1 compliant operation
+.RB ( JENT_NTG1 ).
+.TP
+.B \-\-force\-fips
+FIPS 140 and SP800-90B compliant operation
+.RB ( JENT_FORCE_FIPS ).
+.TP
+.B \-\-disable\-memory\-access
+No memory access noise source
+.RB ( JENT_DISABLE_MEMORY_ACCESS ).
+.TP
+.B \-\-disable\-internal\-timer
+Never use the internal timer
+.RB ( JENT_DISABLE_INTERNAL_TIMER ).
+.TP
+.B \-\-force\-internal\-timer
+Use the internal timer instead of the hardware time stamp
+.RB ( JENT_FORCE_INTERNAL_TIMER ).
+.TP
+.B \-\-all\-caches
+Size the memory access region from all data caches
+.RB ( JENT_CACHE_ALL ).
+.TP
+.BI \-\-max\-mem " n"
+Set the memory access region to 2^(\fIn\fR+9) bytes, with
+.I n
+from 1 (1 kB) to 20 (512 MB); 0 leaves the size to the library.
+.TP
+.BI \-\-hloopcnt " n"
+Run 2^\fIn\fR hash loop iterations per measurement, with
+.I n
+from 0 to 7.
+.SH EXIT STATUS
+0 when a rate was found and printed. 1 when already the minimum rate takes
+longer than
+.IR seconds ,
+for an invalid argument, and when an initialization, allocation or read
+fails during the search.
+.SH EXAMPLES
+The highest rate that delivers a block within 50 milliseconds, averaged over
+100 blocks:
+.PP
+.EX
+jitterentropy-osr 100 0.05
+.EE
+.SH SEE ALSO
+.BR jitterentropy-hashtime (1),
+.BR jitterentropy-rng (1),
+.BR jent_entropy_collector_alloc (3),
+.BR jitterentropy (3)

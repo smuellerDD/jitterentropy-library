@@ -1,0 +1,115 @@
+.\" Copyright (c) 2026 by Markus Theil (theil.markus@gmail.com)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY-FLAGS 1 2026-09-30 "jitterentropy x.y.z" "User Commands"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitterentropy-flags \- encode and decode the flags of the CPU Jitter RNG
+.SH SYNOPSIS
+.B jitterentropy-flags
+.RB [ \-\-hex ]
+.I flag
+\&...
+.br
+.B jitterentropy-flags \-\-decode
+.I value
+.SH DESCRIPTION
+.B jitterentropy-flags
+converts between the
+.B JENT_*
+flags described in
+.BR jent_entropy_collector_alloc (3)
+and the number a caller passes, such as
+.BR jitterentropy-rngd (1)
+with
+.BR \-\-flags .
+It knows the flags of the
+.I jitterentropy.h
+it was built with and runs no Jitter RNG.
+.PP
+Given flags, it prints their sum in decimal, or with
+.B \-\-hex
+in hexadecimal. A
+.I flag
+is a
+.B JENT_*
+name, case-insensitive and with the
+.B JENT_
+prefix optional, such as
+.BR JENT_NTG1 ,
+.B ntg1
+or
+.BR max_memsize_1mb ,
+or an option of
+.BR jitterentropy-rng (1),
+such as
+.B \-\-force\-fips
+or
+.BI \-\-max\-mem " n",
+which are matched by their prefix as there.
+Setting the memory size or the hash loop field twice to different values is
+an error.
+.PP
+With
+.BR \-\-decode ,
+it prints every flag and whether
+.I value
+sets it, followed by the reserved bits and the values of the hash loop and
+memory size fields.
+.I value
+is decimal, or hexadecimal with a
+.B 0x
+prefix.
+.B JENT_FORCE_SECURE_MEM
+reads
+.I implied
+where
+.B JENT_FORCE_FIPS
+or
+.B JENT_NTG1
+imply it.
+.SH EXIT STATUS
+0 on success. 1 for an invalid argument, and for flags that
+.BR jent_entropy_init_ex (3)
+and
+.BR jent_entropy_collector_alloc (3)
+refuse: a reserved bit, a field value above its maximum,
+.B JENT_FORCE_INTERNAL_TIMER
+with
+.B JENT_DISABLE_INTERNAL_TIMER
+or
+.BR JENT_NTG1 ,
+or
+.B JENT_DISABLE_MEMORY_ACCESS
+with
+.B JENT_FORCE_FIPS
+or
+.BR JENT_NTG1 .
+The number or the table is printed nonetheless, and the reasons go to
+standard error. The system's FIPS mode, which refuses
+.B JENT_DISABLE_MEMORY_ACCESS
+as well, is not checked.
+.SH EXAMPLES
+.EX
+$ jitterentropy-flags ntg1 JENT_MAX_MEMSIZE_1MB
+1476395072
+$ jitterentropy-flags --decode 0x58000040
+.EE
+.SH SEE ALSO
+.BR jitterentropy-rng (1),
+.BR jitterentropy-rngd (1),
+.BR jent_entropy_collector_alloc (3),
+.BR jitterentropy (3)
