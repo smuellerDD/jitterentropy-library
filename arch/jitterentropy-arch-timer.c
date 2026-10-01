@@ -473,12 +473,17 @@ void jent_get_nstime(uint64_t *out)
 #else /* JENT_ARCH_TIMER_GENERIC */
 
 	/*
-	 * CLOCK_MONOTONIC is used rather than CLOCK_REALTIME: the realtime
-	 * clock is stepped and slewed by adjtime/NTP, which is external
-	 * interference rather than entropy the CPU itself produced, and it can
-	 * make the timestamp jump backwards. The measured jitter must come
-	 * from the execution of the entropy collection loop alone, so the
-	 * clock source with the least outside influence is the right one here.
+	 * CLOCK_MONOTONIC rather than CLOCK_REALTIME: the library expects a
+	 * monotonic time stamp, and its startup test refuses a clock that runs
+	 * backwards more than three times (ENOMONOTONIC) - as the realtime
+	 * clock does when it is stepped.
+	 *
+	 * Its nanoseconds are scaled from a counter, as those of the kernel's
+	 * ktime_get_ns() that the kernel branch above refuses: a counter slower
+	 * than 1 GHz turns equal tick counts into deltas differing by the
+	 * rounding, which the GCD analysis and the stuck test do not see
+	 * through. Where a target has a counter instruction, a branch of its
+	 * own above is the better source.
 	 */
 	uint64_t tmp = 0;
 	struct timespec time;

@@ -897,7 +897,9 @@ endif()
 # themselves, $ORIGIN/../lib, so an install under any prefix - and one moved
 # elsewhere as a whole - runs without LD_LIBRARY_PATH. Only where the library
 # is not in a directory the linker searches anyway: an rpath there is dead
-# weight that rpmlint and Lintian report. Set before the subdirectories, whose
+# weight that rpmlint and Lintian report. Decided for the configured prefix:
+# configured for a linker directory such as /usr, an install moved elsewhere
+# by "cmake --install --prefix" needs -DCMAKE_INSTALL_RPATH='$ORIGIN/../lib'. Set before the subdirectories, whose
 # targets take it at creation; a CMAKE_INSTALL_RPATH or CMAKE_SKIP_INSTALL_RPATH
 # given on the command line wins. macOS needs none - the install name above is
 # absolute - and neither do Windows, Cygwin and MSYS, which find DLLs on PATH.
