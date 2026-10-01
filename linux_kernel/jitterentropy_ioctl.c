@@ -14,7 +14,6 @@
 #include <linux/uaccess.h>
 
 #include "jitterentropy.h"
-#include "jitterentropy-internal.h"
 #include "jitterentropy_ioctl.h"
 
 /* One answer, whichever field was asked for. */
@@ -89,13 +88,17 @@ static int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
 		out->size = sizeof(out->value.uuid);
 		return 0;
 	case JENT_IOCOSR:
-		return jent_ioctl_field_u32(out, ec->osr);
+		return jent_ioctl_field_u32(out,
+					    jent_entropy_collector_osr(ec));
 	case JENT_IOCFLAGS:
-		return jent_ioctl_field_u32(out, ec->flags);
+		return jent_ioctl_field_u32(out,
+					    jent_entropy_collector_flags(ec));
 	case JENT_IOCHEALTH:
-		return jent_ioctl_field_u32(out, ec->health_failure);
+		return jent_ioctl_field_u32(out,
+				jent_entropy_collector_health_failure(ec));
 	case JENT_IOCREINIT:
-		return jent_ioctl_field_u32(out, ec->reinit_count);
+		return jent_ioctl_field_u32(out,
+				jent_entropy_collector_reinitializations(ec));
 	case JENT_IOCMEMSIZE:
 		out->value.u64 = jent_entropy_collector_memsize(ec);
 		out->size = sizeof(out->value.u64);
@@ -104,8 +107,10 @@ static int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
 		return jent_ioctl_field_u32(out,
 					    jent_entropy_collector_hashloops(ec));
 	case JENT_IOCOUTPUT:
-		out->value.output.invocations = ec->read_invocations;
-		out->value.output.bytes = ec->bytes_output;
+		out->value.output.invocations =
+			jent_entropy_collector_read_invocations(ec);
+		out->value.output.bytes =
+			jent_entropy_collector_bytes_output(ec);
 		out->size = sizeof(out->value.output);
 		return 0;
 	default:

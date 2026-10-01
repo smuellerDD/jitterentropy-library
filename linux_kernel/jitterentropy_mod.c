@@ -25,7 +25,6 @@
 #include <linux/module.h>
 
 #include "jitterentropy.h"
-#include "jitterentropy-internal.h"	/* JENT_MAX_OSR, jent_flags_invalid() */
 #include "jitterentropy_chardev.h"
 #include "jitterentropy_compat.h"
 #include "jitterentropy_hwrng.h"
@@ -77,13 +76,19 @@ static bool cache_all = false;
 static unsigned int max_memsize;
 
 /*
- * The library's own ceiling for a size it derives: 512 MB, or 64 MB on
- * 32-bit, whose vmalloc area (about 128 MB on i386, shared by the whole
- * kernel) makes every larger collector allocation fail with a bare ENOMEM. An
- * explicit size gets the same bound, so it can reach what automatic sizing
- * and recovery reach, and no more.
+ * The library's own ceiling for a size it derives (JENT_MAX_AUTO_MEMSIZE,
+ * internal to it): 512 MB, or 64 MB on 32-bit, whose vmalloc area (about
+ * 128 MB on i386, shared by the whole kernel) makes every larger collector
+ * allocation fail with a bare ENOMEM. An explicit size gets the same bound,
+ * so it can reach what automatic sizing and recovery reach, and no more.
  */
-#define JENT_MOD_MAX_MEMSIZE_KB	(1U << (JENT_MAX_AUTO_MEMSIZE - 1))
+#if BITS_PER_LONG == 32
+#define JENT_MOD_MAX_MEMSIZE	JENT_MAX_MEMSIZE_64MB
+#else
+#define JENT_MOD_MAX_MEMSIZE	JENT_MAX_MEMSIZE_MAX
+#endif
+#define JENT_MOD_MAX_MEMSIZE_KB						       \
+	(1U << (JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MOD_MAX_MEMSIZE) - 1))
 
 module_param_named(osr, jent_osr, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(osr, "Jitter RNG OSR parameter");
@@ -111,8 +116,12 @@ static void jent_mod_health_failure(struct rand_data *ec,
 {
 	unsigned int bits = health_failure |
 			    (health_failure >> JENT_PERMANENT_FAILURE_SHIFT);
+	char uuid[JENT_UUID_STRLEN];
 
-	pr_warn_ratelimited("jitterentropy: %s health test failure 0x%x:%s%s%s%s, instance %s, reinit %u, osr %u, hashloop %u, memsize %u\n",
+	if (jent_entropy_collector_uuid(ec, uuid, sizeof(uuid)))
+		uuid[0] = '\0';
+
+	pr_warn_ratelimited("jitterentropy: %s health test failure 0x%x:%s%s%s%s, instance %s, reinit %u, osr %u, hashloop %u, memsize %zu\n",
 			    health_failure >> JENT_PERMANENT_FAILURE_SHIFT ?
 			    "permanent" : "intermittent",
 			    health_failure,
@@ -120,9 +129,11 @@ static void jent_mod_health_failure(struct rand_data *ec,
 			    bits & JENT_APT_FAILURE ? " APT" : "",
 			    bits & JENT_LAG_FAILURE ? " lag" : "",
 			    bits & JENT_RCT_MEM_FAILURE ? " RCT-mem" : "",
-			    ec->uuid[0] ? ec->uuid : "(starting)",
-			    ec->reinit_count, ec->osr, ec->hashloopcnt,
-			    ec->mem ? ec->memmask + 1 : 0);
+			    uuid[0] ? uuid : "(starting)",
+			    jent_entropy_collector_reinitializations(ec),
+			    jent_entropy_collector_osr(ec),
+			    jent_entropy_collector_hashloops(ec),
+			    jent_entropy_collector_memsize(ec));
 }
 
 int jent_mod_check_config(unsigned int osr, unsigned int flags,

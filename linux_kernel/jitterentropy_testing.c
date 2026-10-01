@@ -3,13 +3,13 @@
  * Test interface for Jitter RNG.
  *
  * The debugfs file jent_raw_hires provides the raw noise data of the Jitter
- * RNG: each open allocates a dedicated Jitter RNG instance, each read drives
- * its measure_jitter operation and returns one u64 per measurement holding
- * the time delta as consumed by the health tests and the entropy pool (i.e.
- * including the division by the common timer GCD). Read sizes must be a
- * multiple of the u64 sample size; any other size is rejected with -EINVAL.
- * This mirrors the user space recording logic in
- * tests/raw-entropy/recording_userspace/jitterentropy-hashtime.c.
+ * RNG: each open allocates a dedicated recording, each read drives its
+ * measurements and returns one u64 per measurement holding the time delta as
+ * consumed by the health tests and the entropy pool (i.e. including the
+ * division by the common timer GCD). Read sizes must be a multiple of the
+ * u64 sample size; any other size is rejected with -EINVAL. The recording is
+ * the one of the user space recording tools, jitterentropy-record.h of
+ * tests/raw-entropy/recording_library.
  *
  * The file also implements the JENT_IOCSTATUS ioctl known from the character
  * device (see jitterentropy_uapi.h), returning the JSON status string of the
@@ -37,9 +37,8 @@
 #include <linux/string.h>
 #include <linux/uaccess.h>
 
-#include "jitterentropy-internal.h"
-#include "jitterentropy-noise.h"
 #include "jitterentropy.h"
+#include "jitterentropy-record.h"
 #include "jitterentropy_ioctl.h"
 #include "jitterentropy_mod.h"
 #include "jitterentropy_status.h"
@@ -145,17 +144,13 @@ static int jent_testing_log(struct rand_data *ec, unsigned int osr,
 /************** Raw High-Resolution Timer Entropy Data Handling **************/
 
 /*
- * Per-open state: each open() gets its own Jitter RNG instance, allocated
- * with the testing_osr/testing_flags values at open time. The measurement
- * routine is captured alongside so a testing_flags update between open() and
- * read() cannot make the recording routine disagree with the instance's
- * configuration.
+ * Per-open state: each open() gets its own recording, allocated with the
+ * testing_osr/testing_flags values at open time, which also fix the noise
+ * source it measures. @ec is its collector, for the status and field ioctls.
  */
 struct jent_testing_ctx {
+	struct jent_record *rec;
 	struct rand_data *ec;
-	unsigned int (*measure_jitter)(struct rand_data *ec,
-				       uint64_t loop_cnt,
-				       uint64_t *ret_current_delta);
 	/*
 	 * Loop count applied to each raw noise measurement, settable via
 	 * JENT_IOCLOOPCNT: 0 (the default) selects the loop count the
@@ -171,6 +166,8 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 	struct jent_testing_ctx *ctx;
 	unsigned int osr;
 	unsigned int flags;
+	unsigned int lib_flags;
+	unsigned int source;
 	int ret;
 
 	/*
@@ -189,99 +186,74 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 
 	/*
 	 * Snapshot the runtime-writable module parameters once: a concurrent
-	 * sysfs write between separate reads could otherwise pair a
-	 * measurement routine with a collector allocated from different
-	 * flags.
+	 * sysfs write between separate reads could otherwise pair a noise
+	 * source with a collector allocated from different flags.
 	 */
 	flags = READ_ONCE(testing_flags);
 	osr = READ_ONCE(testing_osr);
 
 	/*
-	 * The memory access loop with no memory region to walk records nothing.
-	 * jent_entropy_collector_alloc_raw() reaches the internal allocation
-	 * directly, and that one does not reject the pair - the guard lives in
-	 * _jent_entropy_collector_alloc(), which this deliberately bypasses - so
-	 * the collector comes back with ec->mem NULL, every measurement returns
-	 * at the NULL check inside jent_memaccess_deterministic() before it
-	 * writes its delta, and the recording is a file of zeroes that read()
-	 * reports as a full successful capture. The stuck indicator that would
-	 * have shown it is discarded by the extraction loop below.
-	 *
-	 * The in-tree recording tool offers both switches side by side
-	 * (getrawentropy --memaccess --disable-memory-access), so this is a
-	 * command line away rather than hypothetical, and an SP800-90B entropy
-	 * assessment run on that file would be assessing nothing.
-	 *
-	 * The hash loop takes precedence over the memory access loop when both
-	 * are selected (see the measurement routine selection below) and needs
-	 * no memory region, so the pair is only refused when the memory access
-	 * loop is what gets recorded.
+	 * The recording selectors are the test interface's own; the hash loop
+	 * takes precedence when both are set.
 	 */
-	if ((flags & JENT_TEST_MEMACCLOOP) &&
-	    !(flags & JENT_TEST_HASHLOOP) &&
-	    (flags & JENT_DISABLE_MEMORY_ACCESS)) {
-		pr_warn("jitterentropy: testing_flags requests the memory access loop with memory access disabled - it would record only zeroes\n");
-		kvfree(ctx);
-		return -EINVAL;
-	}
+	lib_flags = flags & ~(unsigned int)(JENT_TEST_HASHLOOP |
+					    JENT_TEST_MEMACCLOOP);
+	if (flags & JENT_TEST_HASHLOOP)
+		source = JENT_RECORD_HASHLOOP;
+	else if (flags & JENT_TEST_MEMACCLOOP)
+		source = JENT_RECORD_MEMACCESS;
+	else
+		source = JENT_RECORD_COMMON;
 
 	/*
-	 * Reported as what they are rather than as the -ENOMEM of the
-	 * allocation below, which fails on all of them alike: parameters the
-	 * module refuses to load with - JENT_FORCE_INTERNAL_TIMER among them,
-	 * which the kernel has no timer for - and a failed self test of the
-	 * conditioning. The recording selectors are the test interface's own.
+	 * Parameters the module refuses to load with, reported as what they
+	 * are rather than as the -ENOMEM the allocation below gives some of
+	 * them - JENT_FORCE_INTERNAL_TIMER, which the kernel has no timer for,
+	 * among them.
 	 */
-	ret = jent_mod_check_config(osr, flags & ~(unsigned int)
-				    (JENT_TEST_HASHLOOP | JENT_TEST_MEMACCLOOP),
-				    "testing_");
+	ret = jent_mod_check_config(osr, lib_flags, "testing_");
 	if (ret) {
 		kvfree(ctx);
 		return ret;
 	}
 
-	if (flags & (JENT_TEST_HASHLOOP))
-		ctx->measure_jitter = jent_measure_jitter_ntg1_sha3;
-	else if (flags & (JENT_TEST_MEMACCLOOP))
-		ctx->measure_jitter = jent_measure_jitter_ntg1_memaccess;
-	else
-		ctx->measure_jitter = jent_measure_jitter;
-
 	/*
-	 * Allocate the collector without the startup entropy collection and
-	 * its health-test reset ladder (mirroring the userspace recording
-	 * tools): the startup could silently escalate OSR, memory size and
-	 * hash loop count, but the recorded raw data must correspond exactly
-	 * to the requested testing_osr/testing_flags.
+	 * The collector comes without the startup entropy collection and its
+	 * health-test reset ladder (mirroring the userspace recording tools):
+	 * the startup could silently escalate OSR, memory size and hash loop
+	 * count, but the recorded raw data must correspond exactly to the
+	 * requested testing_osr/testing_flags. It runs the full SP800-90B
+	 * health test handling.
 	 *
 	 * No lock: the allocation, up to the largest memory access region, and
 	 * the self tests of the conditioning it runs first touch nothing
 	 * another file shares, and would otherwise stall every other read.
 	 */
-	ctx->ec = jent_entropy_collector_alloc_raw(osr, flags);
-	if (!ctx->ec) {
+	ret = jent_record_alloc(&ctx->rec, osr, lib_flags, source);
+	switch (ret) {
+	case JENT_RECORD_OK:
+		break;
+	case JENT_RECORD_EINVAL:
 		/*
-		 * The parameters were checked above, so it is the self tests
-		 * or memory; run them again only to tell which (the GCD self
-		 * test allocates, and reports EMEM when it cannot).
+		 * The parameters were checked above, which leaves the memory
+		 * access loop with no memory region to walk. It would record
+		 * zeroes that read() reports as a full capture, and that an
+		 * SP800-90B assessment would take for one
+		 * (getrawentropy --memaccess --disable-memory-access).
 		 */
-		ret = jent_raw_selftest(flags);
-		if (ret && ret != EMEM) {
-			pr_warn("jitterentropy: self test of the conditioning failed\n");
-			ret = -EIO;
-		} else {
-			pr_warn("jitterentropy: raw entropy collector allocation failed: out of memory\n");
-			ret = -ENOMEM;
-		}
+		pr_warn("jitterentropy: testing_flags requests the memory access loop with memory access disabled - it would record only zeroes\n");
 		kvfree(ctx);
-		return ret;
+		return -EINVAL;
+	case JENT_RECORD_ESELFTEST:
+		pr_warn("jitterentropy: self test of the conditioning failed\n");
+		kvfree(ctx);
+		return -EIO;
+	default:
+		pr_warn("jitterentropy: raw entropy collector allocation failed: out of memory\n");
+		kvfree(ctx);
+		return -ENOMEM;
 	}
-
-	/*
-	 * Match the userspace recording tools: enable the full SP800-90B
-	 * health test handling while recording.
-	 */
-	ctx->ec->is_fips_enabled = 1;
+	ctx->ec = jent_record_collector(ctx->rec);
 
 	/*
 	 * The jent_testing_log() bookkeeping is shared by every file. Only
@@ -291,7 +263,7 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 	 */
 	if (jent_verbose) {
 		if (mutex_lock_interruptible(&jent_testing_read_lock)) {
-			jent_entropy_collector_free(ctx->ec);
+			jent_record_free(ctx->rec);
 			kvfree(ctx);
 			return -ERESTARTSYS;
 		}
@@ -311,7 +283,7 @@ static int jent_testing_release(struct inode *inode, struct file *file)
 	if (!ctx)
 		return 0;
 
-	jent_entropy_collector_free(ctx->ec);
+	jent_record_free(ctx->rec);
 	kvfree(ctx);
 	file->private_data = NULL;
 
@@ -322,21 +294,13 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 					 size_t nbytes, loff_t *ppos)
 {
 	struct jent_testing_ctx *ctx = file->private_data;
-	struct rand_data *ec;
 	u64 *tmp = NULL;
-	u64 loop_cnt;
+	unsigned int loop_cnt;
 	ssize_t ret = 0;
-
-	unsigned int (*measure_jitter)(struct rand_data *ec,
-				       uint64_t loop_cnt,
-				       uint64_t *ret_current_delta);
 
 	/* Defense in depth, matching the ioctl handler: open() sets this. */
 	if (!ctx)
 		return -EFAULT;
-
-	ec = ctx->ec;
-	measure_jitter = ctx->measure_jitter;
 
 	if (!nbytes)
 		return 0;
@@ -375,7 +339,8 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 		kvfree(tmp);
 		return -ERESTARTSYS;
 	}
-	loop_cnt = ctx->loop_cnt;
+	/* At most JENT_LOOPCNT_MAX, see jent_testing_ioctl_loopcnt(). */
+	loop_cnt = (unsigned int)ctx->loop_cnt;
 	mutex_unlock(&jent_testing_read_lock);
 
 	while (nbytes >= sizeof(u64)) {
@@ -409,16 +374,14 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 		}
 
 		/*
-		 * Prime the common measurement (initialize ec->prev_time) so
-		 * the first recorded delta is not computed from a stale time
-		 * stamp (unprimed instance, the gap spent in copy_to_user()
-		 * between two rounds, or a reschedule). The NTG.1 hash-loop and
-		 * memory-access variants prime themselves and need no separate
-		 * priming. The priming runs at the session's loop count, so the
-		 * hash and memory access loops the first recorded delta spans
-		 * run at that count like every other's; it stays out of the
-		 * health tests, whose own work the steady-state deltas also
-		 * span, as its delta is not one of the recording.
+		 * Prime the measurement so the first recorded delta is not
+		 * computed from a stale time stamp (unprimed instance, the gap
+		 * spent in copy_to_user() between two rounds, or a reschedule).
+		 * The priming runs at the session's loop count, so the hash and
+		 * memory access loops the first recorded delta spans run at
+		 * that count like every other's; it stays out of the health
+		 * tests, whose own work the steady-state deltas also span, as
+		 * its delta is not one of the recording.
 		 *
 		 * A priming is followed by its measurement without a check in
 		 * between, so every pass of the loop records a sample: were a
@@ -427,7 +390,7 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 		 * nothing. The longest stretch without a reschedule point is
 		 * thus a priming and a measurement, two at the loop count.
 		 */
-		primed = (measure_jitter != jent_measure_jitter);
+		primed = false;
 
 		for (i = 0; i < samples; i++) {
 			/*
@@ -438,19 +401,18 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 			 */
 			if (need_resched()) {
 				schedule();
-				primed = (measure_jitter != jent_measure_jitter);
+				primed = false;
 			}
 
 			if (signal_pending(current))
 				break;
 
 			if (!primed) {
-				jent_measure_jitter_one(ec, loop_cnt, NULL, 0);
+				jent_record_prime(ctx->rec, loop_cnt);
 				primed = true;
 			}
 
-			/* Disregard stuck indicator */
-			measure_jitter(ec, loop_cnt, &tmp[i]);
+			tmp[i] = jent_record_sample(ctx->rec, loop_cnt);
 		}
 
 		mutex_unlock(&jent_testing_read_lock);

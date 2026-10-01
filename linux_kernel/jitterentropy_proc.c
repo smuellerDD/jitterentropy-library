@@ -8,6 +8,7 @@
  */
 
 #include <linux/atomic.h>
+#include <linux/fips.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
@@ -15,7 +16,6 @@
 #include <linux/types.h>
 
 #include "jitterentropy.h"
-#include "jitterentropy-internal.h"	/* JENT_MIN_OSR */
 #include "jitterentropy_proc.h"
 #include "jitterentropy_selftest.h"
 
@@ -94,7 +94,7 @@ static int jent_proc_fips_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%u\n",
 		   !!((jent_flags & (JENT_FORCE_FIPS | JENT_NTG1)) ||
-		      jent_fips_enabled()));
+		      fips_enabled));
 
 	return 0;
 }

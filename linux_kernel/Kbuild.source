@@ -11,9 +11,14 @@
 #   $(jent_srcdir)        -> linux_kernel/  (kernel interface headers)
 #   $(jent_srcdir)/..     -> project root   (jitterentropy.h, arch/*.h)
 #   $(jent_srcdir)/../src -> src/           (library internal headers)
+#
+# The kernel interfaces get no src/: they use the library through
+# jitterentropy.h alone, and the test interface the recording library's
+# jitterentropy-record.h.
 jitter_rng_c_args = -DLINUX_KERNEL					       \
-		    -I$(jent_srcdir) -I$(jent_srcdir)/..		       \
-		    -I$(jent_srcdir)/../src
+		    -I$(jent_srcdir) -I$(jent_srcdir)/..
+jitter_rng_lib_c_args = $(jitter_rng_c_args) -I$(jent_srcdir)/../src
+jent_recorddir = tests/raw-entropy/recording_library
 
 # Built in tree, crypto/Makefile enters this directory through
 # "obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy-library/linux_kernel/"
@@ -97,31 +102,31 @@ jitter_rng-y += ../src/jitterentropy-base.o				       \
 		jitterentropy_selftest.o				       \
 		jitterentropy_status.o
 
-jitter_rng_c_args_zero = -O0 $(jitter_rng_c_args)
+jitter_rng_c_args_zero = -O0 $(jitter_rng_lib_c_args)
 
 CFLAGS_../src/jitterentropy-base.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-gcd.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-health.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-noise.o = $(jitter_rng_c_args_zero)
-CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_c_args)
+CFLAGS_../src/jitterentropy-status.o = $(jitter_rng_lib_c_args)
 # The UUID is formatting, not measurement: it needs no -O0.
-CFLAGS_../src/jitterentropy-uuid.o = $(jitter_rng_c_args)
+CFLAGS_../src/jitterentropy-uuid.o = $(jitter_rng_lib_c_args)
 CFLAGS_../src/jitterentropy-sha3.o = $(jitter_rng_c_args_zero)
 CFLAGS_../src/jitterentropy-timer.o = $(jitter_rng_c_args_zero)
-CFLAGS_../arch/jitterentropy-arch-atomic.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-atomic.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-memory.o = $(jitter_rng_lib_c_args)
 # Deliberately not $(jitter_rng_c_args_zero), unlike the entropy core above.
 # On architectures without a counter instruction this object reads the clock
 # through <linux/timex.h>, and kernel headers are only meant to build
 # optimized. The -O0 requirement covers the measured loops in the entropy
 # core, not the counter read, so this costs a call per timestamp and nothing
 # else.
-CFLAGS_../arch/jitterentropy-arch-timer.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-ncpu.o = $(jitter_rng_c_args)
-CFLAGS_../arch/jitterentropy-arch-random.o = $(jitter_rng_c_args)
+CFLAGS_../arch/jitterentropy-arch-timer.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-sched.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-cache.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-fips.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-ncpu.o = $(jitter_rng_lib_c_args)
+CFLAGS_../arch/jitterentropy-arch-random.o = $(jitter_rng_lib_c_args)
 CFLAGS_jitterentropy_mod.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_ioctl.o = $(jitter_rng_c_args)
 CFLAGS_jitterentropy_proc.o = $(jitter_rng_c_args)
@@ -151,7 +156,14 @@ CFLAGS_jitterentropy_hwrng.o = $(jitter_rng_c_args)
 
 ############################ Test Code Compilation #############################
 
+# The recording without a file of the recording library, which the test
+# interface records through. No -O0: it runs between the measurements, not in
+# them, as the test interface's own loop does.
 jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE)		       \
-	+= jitterentropy_testing.o
+	+= jitterentropy_testing.o					       \
+	   ../$(jent_recorddir)/jitterentropy-record-session.o
 
-CFLAGS_jitterentropy_testing.o = $(jitter_rng_c_args)
+CFLAGS_jitterentropy_testing.o = $(jitter_rng_c_args)			       \
+				 -I$(jent_srcdir)/../$(jent_recorddir)
+CFLAGS_../$(jent_recorddir)/jitterentropy-record-session.o =		       \
+	$(jitter_rng_lib_c_args)
