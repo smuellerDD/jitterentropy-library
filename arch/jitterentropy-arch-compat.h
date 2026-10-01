@@ -121,11 +121,12 @@
  * The Windows interfaces the backends use - GetLogicalProcessorInformationEx()
  * with RelationCache and RelationGroup, GetActiveProcessorCount(),
  * ALL_PROCESSOR_GROUPS, GetThreadGroupAffinity()/SetThreadGroupAffinity() and
- * the GROUP_AFFINITY / GROUP_RELATIONSHIP structs and BCryptGenRandom() - are
- * declared by the Windows SDK only when the translation unit asks for Windows 7
- * or newer. mingw-w64 in particular has defaulted to older values across its
- * releases, so the minimum is stated here rather than left to the toolchain; it
- * has to precede every system header, <windows.h> included.
+ * the GROUP_AFFINITY / GROUP_RELATIONSHIP structs, BCryptGenRandom() and
+ * BCryptGetFipsAlgorithmMode() - are declared by the Windows SDK only when the
+ * translation unit asks for Windows 7 or newer. mingw-w64 in particular has
+ * defaulted to older values across its releases, so the minimum is stated here
+ * rather than left to the toolchain; it has to precede every system header,
+ * <windows.h> included.
  */
 #if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
 # define _WIN32_WINNT 0x0601
@@ -133,8 +134,12 @@
 
 /*
  * How far the application has initialized libgcrypt. A copy compiled into
- * libgcrypt itself, which runs after the initialization, defines it as 1
+ * libgcrypt itself, which runs after the initialization, defines both as 1
  * (and cannot call the public gcry_control() from inside libgcrypt).
+ *
+ * JENT_GCRY_STARTED(): libgcrypt settled its FIPS mode, which it does at its
+ * first global initialization - gcry_check_version() or a control that runs
+ * it. Before that it reports FIPS mode whatever the system says.
  *
  * JENT_GCRY_INITIALIZED(): the application declared its initialization
  * finished (GCRYCTL_INITIALIZATION_FINISHED), its secure memory pool
@@ -142,6 +147,10 @@
  * pool at libgcrypt's default size, which the application's own
  * GCRYCTL_INIT_SECMEM then could not change.
  */
+#if defined(LIBGCRYPT) && !defined(JENT_GCRY_STARTED)
+# define JENT_GCRY_STARTED() \
+	(gcry_control(GCRYCTL_ANY_INITIALIZATION_P) != 0)
+#endif
 #if defined(LIBGCRYPT) && !defined(JENT_GCRY_INITIALIZED)
 # define JENT_GCRY_INITIALIZED() \
 	(gcry_control(GCRYCTL_INITIALIZATION_FINISHED_P) != 0)

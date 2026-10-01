@@ -45,6 +45,14 @@
  * DAMAGE.
  */
 
+/*
+ * The feature-test macros that make glibc declare O_CLOEXEC, and the Windows
+ * SDK version that declares BCryptGetFipsAlgorithmMode(). Must be the first
+ * line: both have to precede every system header, the <windows.h> included
+ * below among them.
+ */
+#include "jitterentropy-arch-compat.h"
+
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 
@@ -61,6 +69,13 @@ int jent_fips_enabled(void)
 
 #ifdef LIBGCRYPT
 # include <gcrypt.h>
+# include <stdlib.h>		/* getenv() */
+# include <string.h>
+# ifdef _WIN32
+#  include <io.h>		/* _access() */
+# else
+#  include <unistd.h>		/* access() */
+# endif
 #endif
 #ifdef AWSLC
 # include <openssl/crypto.h>
@@ -77,8 +92,8 @@ int jent_fips_enabled(void)
  * dispatch said nothing about which platforms actually have the concept.
  */
 /* No /proc on a baremetal target, and nothing else there to ask either. */
-#if !defined(LIBGCRYPT) && !defined(AWSLC) && !defined(OPENSSL) && \
-    !defined(JENT_BAREMETAL) && defined(__linux__)
+#if !defined(AWSLC) && !defined(OPENSSL) && !defined(JENT_BAREMETAL) && \
+    defined(__linux__)
 # include <errno.h>
 # include <fcntl.h>
 # include <sys/types.h>
@@ -86,8 +101,28 @@ int jent_fips_enabled(void)
 # define JENT_ARCH_FIPS_PROC
 #endif
 
+/*
+ * The Windows FIPS mode is the system policy "System cryptography: Use FIPS
+ * compliant algorithms", reported by BCryptGetFipsAlgorithmMode() - the
+ * counterpart of the Linux indicator. A compiled-in crypto library still
+ * answers first. bcrypt is linked by the pragma (MSVC) or by CMakeLists.txt
+ * (MinGW).
+ */
+#if !defined(LIBGCRYPT) && !defined(AWSLC) && !defined(OPENSSL) && \
+    !defined(JENT_BAREMETAL) && (defined(_MSC_VER) || defined(__MINGW32__))
+# include <windows.h>
+# include <bcrypt.h>
+# if defined(_MSC_VER)
+#  pragma comment(lib, "bcrypt.lib")
+# endif
+# define JENT_ARCH_FIPS_WINDOWS
+#endif
+
 #ifdef JENT_ARCH_FIPS_PROC
 #define FIPS_MODE_SWITCH_FILE "/proc/sys/crypto/fips_enabled"
+
+/* The branch that selected JENT_ARCH_FIPS_PROC included <fcntl.h>. */
+#include "jitterentropy-arch-cloexec.h"
 
 /*
  * Read the kernel's FIPS indicator out of @file. The path is a parameter so
@@ -104,7 +139,7 @@ static int jent_fips_enabled_file(const char *file)
 	int fd = 0;
 	ssize_t rlen;
 
-	if ((fd = open(file, O_RDONLY)) >= 0) {
+	if ((fd = open(file, O_RDONLY | JENT_O_CLOEXEC)) >= 0) {
 		do {
 			rlen = read(fd, buf, sizeof(buf));
 		} while (rlen < 0 && errno == EINTR);
@@ -122,7 +157,49 @@ static int jent_fips_enabled_file(const char *file)
 int jent_fips_enabled(void)
 {
 #ifdef LIBGCRYPT
-	return gcry_fips_mode_active();
+	/*
+	 * Only a started libgcrypt knows: before gcry_check_version() it
+	 * reports FIPS mode on every system. Until then the system decides, as
+	 * it decides libgcrypt's own mode once started.
+	 */
+	if (JENT_GCRY_STARTED())
+		return gcry_fips_mode_active();
+	/*
+	 * Until then, the decision libgcrypt will take, from the inputs it
+	 * takes it on (check_fips_system_setting() in its fips.c): the
+	 * environment variable, its force file - on Windows under
+	 * %ALLUSERSPROFILE%\GNU\etc\gcrypt since 1.12, /etc/gcrypt of the
+	 * current drive before - and on Linux the kernel's indicator, which
+	 * elsewhere does not exist. Not seen is the GCRYCTL_FORCE_FIPS_MODE an
+	 * application may send before initializing it, which leaves no trace
+	 * until then.
+	 */
+	if (getenv("LIBGCRYPT_FORCE_FIPS_MODE"))
+		return 1;
+# ifdef _WIN32
+	{
+		static const char tail[] = "\\GNU\\etc\\gcrypt\\fips_enabled";
+		const char *pd = getenv("ALLUSERSPROFILE");
+		char path[260];
+
+		if (pd && strlen(pd) + sizeof(tail) <= sizeof(path)) {
+			memcpy(path, pd, strlen(pd));
+			memcpy(path + strlen(pd), tail, sizeof(tail));
+			if (!_access(path, 0))
+				return 1;
+		}
+		if (!_access("/etc/gcrypt/fips_enabled", 0))
+			return 1;
+	}
+# else
+	if (!access("/etc/gcrypt/fips_enabled", F_OK))
+		return 1;
+# endif
+# ifdef JENT_ARCH_FIPS_PROC
+	return jent_fips_enabled_file(FIPS_MODE_SWITCH_FILE);
+# else
+	return 0;
+# endif
 #elif defined(AWSLC)
 	return FIPS_mode();
 #elif defined(OPENSSL)
@@ -130,11 +207,18 @@ int jent_fips_enabled(void)
 #elif defined(JENT_ARCH_FIPS_PROC)
 	return jent_fips_enabled_file(FIPS_MODE_SWITCH_FILE);
 #undef FIPS_MODE_SWITCH_FILE
+#elif defined(JENT_ARCH_FIPS_WINDOWS)
+	/* A failed query means not enabled. */
+	BOOLEAN enabled = FALSE;
+
+	if (!BCRYPT_SUCCESS(BCryptGetFipsAlgorithmMode(&enabled)))
+		return 0;
+	return enabled ? 1 : 0;
 #else
 	/*
-	 * No system-wide FIPS indicator on this platform (Windows, the BSDs,
-	 * macOS, AIX, Solaris, ...). Callers that need FIPS behaviour there ask
-	 * for it explicitly with the JENT_FORCE_FIPS flag.
+	 * No system-wide FIPS indicator on this platform (the BSDs, macOS,
+	 * AIX, Solaris, ...). Callers that need FIPS behaviour there ask for it
+	 * explicitly with the JENT_FORCE_FIPS flag.
 	 */
 	return 0;
 #endif
