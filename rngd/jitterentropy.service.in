@@ -51,6 +51,9 @@ RestrictRealtime=yes
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@chown @clock @cpu-emulation @debug @ipc @module @mount @obsolete @privileged @raw-io @reboot @resources @swap memfd_create mincore mlockall personality
+# The internal timer's thread pins itself to a CPU of its own, which
+# @resources denies; the filter would kill the daemon for it with SIGSYS.
+SystemCallFilter=sched_setaffinity
 UMask=0077
 
 [Install]

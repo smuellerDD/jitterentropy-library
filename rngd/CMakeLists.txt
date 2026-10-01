@@ -12,11 +12,28 @@ install(TARGETS jitterentropy-rngd
 # everything else is; a distribution names the directory systemd reads.
 set(JENT_SYSTEMD_UNITDIR "lib/systemd/system" CACHE STRING
     "Where the systemd unit of jitterentropy-rngd is installed, relative to the prefix unless absolute")
-set(PATH "${CMAKE_INSTALL_FULL_SBINDIR}")
+# The prefix is filled in at install time, as for jitterentropy.pc, so that
+# the unit follows "cmake --install --prefix" to where the daemon goes.
+if(IS_ABSOLUTE "${CMAKE_INSTALL_SBINDIR}")
+    set(PATH "${CMAKE_INSTALL_SBINDIR}")
+else()
+    set(PATH "@JENT_UNIT_PREFIX@/${CMAKE_INSTALL_SBINDIR}")
+endif()
 configure_file(jitterentropy.service.in
-               ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.service @ONLY)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.service
-        DESTINATION ${JENT_SYSTEMD_UNITDIR})
+               ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.service.install @ONLY)
+set(_jent_unit_installed
+    ${CMAKE_CURRENT_BINARY_DIR}/install/jitterentropy.service)
+install(CODE "
+  set(_jent_unit_in \"${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.service.install\")
+  set(_jent_unit_out \"${_jent_unit_installed}\")
+")
+install(CODE [[
+  file(READ "${_jent_unit_in}" _jent_unit)
+  string(REPLACE "@JENT_UNIT_PREFIX@" "${CMAKE_INSTALL_PREFIX}" _jent_unit
+         "${_jent_unit}")
+  file(WRITE "${_jent_unit_out}" "${_jent_unit}")
+]])
+install(FILES ${_jent_unit_installed} DESTINATION ${JENT_SYSTEMD_UNITDIR})
 
 # Needs neither root nor the kernel: the daemon links and reports the
 # library's version. The service itself is tested in a VM, see nix/rngd.nix.

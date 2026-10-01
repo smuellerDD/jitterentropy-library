@@ -94,9 +94,10 @@ static int foreground = 0;
  *
  * * EOPNOTSUPP - the Jitter RNG triggered a fatal health test error
  * * Errors reported by IOCTLs of RNDADDENTROPY and RNDRESEEDCRNG to /dev/random
- * * Errors triggered by system calls including select(2), open(2), truncate(2),
- *   write(2), fork(2), as well as errors from library functions including
- *   lockf(3).
+ * * Errors of pselect(2) waiting for the next occasion
+ *
+ * Every other failure - open(2), the PID file, fork(2), the startup of the
+ * Jitter RNG - ends the daemon with 1, with or without this option.
  */
 static int exit_on_error = 0;
 
@@ -827,15 +828,20 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	if (force_reseed && !lrng_present()) {
 		if (ioctl(rng->fd, RNDRESEEDCRNG) < 0) {
 			static int logged = 0;
+			int errsv = errno;
 
-			written = -errno;
-			if (errno == EINVAL)
+			/*
+			 * A kernel before 4.17 has no such ioctl: the data is
+			 * injected, only the reseed is left to the kernel.
+			 */
+			if (errsv == EINVAL)
 				goto out;
 
+			written = -errsv;
 			if (!logged) {
 				dolog(JENT_LOG_WARN,
 				      "Error triggering a reseed of the kernel DRNG: %s",
-				      strerror(errno));
+				      strerror(errsv));
 				logged = 1;
 			}
 		} else {
@@ -978,23 +984,47 @@ out:
  */
 #define GATHER_RETRIES	5
 
+/*
+ * A fresh Jitter RNG for gather_entropy_retry(): the startup test again and a
+ * new collector. The device, the entropy files and the PID file with its lock
+ * stay. A failure is a warning, not dolog(JENT_LOG_ERR), which would end the
+ * daemon: the caller retries or waits for the next occasion, and
+ * gather_entropy() reports the missing collector as a failed read until then.
+ */
+static int realloc_jent(struct kernel_rng *rng)
+{
+	int ret;
+
+	if (NULL != rng->ec) {
+		jent_entropy_collector_free(rng->ec);
+		rng->ec = NULL;
+	}
+
+	ret = jent_entropy_init_ex(jent_osr, jent_flags);
+	if (ret) {
+		dolog(JENT_LOG_WARN, "The initialization of CPU Jitter RNG failed with error code %d",
+		      ret);
+		return -EAGAIN;
+	}
+
+	rng->ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
+	if (!rng->ec) {
+		dolog(JENT_LOG_WARN, "Allocation of entropy collector failed");
+		return -EAGAIN;
+	}
+
+	return 0;
+}
+
 static ssize_t gather_entropy_retry(struct kernel_rng *rng)
 {
 	unsigned int i;
 	ssize_t written = gather_entropy(rng);
 
 	for (i = 0; written < 0 && i < GATHER_RETRIES; i++) {
-		int ret;
-
-		dolog(JENT_LOG_DEBUG, "Re-initializing rngd");
-		dealloc();
-
-		ret = alloc();
-		if (ret < 0) {
-			dolog(JENT_LOG_WARN,
-			      "Re-initialization of rngd failed with %d", ret);
-			return ret;
-		}
+		dolog(JENT_LOG_DEBUG, "Re-initializing the Jitter RNG");
+		if (realloc_jent(rng))
+			continue;
 
 		written = gather_entropy(rng);
 	}
@@ -1018,6 +1048,7 @@ static ssize_t gather_entropy_retry(struct kernel_rng *rng)
 	return written;
 }
 
+/* The value of an entropy file, or -1 where it cannot be read. */
 static int read_entropy_value(int fd)
 {
 	ssize_t data = 0;
@@ -1032,11 +1063,11 @@ static int read_entropy_value(int fd)
 	if (0 > data) {
 		dolog(JENT_LOG_WARN, "Error reading data from entropy fd: %s",
 		      strerror(errno));
-		return 0;
+		return -1;
 	}
 	if (0 == data) {
 		dolog(JENT_LOG_WARN, "Could not read data from entropy fd");
-		return 0;
+		return -1;
 	}
 
 	/*
@@ -1049,13 +1080,13 @@ static int read_entropy_value(int fd)
 	entropy = strtol(buf, &endptr, 10);
 	if (errno || endptr == buf) {
 		dolog(JENT_LOG_WARN, "Cannot parse value read from entropy fd");
-		return 0;
+		return -1;
 	}
 
 	if (0 > entropy || 4096 < entropy) {
 		dolog(JENT_LOG_WARN, "Entropy read from entropy fd (%ld) is outside of range",
 		      entropy);
-		return 0;
+		return -1;
 	}
 
 	return (int)entropy;
@@ -1119,7 +1150,8 @@ static void process_alarm(void)
 	entropy = read_entropy_value(Entropy_avail_fd);
 	thresh = read_entropy_value(Entropy_thresh_fd);
 
-	if (0 == entropy || 0 == thresh)
+	/* An empty pool is the case to act on, not an error. */
+	if (0 > entropy || 0 >= thresh)
 		goto out;
 	if (entropy >= thresh) {
 		dolog(JENT_LOG_DEBUG, "Sufficient entropy %d available", entropy);
@@ -1463,22 +1495,47 @@ static void create_pid_file(const char *pid_file)
 
 static void daemonize(void)
 {
+	int ready[2];
 	pid_t pid;
 	
 	/* already a daemon */
 	if (1 == getppid())
 	       return;
 
+	/*
+	 * The parent exits with the verdict of the child, which writes a byte
+	 * once it owns the PID file: a second instance naming the same file
+	 * fails its start, and the file exists when the start returns. A child
+	 * that exits before - dolog(JENT_LOG_ERR) - leaves only EOF.
+	 */
+	if (pipe(ready))
+		dolog(JENT_LOG_ERR, "Cannot create pipe to daemonize: %s",
+		      strerror(errno));
+
+	/* Neither process is to write out what the other buffered. */
+	fflush(NULL);
+
 	pid = fork();
 	if (pid < 0)
 		dolog(JENT_LOG_ERR, "Cannot fork to daemonize\n");
 
-	/* the parent process exits -- nothing has been allocated, nothing
-	 * needs to be freed */
-	if (0 < pid)
-		exit(0);
+	/*
+	 * The parent process exits -- its resources go with it, and the child
+	 * owns them from here on, so nothing is freed.
+	 */
+	if (0 < pid) {
+		ssize_t n;
+		char c;
+
+		close(ready[1]);
+		do {
+			n = read(ready[0], &c, 1);
+		} while (n < 0 && errno == EINTR);
+		_exit(n == 1 ? 0 : 1);
+	}
 
 	/* we are the child now */
+	close(ready[0]);
 
 	/* new SID for the child process */
 	if (setsid() < 0)
@@ -1499,6 +1556,11 @@ static void daemonize(void)
 	freopen( "/dev/null", "w", stdout);
 	freopen( "/dev/null", "w", stderr);
 #pragma GCC diagnostic pop
+
+	/* Started: release the parent. */
+	if (write(ready[1], "", 1) != 1)
+		dolog(JENT_LOG_ERR, "Cannot signal the start to the parent");
+	close(ready[1]);
 
 	/* stdout is no longer a terminal, so drop the colors */
 	detect_color();
