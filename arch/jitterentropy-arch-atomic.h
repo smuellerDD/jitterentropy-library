@@ -56,69 +56,34 @@
  * them, which buries whatever real finding a run has. Accessing them through
  * these helpers states what they are instead.
  *
- * Provided are a load and a store per width the library latches on:
- *
- *   - jent_atomic_load_int()  / jent_atomic_store_int()  for the flags,
- *   - jent_atomic_load_u32()  / jent_atomic_store_u32()  for the memos.
- *
- * The loads take a plain pointer rather than a pointer to const: the kernel's
- * smp_load_acquire() derives a local of the operand's type, which a const
- * qualifier breaks on the releases that predate __unqual_scalar_typeof(), and
- * the Windows intrinsics would have to cast the qualifier away again.
- *
- * The load acquires and the store releases, which is what the one-time state
- * needs: a thread that sees a latch set must also see everything the thread
- * that set it published beforehand - the self test verdict published by
- * jent_selftest_run stands for the timer GCD and the switch blocks established
- * with it.
- *
- * jent_atomic_exchange_int() is the one read-modify-write, and it exists for
- * the one place that has to know whether it was the thread that set a latch:
- * the common timer GCD is a 64-bit value, and a claim taken on a 32-bit flag
- * lets exactly one thread write it - which keeps these helpers to the widths
- * every target has a lock-free access for. A 64-bit atomic would be a call
- * into libatomic on the 32-bit platforms that cannot do one inline.
- *
- * jent_atomic_load_fnptr() / jent_atomic_store_fnptr() are the one pair for a
- * pointer, and they are the one piece of shared state that is not a latch: the
- * registered FIPS failure callback, which one thread may replace while another
- * is already generating from a collector that would call it.
- *
- * They are typed on jent_fnptr, a function pointer of no particular signature,
- * and the caller converts. That is deliberate and it is what ISO C allows: a
- * function pointer converted to another function pointer type and back again
- * compares equal to the original, and the call is made through the type the
- * function actually has. A void * would not do - converting between a function
- * pointer and an object pointer is outside the standard, which -pedantic says
- * so about, and the two only happen to be one width.
  */
 
 #ifndef _JITTERENTROPY_ARCH_ATOMIC_H
 #define _JITTERENTROPY_ARCH_ATOMIC_H
 
-/*
- * A function pointer with no signature of its own, for the sole purpose of
- * being the type these two are declared on. Storage of this type holds a
- * callback that the caller converts back before calling it.
- */
 typedef void (*jent_fnptr)(void);
 
-/*
- * All defined in arch/jitterentropy-arch-atomic.c, which is the only place the
- * kernel and the Windows atomic headers are included. That is why they are
- * out-of-line functions rather than the inline definitions that used to stand
- * here: nothing on these paths is measured, and every source in the project
- * includes this header.
- */
-int jent_atomic_load_int(int *ptr);
+JENT_INTERNAL
+int jent_atomic_load_int(const int *ptr);
+JENT_INTERNAL
 void jent_atomic_store_int(int *ptr, int val);
 
-uint32_t jent_atomic_load_u32(uint32_t *ptr);
+JENT_INTERNAL
+uint32_t jent_atomic_load_u32(const uint32_t *ptr);
+JENT_INTERNAL
+uint32_t jent_atomic_inc_u32(uint32_t *ptr);
+/* Store val if *ptr is old; returns what *ptr held, old on success. */
+JENT_INTERNAL
+uint32_t jent_atomic_cmpxchg_u32(uint32_t *ptr, uint32_t old, uint32_t val);
+JENT_INTERNAL
 void jent_atomic_store_u32(uint32_t *ptr, uint32_t val);
 
+JENT_INTERNAL
 int jent_atomic_exchange_int(int *ptr, int val);
 
-jent_fnptr jent_atomic_load_fnptr(jent_fnptr *ptr);
+JENT_INTERNAL
+jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr);
+JENT_INTERNAL
 void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val);
 
 #endif /* _JITTERENTROPY_ARCH_ATOMIC_H */
