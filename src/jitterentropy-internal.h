@@ -434,26 +434,10 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 #endif
 
 /*
- * Oversampling rate: This value defines the default oversampling rate. The
- * OSR defines the global heuristic entropy rate of 1/OSR.
- *
- * It is permissible to configure this value differently at compile time.
- *
- * This value is applied if the Jitter RNG:
- * - is instantiated with an OSR of 0 provided to the initialization API
- *
- * During initial health tests or jent_read_entropy_safe, the RNG instance
- * may re-initialize with an incremented OSR, which stops at JENT_OSR_MAX
- * and returns a failure condition. Otherwise this would run "forever".
- * Set another value instead of the default 20, if necessary.
+ * The oversampling rate bounds JENT_MIN_OSR / JENT_MAX_OSR are in
+ * jitterentropy.h. The OSR defines the global heuristic entropy rate of
+ * 1/OSR; ensure_osr_is_at_least_minimal() applies the floor.
  */
-#ifndef JENT_MIN_OSR
-#define JENT_MIN_OSR	3
-#endif
-
-#ifndef JENT_MAX_OSR
-#define JENT_MAX_OSR	20
-#endif
 
 /***************************************************************************
  * Jitter RNG State Definition Section
