@@ -536,6 +536,10 @@ static void test_selftest_failure_stops_output(void)
 	}
 	jent_ut_checks++;
 
+	JENT_UT_EQ(jent_read_entropy(ec, (char *)buf, 0), JENT_ERR_SELFTEST,
+		   "a zero-length read reports it too");
+	JENT_UT_EQ(jent_read_entropy_safe(&ec, (char *)buf, 0),
+		   JENT_ERR_SELFTEST, "through jent_read_entropy_safe as well");
 	JENT_UT_EQ(jent_read_entropy_safe(&ec, (char *)buf, sizeof(buf)),
 		   JENT_ERR_SELFTEST,
 		   "jent_read_entropy_safe does not recover from it");
