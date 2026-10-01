@@ -278,9 +278,12 @@ extern "C" {
 	 JENT_MAX_HASHLOOP_MASK | JENT_MAX_MEMSIZE_MASK)
 
 /*
- * Flags every allocation refuses: an undefined bit, or a memory size / hash
- * loop field above its maximum. Lets a caller tell a configuration error
- * apart from a failed startup before jent_entropy_init_ex().
+ * Flags no configuration accepts: an undefined bit, a memory size / hash loop
+ * field above its maximum, or the internal timer both forced and disabled.
+ * Lets a caller tell a configuration error apart from a failed startup before
+ * jent_entropy_init_ex(). Not covered are the combinations refused only in a
+ * mode: the forced internal timer and memory access disabled with NTG.1, and
+ * the latter in FIPS mode.
  */
 static inline int jent_flags_invalid(unsigned int flags)
 {
@@ -288,7 +291,9 @@ static inline int jent_flags_invalid(unsigned int flags)
 	       JENT_FLAGS_TO_MAX_MEMSIZE(flags) >
 			JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX) ||
 	       JENT_FLAGS_TO_HASHLOOP(flags) >
-			JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP);
+			JENT_FLAGS_TO_HASHLOOP(JENT_MAX_HASHLOOP) ||
+	       ((flags & JENT_FORCE_INTERNAL_TIMER) &&
+		(flags & JENT_DISABLE_INTERNAL_TIMER));
 }
 
 /*
@@ -608,7 +613,7 @@ int jent_entropy_collector_uuid(const struct rand_data *ec, char *buf,
  * Read-only accessors of an instance's settings and state, the numbers
  * jent_status reports without its JSON. They follow the instance through the
  * reallocations after a health test failure: the osr is at least JENT_MIN_OSR
- * (3 unless configured otherwise) and raised on each, as is the memory size
+ * (3) and raised on each, as is the memory size
  * in effect where it is derived - one the caller set stays - and the hash
  * loop count, whether set by the caller or not, up to JENT_MAX_HASHLOOP (128);
  * a compile-time default above that stays as it is. The flags are the

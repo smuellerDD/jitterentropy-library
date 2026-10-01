@@ -1279,9 +1279,9 @@ static void test_reserved_flags(void)
 {
 	static const unsigned int valid =
 		JENT_DISABLE_STIR | JENT_DISABLE_UNBIAS |
-		JENT_DISABLE_MEMORY_ACCESS | JENT_FORCE_INTERNAL_TIMER |
-		JENT_DISABLE_INTERNAL_TIMER | JENT_FORCE_FIPS | JENT_NTG1 |
-		JENT_CACHE_ALL | JENT_FORCE_SECURE_MEM | JENT_MAX_HASHLOOP |
+		JENT_DISABLE_MEMORY_ACCESS | JENT_DISABLE_INTERNAL_TIMER |
+		JENT_FORCE_FIPS | JENT_NTG1 | JENT_CACHE_ALL |
+		JENT_FORCE_SECURE_MEM | JENT_MAX_HASHLOOP |
 		JENT_MAX_MEMSIZE_MAX;
 	unsigned int bit;
 
@@ -1289,6 +1289,11 @@ static void test_reserved_flags(void)
 
 	JENT_UT_EQ(jent_flags_invalid(valid), 0,
 		   "every defined flag and the largest fields are accepted");
+	JENT_UT_EQ(jent_flags_invalid(JENT_FORCE_INTERNAL_TIMER), 0,
+		   "as is the forced internal timer");
+	JENT_UT_NE(jent_flags_invalid(JENT_FORCE_INTERNAL_TIMER |
+				      JENT_DISABLE_INTERNAL_TIMER), 0,
+		   "but not together with the disabled one");
 	JENT_UT_EQ(jent_flags_invalid(0), 0, "as are no flags at all");
 
 	for (bit = 9; bit <= 22; bit++) {
@@ -1314,6 +1319,9 @@ static void test_reserved_flags(void)
 		   "jent_entropy_init_ex refuses a reserved bit with EPROGERR");
 	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_MAX_MEMSIZE_MASK), EPROGERR,
 		   "and an out-of-range memory size");
+	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_FORCE_INTERNAL_TIMER |
+					   JENT_DISABLE_INTERNAL_TIMER),
+		   EPROGERR, "and the internal timer forced and disabled");
 	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_MAX_HASHLOOP_MASK), EPROGERR,
 		   "and an out-of-range hash loop count");
 	JENT_UT_TRUE(jent_entropy_collector_alloc(0, 1U << 22) == NULL,

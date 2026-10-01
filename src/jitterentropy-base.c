@@ -397,8 +397,19 @@ ssize_t jent_read_entropy(struct rand_data *ec, char *data, size_t len)
 	if (!ec || (data == NULL && len > 0))
 		return JENT_ERR_EINVAL;
 
-	if (!len)
-		return 0;
+	/*
+	 * Nothing to generate, but an instance out of service says so, as
+	 * every longer read would.
+	 */
+	if (!len) {
+		unsigned int health_test_result;
+
+		if (jent_atomic_load_int(&ec->selftest_failed))
+			return JENT_ERR_SELFTEST;
+		health_test_result = jent_health_failure(ec);
+		return health_test_result ?
+			jent_health_err(health_test_result) : 0;
+	}
 
 	/*
 	 * (hypothetical) edge case: clamp to ssize_t range to prevent
@@ -636,6 +647,10 @@ ssize_t jent_read_entropy_safe(struct rand_data **ec, char *data, size_t len)
 	/* check obvious misuse of API */
 	if (!ec || !*ec || (data == NULL && len > 0))
 		return JENT_ERR_EINVAL;
+
+	/* The state of the instance, see jent_read_entropy(). */
+	if (!len)
+		return jent_read_entropy(*ec, data, 0);
 
 	/*
 	 * (hypothetical) edge case: clamp to ssize_t range to prevent
@@ -1110,6 +1125,10 @@ int jent_raw_selftest(unsigned int flags)
 struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
 						   unsigned int flags)
 {
+	/* What every other allocation refuses, a recording refuses too. */
+	if (jent_flags_invalid(flags) || jent_memaccess_contradicts(flags))
+		return NULL;
+
 	if (jent_raw_selftest(flags))
 		return NULL;
 
