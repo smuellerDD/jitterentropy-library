@@ -94,7 +94,7 @@ unsigned int jent_version(void)
  ***************************************************************************/
 
 /* Calculate log2 of given value assuming that the value is a power of 2 */
-static inline unsigned int jent_log2_simple(unsigned int val)
+static inline unsigned int jent_log2_simple(uint64_t val)
 {
 	unsigned int idx = 0;
 

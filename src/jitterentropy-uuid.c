@@ -55,6 +55,10 @@
 #ifdef LINUX_KERNEL
 #include <linux/string.h>	/* memset() */
 #include <linux/types.h>
+#elif defined(_KERNEL) && defined(__FreeBSD__)
+#include <sys/param.h>
+#include <sys/systm.h>		/* memcpy() */
+#include <sys/stdint.h>
 #else
 #include <stddef.h>
 #include <stdint.h>

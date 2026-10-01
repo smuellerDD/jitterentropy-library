@@ -2,14 +2,8 @@
 /*
  * Architecture / OS-specific access to the operating system's CSPRNG.
  *
- * Definition of jent_os_random_bytes() (declared in
- * arch/jitterentropy-arch-random.h), which is the one place in the library
- * that asks the platform for random bytes rather than measuring for them.
- *
- * See that header for the dispatch, and for what these bytes are and are not
- * to be used for.
- *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
+ * Copyright Markus Theil <theil.markus@gmail.com>, 2026
  *
  * License
  * =======
@@ -48,15 +42,12 @@
  */
 
 /*
- * <bcrypt.h> and BCryptGenRandom() are declared by the Windows SDK only from
- * Windows Vista onwards. mingw-w64 has defaulted to older values across its
- * releases, so the minimum is stated here rather than left to the toolchain; it
- * must precede every system header, including the <windows.h> included below.
- * An externally supplied, higher value is left alone.
+ * The feature-test macros that make glibc declare O_CLOEXEC, and the Windows
+ * SDK version that declares <bcrypt.h> and BCryptGenRandom(). Must be the
+ * first line: both have to precede every system header, the <windows.h>
+ * included below among them.
  */
-#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
-# define _WIN32_WINNT 0x0601
-#endif
+#include "jitterentropy-arch-compat.h"
 
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
@@ -64,9 +55,21 @@
 #ifdef LINUX_KERNEL
 
 #include <linux/random.h>	/* get_random_bytes() */
-#include <linux/string.h>	/* memset() */
 #include <linux/types.h>
 # define JENT_RANDOM_LINUX_KERNEL
+
+#elif defined(_KERNEL) && defined(__FreeBSD__)
+
+/*
+ * The FreeBSD kernel has the same arc4random_buf() as its user space, in
+ * libkern, keyed from random(4). Its output can be weak before random(4) is
+ * seeded early in boot, and is taken all the same - acceptable for what it is
+ * used for here, an instance identifier, and never an entropy source (see the
+ * header).
+ */
+#include <sys/param.h>
+#include <sys/systm.h>		/* arc4random_buf() via <sys/libkern.h> */
+# define JENT_RANDOM_ARC4RANDOM
 
 #else /* LINUX_KERNEL */
 
@@ -77,9 +80,8 @@
 /*
  * No CSPRNG to ask on a baremetal target: none of the branches is selected and
  * jent_os_random_supported() reports so. That is not a shortfall in the noise
- * source - the OS random pool is used for the instance identifier and for the
- * startup work-scale plan, both of which fall back to what the collector
- * itself has measured.
+ * source - the OS random pool only provides the instance identifier, which
+ * then derives from a counter (see jent_uuid_generate()).
  */
 #if defined(JENT_BAREMETAL)
 #elif defined(_MSC_VER) || defined(__MINGW32__)
@@ -127,6 +129,12 @@
 # else
 #  include <sys/random.h>
 #  define JENT_RANDOM_GETRANDOM
+/* Linux 3.17 has the flag; a libc header predating it gets the ABI value. */
+#  ifdef GRND_NONBLOCK
+#   define JENT_GRND_NONBLOCK GRND_NONBLOCK
+#  else
+#   define JENT_GRND_NONBLOCK 0x0001
+#  endif
 # endif
 #elif defined(__unix__) || defined(__sun) || defined(_AIX) || \
       defined(__HAIKU__) || defined(__CYGWIN__)
@@ -150,6 +158,9 @@
 #endif
 
 #if defined(JENT_RANDOM_GETRANDOM) || defined(JENT_RANDOM_DEVURANDOM)
+/* Both branches above included <fcntl.h>. */
+# include "jitterentropy-arch-cloexec.h"
+
 /*
  * Blocking read of @len bytes from @path. Returns 0 on success. The path is a
  * parameter so the outcomes this has to survive - the device missing, a short
@@ -159,7 +170,7 @@
 static int jent_random_read_file(const char *path, uint8_t *buf, size_t len)
 {
 	size_t i = 0;
-	int fd = open(path, O_RDONLY);
+	int fd = open(path, O_RDONLY | JENT_O_CLOEXEC);
 
 	if (fd < 0)
 		return -1;
@@ -201,12 +212,27 @@ int jent_os_random_supported(void)
 int jent_os_random_bytes(uint8_t *buf, size_t len)
 {
 #if defined(JENT_RANDOM_LINUX_KERNEL)
+	/*
+	 * get_random_bytes() never fails and never waits: before the pool is
+	 * initialised it hands out what it has. That is not asked about: the
+	 * bytes only make an instance identifier, which need not come from a
+	 * fully seeded pool. The FreeBSD kernel's arc4random_buf() below is
+	 * taken the same way.
+	 */
 	get_random_bytes(buf, len);
 	return 0;
 #elif defined(JENT_RANDOM_WINDOWS)
-	if (BCryptGenRandom(NULL, buf, (ULONG)len,
-			    BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
-		return -1;
+	/* BCryptGenRandom() takes a ULONG: fill @len in pieces. */
+	while (len) {
+		ULONG chunk = (len > (size_t)ULONG_MAX) ? ULONG_MAX :
+							  (ULONG)len;
+
+		if (BCryptGenRandom(NULL, buf, chunk,
+				    BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
+			return -1;
+		buf += chunk;
+		len -= chunk;
+	}
 	return 0;
 #elif defined(JENT_RANDOM_ARC4RANDOM)
 	arc4random_buf(buf, len);
@@ -214,12 +240,27 @@ int jent_os_random_bytes(uint8_t *buf, size_t len)
 #elif defined(JENT_RANDOM_GETRANDOM)
 	size_t i = 0;
 
+	/*
+	 * Without GRND_NONBLOCK the call waits for the kernel's pool to be
+	 * initialised. Before Linux 5.4 nothing drives that forward on an idle
+	 * machine, and the caller is every collector allocation - rngd starting
+	 * early in boot to feed that very pool would wait on itself.
+	 *
+	 * A pool not ready yet (EAGAIN) is not a reason to read /dev/urandom
+	 * instead, which does not block either but at that point hands out
+	 * output that every clone of the same image may share: the bytes are an
+	 * instance identifier, which then derives from a counter, as it does on
+	 * a platform without a CSPRNG. Only a getrandom() the kernel or libc
+	 * lacks (ENOSYS and the like) still falls back to the device.
+	 */
 	while (i < len) {
-		ssize_t r = getrandom(buf + i, len - i, 0);
+		ssize_t r = getrandom(buf + i, len - i, JENT_GRND_NONBLOCK);
 
 		if (r < 0) {
 			if (errno == EINTR)
 				continue;
+			if (errno == EAGAIN)
+				return -1;
 			break;	/* fall back to /dev/urandom */
 		}
 		i += (size_t)r;
@@ -236,4 +277,3 @@ int jent_os_random_bytes(uint8_t *buf, size_t len)
 #endif
 }
 
-/* Write the canonical hex representation of @b (16 bytes) into @out. */

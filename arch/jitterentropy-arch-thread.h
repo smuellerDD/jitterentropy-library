@@ -79,10 +79,13 @@
  */
 
 /* Definitions in arch/jitterentropy-arch-thread.c. */
+JENT_INTERNAL
 int jent_thread_pin_to_cpu(unsigned long cpu);
+JENT_INTERNAL
 int jent_notime_thread_create(struct jent_notime_ctx *ctx,
 			      jent_notime_start_routine routine,
 			      void *arg);
+JENT_INTERNAL
 void jent_notime_thread_join(struct jent_notime_ctx *ctx);
 
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */

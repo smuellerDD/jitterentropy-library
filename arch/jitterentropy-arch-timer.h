@@ -47,39 +47,45 @@
  * arch/jitterentropy-arch-timer.c; the dispatch order is:
  *
  *   - Windows ARM / ARM64 (MSVC / MinGW) -> QueryPerformanceCounter()
- *   - x86 / x86_64       -> __rdtsc() intrinsic in user space (<intrin.h> on
+ *   - ARM64, MSVC, JENT_BAREMETAL -> _ReadStatusReg(ARM64_CNTVCT)
+ *   - x86 / x86_64      -> __rdtsc() intrinsic in user space (<intrin.h> on
  *                           MSVC, <x86intrin.h> elsewhere), rdtsc inline asm
- *                           in the kernel
+ *                           in the Linux and FreeBSD kernels
  *   - aarch64            -> mrs <reg> (cntvct_el0 by default), Apple included
  *   - s390x              -> stcke inline asm
  *   - AIX                -> the PowerPC timebase, via the GCC/clang builtin
  *                           where available and read_real_time() otherwise
  *   - powerpc            -> __builtin_ppc_get_timebase()
  *   - riscv              -> rdtime (RV64), or rdtimeh/rdtime retry pair (RV32);
- *                           override via RISCV_NSTIME_INSN[_HI] to use rdcycle
+ *                           override via RISCV_NSTIME_INSN[_HI] to use rdcycle;
+ *                           an M-mode Linux kernel takes random_get_entropy()
  *   - sparc64            -> rd %tick
  *   - loongarch64        -> rdtime.d
  *   - no counter instruction, Linux kernel
- *                        -> random_get_entropy and ktime_get_ns as fallback
+ *                        -> random_get_entropy(), on MIPS and m68k
+ *                           random_get_entropy_fallback()
+ *   - no counter instruction, FreeBSD kernel
+ *                        -> get_cyclecount()
+ *   - no counter instruction, JENT_BAREMETAL
+ *                        -> 0 (ENOTIME, the internal timer takes over), and a
+ *                           build error without JENT_CONF_ENABLE_INTERNAL_TIMER
  *   - no counter instruction, user space
- *                        -> mach_absolute_time() on Mach,
- *                           clock_gettime(CLOCK_MONOTONIC) elsewhere
+ *                        -> clock_gettime(CLOCK_MONOTONIC)
  *
  * The dispatch is by architecture first and by execution environment second:
  * every backend that is a counter read reachable from the instruction set is
  * used in kernel mode exactly as it is in user space. On those architectures
  * the kernel's own random_get_entropy() ends in get_cycles(), i.e. in the very
- * same instruction, so going through it would buy nothing while making the
- * entropy core depend on <linux/timex.h>. Only where the instruction set
- * offers no counter at all does the kernel backend earn its place.
+ * same instruction, so going through it would buy nothing but a dependency on
+ * <linux/timex.h>. Only where the instruction set offers no counter at all
+ * does the kernel backend earn its place.
  *
  * Keeping the backends out of this header is what keeps their platform headers
- * - <windows.h>, <x86intrin.h>, the Mach headers, <linux/timex.h> - out of the
+ * - <windows.h>, <x86intrin.h>, <linux/timex.h> - out of the
  * entropy-collection core, which includes this file through
- * src/jitterentropy-internal.h. That is a hard requirement in the Linux kernel,
- * where linux_kernel/Kbuild.source compiles the core at -O0 and <linux/timex.h>
- * does not survive that; see the note at the top of
- * arch/jitterentropy-arch-timer.c. The out-of-line call costs one branchless
+ * src/jitterentropy-internal.h and which linux_kernel/Kbuild.source compiles
+ * at -O0, which kernel headers are not written for; see the note at the top
+ * of arch/jitterentropy-arch-timer.c. The out-of-line call costs one
  * call/return per timestamp, which is constant overhead: it delays the
  * measurement uniformly rather than removing jitter from it, and the -O0
  * requirement exists to protect the measured loops, not the counter read.
@@ -89,15 +95,10 @@
 #define _JITTERENTROPY_ARCH_TIMER_H
 
 /*
- * Only the fixed-width types the declaration below needs. The platform headers
- * the backends use belong to arch/jitterentropy-arch-timer.c.
+ * No includes, as in every arch/ header: uint64_t comes from jitterentropy.h,
+ * and the backends' platform headers belong to the .c file.
  */
-#ifdef LINUX_KERNEL
-#include <linux/types.h>
-#else
-#include <stdint.h>
-#endif
-
+JENT_INTERNAL
 void jent_get_nstime(uint64_t *out);
 
 #ifdef JENT_CONF_ENABLE_MOCK_TIMER
@@ -132,9 +133,11 @@ typedef void (*jent_mock_timer_cb)(void *arg, uint64_t *out);
  * Register @cb as the time source, or NULL to return to the platform one.
  * Returns 0. Call before allocating the collector that is to use it.
  */
+JENT_INTERNAL
 int jent_set_mock_timer(jent_mock_timer_cb cb, void *arg);
 
 /* Whether a callback is currently registered. */
+JENT_INTERNAL
 int jent_mock_timer_active(void);
 #endif /* JENT_CONF_ENABLE_MOCK_TIMER */
 

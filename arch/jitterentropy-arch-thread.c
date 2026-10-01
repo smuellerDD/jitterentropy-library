@@ -46,27 +46,24 @@
  */
 
 /*
+ * The Windows SDK version that declares GetThreadGroupAffinity(),
+ * SetThreadGroupAffinity() and the GROUP_AFFINITY struct. Must be the first
+ * line: it has to precede every system header, the <windows.h> included below
+ * among them.
+ */
+#include "jitterentropy-arch-compat.h"
+
+/*
  * _GNU_SOURCE exposes the Linux CPU-affinity interfaces used below on glibc
- * (the CPU_* set macros, sched_setaffinity(), pthread_setaffinity_np()). It is
- * defined here, in the translation unit that needs it, rather than in the
- * public jitterentropy.h so the installed header does not impose a feature-test
- * macro on consumers; it must precede every system header.
+ * (the CPU_* set macros, sched_setaffinity(), pthread_setaffinity_np()). Only
+ * this translation unit and jitterentropy-arch-ncpu.c want it, so it stays
+ * here rather than joining the shared block above - and it is not in the
+ * public jitterentropy.h either, so the installed header imposes no
+ * feature-test macro on consumers. Like that block it must precede every
+ * system header, which it does: the header above includes none.
  */
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 # define _GNU_SOURCE
-#endif
-
-/*
- * GetLogicalProcessorInformationEx(), RelationGroup, SetThreadGroupAffinity()
- * and the GROUP_AFFINITY / GROUP_RELATIONSHIP structs are declared by the
- * Windows SDK only when the translation unit asks for Windows 7 or newer.
- * mingw-w64 has defaulted to older values across its releases, so the minimum
- * is stated here rather than left to the toolchain; like _GNU_SOURCE above it
- * must precede every system header, including the <windows.h> included below.
- * An externally supplied, higher value is left alone.
- */
-#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(_WIN32_WINNT)
-# define _WIN32_WINNT 0x0601
 #endif
 
 #include "jitterentropy.h"
@@ -82,8 +79,6 @@
 /* CPU pinning back-end selection */
 #if defined(_MSC_VER) || defined(__MINGW32__)
 # include <windows.h>
-# include <stddef.h>	/* offsetof() */
-# include <stdlib.h>	/* malloc(), free() */
 # define JENT_ARCH_THREAD_PIN_WINDOWS
 #elif defined(__linux__)
 # include <sched.h>
@@ -130,104 +125,31 @@ int jent_thread_pin_to_cpu(unsigned long cpu)
 {
 #if defined(JENT_ARCH_THREAD_PIN_WINDOWS)
 	/*
-	 * A processor group holds at most 64 logical CPUs, so the flat CPU
-	 * index is resolved to a (group, in-group bit) pair by walking the
-	 * groups. This lets us pin to CPUs beyond 64 on systems that span
-	 * multiple processor groups. The flat index space is the one
-	 * jent_ncpu() reports, i.e. the active processors of all groups
-	 * concatenated in group order.
-	 *
-	 * The groups are enumerated with GetLogicalProcessorInformationEx()
-	 * rather than counted with GetActiveProcessorGroupCount() /
-	 * GetActiveProcessorCount(): the index selects the n-th *active*
-	 * processor, and only ActiveProcessorMask says which bit positions
-	 * those actually are. Deriving the bit from the count alone assumes
-	 * the active processors occupy the lowest bits of the group without a
-	 * gap, which stops holding as soon as one is parked or disabled - the
-	 * thread would then be pinned to a different CPU than the caller asked
-	 * for, or to an inactive one.
+	 * Resolve the flat CPU number to a (group, bit) pair and check it
+	 * against this thread's affinity: SetThreadGroupAffinity() does not
+	 * enforce the process affinity mask itself. A CPU outside it, or in
+	 * another processor group whose bound the thread cannot read, is
+	 * refused with -EINVAL, as sched_setaffinity() refuses one outside the
+	 * cpuset.
 	 */
-	DWORD len = 0;
-	BYTE *buffer;
-	PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX rec;
-	GROUP_RELATIONSHIP *groups;
-	/* Bytes that must be readable before Relationship and Size are read. */
-	const size_t hdr = offsetof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
-				    Group);
-	size_t need;
-	unsigned long idx = cpu;
-	WORD group;
-	int ret = -EINVAL;
+	GROUP_AFFINITY cur, ga;
+	unsigned short group;
+	unsigned int bit;
+	int ret = jent_cpu_to_group(cpu, &group, &bit);
 
-	if (!GetLogicalProcessorInformationEx(RelationGroup, NULL, &len) &&
-	    GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+	if (ret)
+		return ret;
+
+	if (!GetThreadGroupAffinity(GetCurrentThread(), &cur))
 		return -EFAULT;
+	if (cur.Group != group || !((cur.Mask >> bit) & (KAFFINITY)1))
+		return -EINVAL;
 
-	buffer = (BYTE *)malloc(len);
-	if (!buffer)
-		return -ENOMEM;
-
-	if (!GetLogicalProcessorInformationEx(
-			RelationGroup,
-			(PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer,
-			&len)) {
-		free(buffer);
-		return -EFAULT;
-	}
-
-	/*
-	 * RelationGroup is reported as a single record covering every group,
-	 * with the per-group entries as a trailing array. Validate the header,
-	 * then the array the announced ActiveGroupCount implies, before either
-	 * is dereferenced.
-	 */
-	rec = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer;
-	need = hdr + offsetof(GROUP_RELATIONSHIP, GroupInfo);
-	if ((size_t)len < hdr || (size_t)len < rec->Size ||
-	    rec->Relationship != RelationGroup || rec->Size < need) {
-		free(buffer);
-		return -EFAULT;
-	}
-
-	groups = &rec->Group;
-	need += (size_t)groups->ActiveGroupCount * sizeof(PROCESSOR_GROUP_INFO);
-	if (rec->Size < need) {
-		free(buffer);
-		return -EFAULT;
-	}
-
-	for (group = 0; group < groups->ActiveGroupCount; group++) {
-		const PROCESSOR_GROUP_INFO *gi = &groups->GroupInfo[group];
-		unsigned long seen = 0;
-		unsigned int bit;
-
-		if (idx >= (unsigned long)gi->ActiveProcessorCount) {
-			idx -= gi->ActiveProcessorCount;
-			continue;
-		}
-
-		/* The idx-th set bit of this group's active mask. */
-		for (bit = 0; bit < (unsigned int)(sizeof(KAFFINITY) * 8);
-		     bit++) {
-			GROUP_AFFINITY ga;
-
-			if (!((gi->ActiveProcessorMask >> bit) & (KAFFINITY)1))
-				continue;
-			if (seen++ != idx)
-				continue;
-
-			ZeroMemory(&ga, sizeof(ga));
-			ga.Group = group;
-			ga.Mask = (KAFFINITY)1 << bit;
-			ret = SetThreadGroupAffinity(GetCurrentThread(), &ga,
-						     NULL) ? 0 : -EFAULT;
-			break;
-		}
-		break;
-	}
-
-	free(buffer);
-	return ret;
+	ZeroMemory(&ga, sizeof(ga));
+	ga.Group = group;
+	ga.Mask = (KAFFINITY)1 << bit;
+	return SetThreadGroupAffinity(GetCurrentThread(), &ga, NULL) ?
+	       0 : -EFAULT;
 #elif defined(JENT_ARCH_THREAD_PIN_LINUX)
 	/*
 	 * A cpu_set_t holds CPU_SETSIZE bits - 1024 on glibc - while
@@ -409,6 +331,8 @@ int jent_notime_thread_create(struct jent_notime_ctx *ctx,
 	ctx->notime_routine = routine;
 	ctx->notime_arg = arg;
 
+	/* Cleared, so that a failure that sets no errno reads as one. */
+	errno = 0;
 	handle = _beginthreadex(NULL, 0, jent_notime_thread_win32, ctx, 0, NULL);
 	if (!handle) {
 		/*

@@ -2,22 +2,16 @@
 /*
  * Architecture-specific high-resolution timestamp source.
  *
- * Definition of jent_get_nstime() (declared in
- * arch/jitterentropy-arch-timer.h); see that header for the dispatch
- * rationale.
  *
  * Every backend lives here rather than inline in the header so that the
- * platform headers they need - <windows.h>, <x86intrin.h>, the Mach headers,
- * <linux/timex.h> - stay out of the entropy-collection core. In the Linux
- * kernel that is a requirement rather than a preference:
- * linux_kernel/Kbuild.source compiles the core at -O0, and <linux/timex.h>
- * does not compile at -O0 on current kernels, because x86's
- * random_get_entropy() reaches _static_cpu_has(), whose asm goto needs a
- * compile-time-constant feature operand that no unoptimized build can supply.
- * Kbuild.source therefore compiles this file with the kernel's normal flags,
- * unlike the core objects around it. Note that only the architectures without
- * a counter instruction reach <linux/timex.h> at all - the ones that have one
- * read it directly below, in kernel mode as in user space.
+ * platform headers they need - <windows.h>, <x86intrin.h>, <linux/timex.h> -
+ * stay out of the entropy-collection core, which linux_kernel/Kbuild.source
+ * compiles at -O0. The kernel's arch headers are only meant to build
+ * optimized (inline asm and compile-time asserts that need operands folded to
+ * constants), and only the kernel backend below, for architectures without a
+ * counter instruction, pulls them in. This file is
+ * therefore built with the kernel's normal flags: -O0 protects the measured
+ * loops, not the counter read.
  *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
  *
@@ -58,39 +52,58 @@
  */
 
 /*
- * _DEFAULT_SOURCE exposes clock_gettime()/CLOCK_* (POSIX.1b) on glibc under a
- * strict -std=c11. The generic fallback below uses them on architectures
- * without a counter instruction. The macro is defined here rather than in the
- * public jitterentropy.h so the header imposes no feature-test macro on
- * consumers; it must precede every system header.
+ * The feature-test macros that make glibc declare clock_gettime() and the
+ * CLOCK_* identifiers - POSIX.1b (__USE_POSIX199309), and so hidden by the
+ * strict -std=c11 the Makefile uses. The generic fallback below uses them on
+ * architectures without a counter instruction. Must be the first line: they
+ * have to precede every system header.
  */
-#if defined(__linux__) && !defined(_DEFAULT_SOURCE)
-# define _DEFAULT_SOURCE
-#endif
+#include "jitterentropy-arch-compat.h"
 
 #include "jitterentropy.h"
 #include "jitterentropy-arch-timer.h"
 
-#if (defined(_MSC_VER) || defined(__MINGW32__)) && \
-    (defined(_M_ARM) || defined(_M_ARM64))
+/*
+ * MSVC names the Arm architectures _M_ARM and _M_ARM64 only; clang and GCC
+ * targeting MinGW (llvm-mingw's aarch64-w64-mingw32 and armv7-w64-mingw32)
+ * define __aarch64__ and __arm__ instead, and without them here such a build
+ * would fall through to the bare cntvct_el0 read below.
+ */
+#if (defined(_MSC_VER) || defined(__MINGW32__)) && !defined(JENT_BAREMETAL) && \
+    (defined(_M_ARM) || defined(_M_ARM64) || \
+     defined(__arm__) || defined(__aarch64__))
 # include <windows.h>
 # include <profileapi.h>
 # define JENT_ARCH_TIMER_WINDOWS_QPC
 
+#elif defined(_MSC_VER) && defined(_M_ARM64) && !defined(__clang__)
+/*
+ * MSVC building for a firmware on Arm64 - EDK2 supports that toolchain - has
+ * no QueryPerformanceCounter() to call. The counter the aarch64 branch below
+ * reads is there all the same; MSVC reaches it through the intrinsic rather
+ * than through inline assembly, which it does not have on this target.
+ */
+# include <intrin.h>	/* _ReadStatusReg(), and ARM64_SYSREG() */
+/* <winnt.h> names the register; its encoding is op0 3, op1 3, CRn 14, CRm 0, op2 2. */
+# ifndef ARM64_CNTVCT
+#  define ARM64_CNTVCT ARM64_SYSREG(3, 3, 14, 0, 2)
+# endif
+# define JENT_ARCH_TIMER_MSVC_ARM64
+
 #elif defined(__x86_64__) || defined(__i386__) || \
       defined(_M_X64)     || defined(_M_IX86)
-# ifdef LINUX_KERNEL
+# if defined(LINUX_KERNEL) || (defined(_KERNEL) && defined(__FreeBSD__))
 /*
  * The kernel gets the same instruction through inline asm rather than through
  * the intrinsic: <x86intrin.h> is a user-space compiler header that kernel
  * code does not include, and the kernel's own rdtsc() lives in <asm/msr.h>,
  * which drags in the cpufeature machinery this file exists to keep away from
- * the core.
+ * the core. The FreeBSD kernel, built -nostdinc, has no <x86intrin.h> either.
  *
  * This assumes the TSC exists, as the user-space backend has always done for
  * this architecture. That is architecturally guaranteed on x86_64 and true of
  * every 32-bit CPU from the Pentium onwards; a kernel built for a 486 would
- * need the random_get_entropy() fallback instead.
+ * need the random_get_entropy() backend instead.
  */
 #  define JENT_ARCH_TIMER_X86_ASM
 # else
@@ -159,7 +172,20 @@
 #elif defined(__powerpc) || defined(__powerpc__)
 # define JENT_ARCH_TIMER_POWERPC
 
-#elif defined(__riscv)
+#elif defined(__riscv) && !(defined(LINUX_KERNEL) && defined(CONFIG_RISCV_M_MODE))
+/*
+ * Not in a kernel that runs in M-mode (CONFIG_RISCV_M_MODE, the NOMMU builds
+ * for K210-class parts): there is no SBI below it to emulate the time CSR, and
+ * on the cores that do not implement it in hardware rdtime traps into the very
+ * kernel executing it. Such a kernel reads the CLINT's mtime register through
+ * get_cycles(), and the random_get_entropy() branch further down takes that.
+ *
+ * Outside the Linux kernel, M-mode is currently not supported. A freestanding
+ * (JENT_BAREMETAL) build running in M-mode takes this branch and reads the
+ * time CSR with rdtime, which traps on the cores that do not implement it in
+ * hardware - the same problem as above, with no SBI below M-mode to emulate
+ * the CSR either.
+ */
 # define JENT_ARCH_TIMER_RISCV
 /*
  * The "time" CSR is the platform timer and is reliably accessible from
@@ -207,22 +233,69 @@
 #elif defined(LINUX_KERNEL)
 /*
  * The architecture offers no counter instruction of its own, so the kernel's
- * clock sources have to be asked. This is the branch that pulls in
- * <linux/timex.h>, and hence the reason this translation unit is built with
- * the kernel's normal flags; see the note at the top of this file.
+ * raw cycle counter is read through random_get_entropy(). Not ktime_get_ns():
+ * that rescales the clocksource by mult/shift, so constant ticks of a 24 MHz
+ * counter come out as 41, 42, 41 ns deltas - the harm described for aarch64
+ * above: the GCD analysis finds 1 and jent_stuck() credits deterministic
+ * samples.
+ *
+ * random_get_entropy() is an unsigned long and often narrower still (32-bit
+ * kernels, the MIPS count register, masked clocksources). jent_delta() only
+ * handles a 64-bit wrap, so each wrap of a narrow counter gives one bogus huge
+ * delta - once every few seconds to minutes. The delta stays the true one
+ * minus a constant modulo 2^64, so it carries the same information, but the
+ * stuck test misjudges the two or three samples around it. The startup test
+ * drops such a backwards step from the GCD analysis and tolerates three. No
+ * stateless fix exists: the counter width is not known here.
+ *
+ * MIPS and m68k read random_get_entropy_fallback(), the raw cycles of the
+ * current clocksource, instead: their random_get_entropy() is not a clock
+ * everywhere - MIPS without a usable c0_count mixes the TLB Random index into
+ * it, m68k asks a machine hook, on Amiga the video beam position. The
+ * function exists since 5.19 and the 5.10.119 and 5.15.44 backports; the
+ * module does not build for these two on older kernels. On those, other
+ * architectures without get_cycles() read 0 from random_get_entropy(), and
+ * the startup test rejects that clock.
  */
 # define JENT_ARCH_TIMER_LINUX_KERNEL
-# include <linux/ktime.h>	/* ktime_t (required by timekeeping.h on older kernels) */
-# include <linux/time.h>
-# include <linux/timekeeping.h>	/* ktime_get_ns() */
-# include <linux/timex.h>	/* random_get_entropy() */
+# include <linux/timex.h>	/* random_get_entropy(), ..._fallback() */
+
+#elif defined(_KERNEL) && defined(__FreeBSD__)
+/*
+ * The FreeBSD kernel counterpart of the branch above (armv7 is what reaches
+ * it): get_cyclecount() is the machine-dependent raw counter, the one random(4)
+ * stamps its own harvested events with, and not a clock rescaled to
+ * nanoseconds - see the Linux kernel branch for why that matters.
+ */
+# define JENT_ARCH_TIMER_FREEBSD_KERNEL
+# include <sys/param.h>
+# include <sys/systm.h>
+# include <machine/cpu.h>	/* get_cyclecount() */
+
+#elif defined(JENT_BAREMETAL)
+/*
+ * A freestanding build on an architecture none of the branches above has a
+ * counter instruction for - 32-bit Arm, MIPS, the Cortex-M profile, ... The
+ * generic fallback below is no answer there: it calls clock_gettime(), which a
+ * freestanding target does not have - or has as a newlib stub that fails, or
+ * one returning a millisecond tick - and none of that is a statement that the
+ * target was ported.
+ *
+ * With the internal timer compiled in, the platform timer reads 0 instead. The
+ * startup test rejects that with ENOTIME, and the library runs on the internal
+ * timer - which on such a target means the thread handler the integrator
+ * registers with jent_entropy_switch_notime_impl(). Without it no clock is
+ * left at all, and that is a build error rather than a collector that only
+ * finds out at runtime.
+ */
+# ifndef JENT_CONF_ENABLE_INTERNAL_TIMER
+#  error "JENT_BAREMETAL: no counter instruction is known for this architecture - add one to arch/jitterentropy-arch-timer.c or enable the internal timer"
+# endif
+# define JENT_ARCH_TIMER_NONE
 
 #else /* generic fallback */
 # define JENT_ARCH_TIMER_GENERIC
 # include <time.h>
-# ifdef __MACH__
-#  include <mach/mach_time.h>
-# endif
 #endif
 
 #ifdef JENT_CONF_ENABLE_MOCK_TIMER
@@ -272,6 +345,10 @@ void jent_get_nstime(uint64_t *out)
 	LARGE_INTEGER ticks;
 	QueryPerformanceCounter(&ticks);
 	*out = (uint64_t)ticks.QuadPart;
+
+#elif defined(JENT_ARCH_TIMER_MSVC_ARM64)
+
+	*out = (uint64_t)_ReadStatusReg(ARM64_CNTVCT);
 
 #elif defined(JENT_ARCH_TIMER_X86)
 
@@ -378,29 +455,23 @@ void jent_get_nstime(uint64_t *out)
 
 #elif defined(JENT_ARCH_TIMER_LINUX_KERNEL)
 
-	__u64 tmp = 0;
+# if defined(CONFIG_MIPS) || defined(CONFIG_M68K)
+	*out = (uint64_t)random_get_entropy_fallback();
+# else
+	*out = (uint64_t)random_get_entropy();
+# endif
 
-	tmp = random_get_entropy();
+#elif defined(JENT_ARCH_TIMER_FREEBSD_KERNEL)
 
-	/*
-	 * If random_get_entropy does not return a value, i.e. it is not
-	 * implemented for a given architecture, use a clock source.
-	 * hoping that there are timers we can work with.
-	 */
-	if (tmp == 0)
-		tmp = ktime_get_ns();
+	*out = (uint64_t)get_cyclecount();
 
-	*out = tmp;
+#elif defined(JENT_ARCH_TIMER_NONE)
+
+	/* No clock: the startup test reports ENOTIME, see the dispatch above. */
+	*out = 0;
 
 #else /* JENT_ARCH_TIMER_GENERIC */
 
-# ifdef __MACH__
-	/*
-	 * macOS lacks clock_gettime on older releases. Taken from
-	 * http://developer.apple.com/library/mac/qa/qa1398/_index.html
-	 */
-	*out = mach_absolute_time();
-# else
 	/*
 	 * CLOCK_MONOTONIC is used rather than CLOCK_REALTIME: the realtime
 	 * clock is stepped and slewed by adjtime/NTP, which is external
@@ -417,7 +488,6 @@ void jent_get_nstime(uint64_t *out)
 		tmp = tmp + (uint64_t)time.tv_nsec;
 	}
 	*out = tmp;
-# endif
 
 #endif
 }
