@@ -31,6 +31,9 @@
  */
 #include <linux/kernel.h>
 #include <linux/string.h>
+#elif defined(_KERNEL) && defined(__FreeBSD__)
+#include <sys/param.h>
+#include <sys/systm.h>
 #else
 #include <stdio.h>
 #endif
@@ -147,8 +150,10 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t\t\"cpuCores\": %ld,\n", jent_ncpu());
 
 	jent_add_to_status("\t\t\"cpuCache\": {\n");
-	jent_add_to_status("\t\t\t\"l1Bytes\": %u,\n", jent_cache_size_roundup(0));
-	jent_add_to_status("\t\t\t\"allBytes\": %u\n", jent_cache_size_roundup(1));
+	jent_add_to_status("\t\t\t\"l1Bytes\": %llu,\n",
+			   (unsigned long long)jent_cache_size_roundup(0));
+	jent_add_to_status("\t\t\t\"allBytes\": %llu\n",
+			   (unsigned long long)jent_cache_size_roundup(1));
 	jent_add_to_status("\t\t}\n");
 	jent_add_to_status("\t},\n");
 
@@ -171,6 +176,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status("\t\t},\n");
 
 	jent_add_to_status("\t\t\"secureMemory\": %s,\n", jent_memory_is_secure(ec->flags) ? "true" : "false");
+	jent_add_to_status("\t\t\"secureMemoryBackend\": \"%s\",\n", jent_memory_backend_name());
 	jent_add_to_status("\t\t\"internalTimer\": %s,\n", ec->enable_notime ? "true" : "false");
 	/*
 	 * Whether this build can have its time source replaced by the caller -

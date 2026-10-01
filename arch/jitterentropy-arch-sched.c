@@ -2,9 +2,6 @@
 /*
  * Architecture / OS-specific scheduler yield.
  *
- * Definition of jent_yield() (declared in arch/jitterentropy-arch-sched.h). It
- * combines a CPU-level pause hint with an OS-level scheduler yield; see that
- * header for the dispatch rationale.
  *
  * Copyright Stephan Mueller <smueller@chronox.de>, 2014 - 2026
  *
@@ -54,7 +51,18 @@
 
 #else /* LINUX_KERNEL */
 
-#if defined(JENT_BAREMETAL)
+#if defined(_KERNEL) && defined(__FreeBSD__)
+/*
+ * The FreeBSD kernel: kern_yield(9) with PRI_USER gives up the CPU and
+ * returns the thread at its own user priority, which is what sched_yield()
+ * does for the hosted build. The CPU hint below is kept.
+ */
+# include <sys/param.h>
+# include <sys/systm.h>
+# include <sys/proc.h>		/* kern_yield() */
+# include <sys/priority.h>	/* PRI_USER */
+# define JENT_ARCH_SCHED_FREEBSD_KERNEL
+#elif defined(JENT_BAREMETAL)
 /*
  * No scheduler to yield to - there is nothing else runnable. The CPU-level
  * pause hint below is selected as usual and is the whole of jent_yield() here,
@@ -71,19 +79,26 @@
 
 #if defined(__x86_64__) || defined(__i386__) || \
     defined(_M_X64)     || defined(_M_IX86)
-# if defined(_MSC_VER)
-#  include <intrin.h>
+# if defined(JENT_ARCH_SCHED_FREEBSD_KERNEL)
+/* <x86intrin.h> is a user-space compiler header the kernel does not have. */
+#  define JENT_ARCH_SCHED_PAUSE_X86_ASM
 # else
-#  include <x86intrin.h>
+#  if defined(_MSC_VER)
+#   include <intrin.h>
+#  else
+#   include <x86intrin.h>
+#  endif
+#  define JENT_ARCH_SCHED_PAUSE_X86
 # endif
-# define JENT_ARCH_SCHED_PAUSE_X86
-#elif defined(_M_ARM64) || defined(_M_ARM)
+#elif (defined(_M_ARM64) || defined(_M_ARM)) && !defined(__clang__)
 /*
  * Windows on ARM. MSVC defines neither __aarch64__ nor __arm__, so without
  * these two macros the branch below did not match and a Windows-on-ARM build
  * emitted no yield hint at all - the same pair jitterentropy-arch-timer.c
  * matches for its QueryPerformanceCounter back-end. The hint goes through the
- * intrinsic because MSVC rejects inline asm on ARM targets entirely.
+ * intrinsic because MSVC rejects inline asm on ARM targets entirely. Clang in
+ * MSVC mode declares no __yield() in <intrin.h> but defines __aarch64__ or
+ * __arm__ and takes inline asm, so it uses the branch below.
  */
 # include <intrin.h>
 # define JENT_ARCH_SCHED_PAUSE_ARM_INTRIN
@@ -102,6 +117,8 @@ void jent_yield(void)
 {
 #if defined(JENT_ARCH_SCHED_PAUSE_X86)
 	_mm_pause();
+#elif defined(JENT_ARCH_SCHED_PAUSE_X86_ASM)
+	__asm__ __volatile__("pause" ::: "memory");
 #elif defined(JENT_ARCH_SCHED_PAUSE_ARM_INTRIN)
 	__yield();
 #elif defined(JENT_ARCH_SCHED_PAUSE_ARM)
@@ -126,5 +143,7 @@ void jent_yield(void)
 	(void)sched_yield();
 #elif defined(JENT_ARCH_SCHED_LINUX_KERNEL)
 	schedule();
+#elif defined(JENT_ARCH_SCHED_FREEBSD_KERNEL)
+	kern_yield(PRI_USER);
 #endif
 }

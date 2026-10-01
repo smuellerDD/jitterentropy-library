@@ -42,10 +42,12 @@
 /*
  * OS-specific online CPU count discovery.
  *
- * Provides jent_ncpu() returning the number of online logical CPUs, or
- * a negative errno on failure. The dispatch (see
+ * Provides jent_ncpu() returning the number of logical CPUs the calling thread
+ * may run on, or a negative errno on failure. The dispatch (see
  * arch/jitterentropy-arch-ncpu.c) is:
- *   - Windows                        -> GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)
+ *   - Windows                        -> GetThreadGroupAffinity(), with
+ *                                       GetActiveProcessorCount(
+ *                                       ALL_PROCESSOR_GROUPS) as fallback
  *   - Linux (glibc)                  -> sched_getaffinity(2), with
  *                                       sysconf(_SC_NPROCESSORS_ONLN) as fallback
  *   - Linux (musl / non-glibc)       -> sched_getaffinity(2), with
@@ -55,14 +57,17 @@
  *   - hosted Unix-like (BSDs, Apple, -> sysconf(_SC_NPROCESSORS_ONLN)
  *     AIX, Solaris/illumos, Haiku,
  *     Cygwin)
- *   - Linux Kernel                   -> 1 (we do not need a timer thread)
+ *   - Linux Kernel                   -> num_online_cpus() (status only,
+ *                                       no timer thread)
+ *   - FreeBSD Kernel                 -> mp_ncpus
  *   - other (e.g. baremetal)         -> 1 (timer thread will be disabled)
  *
  * Provides jent_cpu_highest() returning the highest of those CPU numbers - the
  * one a thread may be pinned to - or a negative errno. Not the count minus
  * one: the CPUs a thread may run on are a set, and one confined to a cpuset
- * need not hold the numbers the count would name. Only Linux can tell the two
- * apart; elsewhere the count minus one is all there is.
+ * or a job need not hold the numbers the count would name. Only Linux and
+ * Windows can tell the two apart; elsewhere the count minus one is all there
+ * is.
  */
 
 #ifndef _JITTERENTROPY_ARCH_NCPU_H
@@ -79,7 +84,21 @@
  */
 #define JENT_NCPU_SET_MAX	(1U << 16)
 
+JENT_INTERNAL
 long jent_ncpu(void);
+JENT_INTERNAL
 long jent_cpu_highest(void);
+
+#if !defined(LINUX_KERNEL) && !defined(JENT_BAREMETAL) && \
+    (defined(_MSC_VER) || defined(__MINGW32__))
+/*
+ * Resolve the flat Windows CPU number @cpu, as jent_cpu_highest() reports it,
+ * to its processor group and affinity mask bit. Returns 0, -EINVAL for no
+ * such active processor, or another negative errno.
+ */
+JENT_INTERNAL
+int jent_cpu_to_group(unsigned long cpu, unsigned short *group,
+		      unsigned int *bit);
+#endif
 
 #endif /* _JITTERENTROPY_ARCH_NCPU_H */

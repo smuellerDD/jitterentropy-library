@@ -52,21 +52,26 @@
  * discovery once and answers from a cache afterwards.
  *
  * Dispatch:
- *   - Linux            -> /sys/devices/system/cpu walk with sysconf(_SC_LEVEL{1,2,3}_*) fallback
+ *   - Linux            -> /sys/devices/system/cpu walk with sysconf(_SC_LEVEL{1,2,3}_*) fallback,
+ *                         on Arm then the core types of /proc/cpuinfo,
+ *                         on x86 then CPUID for the levels still unknown
  *   - macOS            -> sysctlbyname("hw.l{1d,2,3}cachesize")
- *   - Windows / Cygwin -> GetLogicalProcessorInformation
- *   - {Open,Free,Net}BSD x86 -> CPUID deterministic cache parameters
- *                               (leaf 4, or 0x8000001D on AMD / Hygon)
+ *   - Windows          -> GetLogicalProcessorInformationEx
+ *   - other x86 (BSDs, Solaris, Haiku, Cygwin)
+ *                      -> CPUID deterministic cache parameters
+ *                         (leaf 4, or 0x8000001D on AMD / Hygon)
  *   - {Open,Free,Net}BSD aarch64 / riscv -> zero stub (no EL0-readable source)
  *   - AIX              -> _system_configuration (dcache_size / L2_cache_size)
  *   - Linux Kernel x86 -> CPUID leaf 4 / 0x8000001D, on every online CPU
  *   - Linux Kernel arm64 -> CLIDR_EL1 / CCSIDR_EL1 cache ID registers
+ *   - FreeBSD Kernel x86 -> CPUID leaf 4 / 0x8000001D, on the current CPU
  *   - other            -> return 0
  */
 
 #ifndef _JITTERENTROPY_ARCH_CACHE_H
 #define _JITTERENTROPY_ARCH_CACHE_H
 
-uint32_t jent_cache_size_roundup(int all_caches);
+JENT_INTERNAL
+uint64_t jent_cache_size_roundup(int all_caches);
 
 #endif /* _JITTERENTROPY_ARCH_CACHE_H */

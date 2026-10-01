@@ -327,27 +327,24 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 #endif
 
 /*
- * Ceiling for the memory size that jent_update_memsize() derives on its own
- * from the discovered cache geometry. It does not constrain a size the caller
- * requested explicitly with a JENT_MAX_MEMSIZE_* flag - that is the caller's
- * decision to make - only the automatic one.
- *
- * On a 64-bit target this is JENT_MAX_MEMSIZE_MAX, i.e. no additional limit.
- * On a 32-bit target the address space is the binding constraint rather than
- * the cache: a two-socket machine with a large L3 makes JENT_CACHE_ALL derive
- * the full 512 MB, which the collector then both maps and mlock()s. That is a
- * sixth of the usable address space of a 32-bit process and well beyond a
- * typical RLIMIT_MEMLOCK, so jent_zalloc() fails and the whole collector
- * allocation fails with it. Capping the derived value at 64 MB keeps the
- * automatic path working on i686, armv7, RV32 and 31-bit s390.
- *
- * UINTPTR_MAX is the pointer-width test; where it is unavailable (the Linux
- * kernel build does not define it) the 64-bit branch is taken, which leaves
- * that configuration's behaviour unchanged.
+ * Ceiling for the memory size derived from the cache size, not for one the
+ * caller requested: 32-bit address spaces cannot always map 512 MB.
  */
-#if defined(UINTPTR_MAX) && (UINTPTR_MAX <= 0xffffffffUL)
+#if defined(LINUX_KERNEL)
+# ifndef BITS_PER_LONG
+#  error "BITS_PER_LONG missing: <linux/types.h> no longer provides it"
+# endif
+# if BITS_PER_LONG == 32
+#  define JENT_MAX_AUTO_MEMSIZE JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_64MB)
+# endif
+#elif defined(__SIZEOF_POINTER__)
+# if __SIZEOF_POINTER__ <= 4
+#  define JENT_MAX_AUTO_MEMSIZE JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_64MB)
+# endif
+#elif defined(UINTPTR_MAX) && (UINTPTR_MAX <= 0xffffffffUL)
 # define JENT_MAX_AUTO_MEMSIZE JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_64MB)
-#else
+#endif
+#ifndef JENT_MAX_AUTO_MEMSIZE
 # define JENT_MAX_AUTO_MEMSIZE JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX)
 #endif
 

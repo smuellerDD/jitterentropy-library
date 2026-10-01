@@ -40,48 +40,27 @@
  */
 
 /*
- * Architecture / OS-specific scheduler yield.
+ * JENT_O_CLOEXEC, the open() flag that keeps a descriptor from leaking into a
+ * child that a concurrent fork() and exec() starts. O_CLOEXEC is POSIX.1-2008
+ * and absent from older systems, where the window stays open rather than the
+ * build failing.
  *
- * Provides jent_yield() which combines a CPU-level pause hint (to ease
- * SMT and power contention while the caller is busy-waiting) with an
- * OS-level scheduler yield. The two phases are dispatched independently.
- *
- * CPU pause hint:
- *   - x86 / x86_64           -> _mm_pause() intrinsic ('pause' inline asm
- *                               in the FreeBSD kernel)
- *   - Windows on ARM / ARM64 -> __yield() intrinsic
- *   - aarch64                -> 'yield' instruction
- *   - arm (ARMv7+)           -> 'yield' instruction
- *   - powerpc                -> 'or 27,27,27' (low-priority hint)
- *   - riscv                  -> Zihintpause 'pause', emitted as its raw
- *                               encoding (a no-op on older cores)
- *   - Linux kernel           -> no hint (schedule() below is the yield)
- *   - other (s390x, unknown) -> no hint
- *
- * OS yield:
- *   - Windows (MSVC / MinGW)             -> SwitchToThread()
- *   - hosted Unix-like (Linux, BSDs,     -> sched_yield()
- *     Apple, AIX, Solaris/illumos,
- *     Haiku, Cygwin)
- *   - Linux kernel                       -> schedule()
- *   - FreeBSD kernel                     -> kern_yield(PRI_USER)
- *   - other (e.g. baremetal)             -> no-op
- *
- * The CPU hint mirrors what YieldProcessor() does on Windows (which
- * expands to the architecture's pause/yield instruction). On baremetal
- * targets with no scheduler we still emit the CPU hint so a busy-wait
- * loop does not pin SMT siblings unnecessarily.
+ * It is O_CLOEXEC out of <fcntl.h> that is tested, so a backend includes this
+ * header right after its <fcntl.h>; like every arch header it includes nothing
+ * itself. Included too early, it settles on 0 without a word, which is why
+ * it is kept apart from jitterentropy-arch-compat.h, the one that has to come
+ * before every system header.
  */
 
-#ifndef _JITTERENTROPY_ARCH_SCHED_H
-#define _JITTERENTROPY_ARCH_SCHED_H
+#ifndef _JITTERENTROPY_ARCH_CLOEXEC_H
+#define _JITTERENTROPY_ARCH_CLOEXEC_H
 
-/*
- * Combine a CPU-level pause hint (to ease SMT and power contention while the
- * caller is busy-waiting) with an OS-level scheduler yield. Defined in
- * arch/jitterentropy-arch-sched.c.
- */
-JENT_INTERNAL
-void jent_yield(void);
+#ifndef JENT_O_CLOEXEC
+# ifdef O_CLOEXEC
+#  define JENT_O_CLOEXEC O_CLOEXEC
+# else
+#  define JENT_O_CLOEXEC 0
+# endif
+#endif
 
-#endif /* _JITTERENTROPY_ARCH_SCHED_H */
+#endif /* _JITTERENTROPY_ARCH_CLOEXEC_H */

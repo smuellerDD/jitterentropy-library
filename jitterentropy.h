@@ -58,6 +58,23 @@
 #include <linux/minmax.h>	/* min()/max()/min_t()/max_t() */
 #include <linux/types.h>	/* uintN_t, size_t, ssize_t, bool, NULL */
 
+#elif defined(_KERNEL) && defined(__FreeBSD__)
+
+/*
+ * The FreeBSD kernel. It is freestanding like the Linux kernel above - built
+ * with -ffreestanding -nostdinc, so none of the C library headers below
+ * exist - and it is not JENT_BAREMETAL either (see there): the arch/ backends
+ * select the kernel's own interfaces on _KERNEL && __FreeBSD__. What the
+ * library needs of it is what the hosted headers below provide elsewhere, and
+ * <sys/systm.h> brings in the libkern string and memory helpers.
+ */
+#include <sys/param.h>
+#include <sys/types.h>		/* uintN_t, size_t, ssize_t */
+#include <sys/systm.h>		/* memcpy(), memset(), strlen(), snprintf() */
+#include <sys/errno.h>
+#include <sys/limits.h>
+#include <sys/stdint.h>		/* UINTn_MAX, UINTn_C() */
+
 #else /* LINUX_KERNEL */
 
 /*
@@ -115,9 +132,9 @@ typedef intptr_t ssize_t;
  * the API declared below, <unistd.h> is already covered above, and
  * <CoreServices/CoreServices.h> in particular is a large umbrella framework
  * that no part of the library references - and one that does not exist in the
- * iOS/tvOS/watchOS SDKs, all of which define __MACH__. The few places that do
- * need Mach interfaces (arch/jitterentropy-arch-thread.c,
- * arch/jitterentropy-arch-timer.c) include exactly what they use themselves.
+ * iOS/tvOS/watchOS SDKs, all of which define __MACH__. The one place that
+ * does need Mach interfaces (arch/jitterentropy-arch-thread.c) includes
+ * exactly what it uses itself.
  */
 
 #endif /* LINUX_KERNEL */
@@ -308,10 +325,27 @@ extern "C" {
  * services, and is what keeps this path building and running.
  *
  * One flag goes with them on aarch64: -mno-outline-atomics. GCC 10 and later
- * default to the opposite, which turns the read-modify-write in
- * arch/jitterentropy-arch-atomic.c into a call to a libgcc helper that a
- * freestanding link does not have. The kernel passes the same flag for the
- * same reason.
+ * default to the opposite, which turns an atomic read-modify-write into a call
+ * to a libgcc helper that a freestanding link does not have. The library needs
+ * the flag: every startup sets the common timer divisor with
+ * jent_atomic_cmpxchg_u32(), and jent_uuid_from_counter() increments the
+ * process-wide counter it derives an instance identifier from with
+ * jent_atomic_inc_u32() - precisely the path taken where no CSPRNG answers,
+ * the normal EFI and baremetal case. Without the flag such a build fails to
+ * link on an undefined __aarch64_cas4_* or __aarch64_ldadd4_*. The kernel
+ * passes the same flag for the same reason.
+ *
+ * A core with no atomic instructions at all - ARMv6-M, RISC-V without the A
+ * extension - is not supported: the library requires lock-free 32-bit atomics,
+ * and arch/jitterentropy-arch-atomic.c fails to compile without them.
+ *
+ * The time stamp is read from a counter instruction on x86, aarch64, PowerPC,
+ * s390x, SPARC64, RISC-V and LoongArch (arch/jitterentropy-arch-timer.c). Any
+ * other architecture has no clock the library could read without an operating
+ * system, and fails to compile unless JENT_CONF_ENABLE_INTERNAL_TIMER is set:
+ * the internal timer then takes over, and the counting thread it needs comes
+ * from a handler the integrator registers with
+ * jent_entropy_switch_notime_impl().
  */
 #if !defined(JENT_BAREMETAL) &&						       \
     !defined(LINUX_KERNEL) && !defined(__KERNEL__) &&			       \
@@ -323,8 +357,26 @@ extern "C" {
 /*
  * Threading back-end for the internal timer.
  */
-#if !defined(JENT_PTHREAD) && !defined(JENT_WIN_THREADS) && \
-    !defined(LINUX_KERNEL)
+/*
+ * Only for a hosted build. The environments with a threading back-end of their
+ * own have to be excluded here, or this picks one they do not have and the
+ * jent_notime_start_routine typedef below - which keys off these same macros -
+ * ends up disagreeing with the back-end that is actually compiled: the
+ * freestanding one takes int (*)(void *), the pthread one void *(*)(void *),
+ * and struct jent_notime_thread then declares a start member of the wrong
+ * type. That is a build failure for the library and, worse, the wrong
+ * signature in the public struct for the consumer registering a handler
+ * through jent_entropy_switch_notime_impl() - on exactly the target where the
+ * builtin back-end always refuses, so registering one is mandatory.
+ *
+ * JENT_BAREMETAL is defined a few lines above, so it is already known here;
+ * the FreeBSD kernel is spelled out as its own case, as it is elsewhere - the
+ * arch/ backends each carry a _KERNEL && __FreeBSD__ branch of their own.
+ */
+#if !defined(JENT_PTHREAD) && !defined(JENT_WIN_THREADS) &&		       \
+    !defined(LINUX_KERNEL) && !defined(__KERNEL__) &&			       \
+    !(defined(_KERNEL) && defined(__FreeBSD__)) &&			       \
+    !defined(JENT_BAREMETAL)
 # if defined(_MSC_VER) || defined(__MINGW32__)
 #  define JENT_WIN_THREADS
 # else
@@ -454,10 +506,11 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen);
 JENT_PRIVATE_STATIC
 int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen);
 
-/* return secure memory support, must be done
- * in jitterentropy itself, as users may not define
- * a crypto library and so the define in arch/jitterentropy-arch-memory.h
- * is not set for them. */
+/* return secure memory support - memory zeroized on free, which every build
+ * provides, so this returns 1; locking and core dump exclusion are extras it
+ * does not report. Must be done in jitterentropy itself, as users may not
+ * define a crypto library and so the define in
+ * arch/jitterentropy-arch-memory.h is not set for them. */
 JENT_PRIVATE_STATIC
 int jent_secure_memory_supported(void);
 

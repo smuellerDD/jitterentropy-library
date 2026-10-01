@@ -161,7 +161,7 @@ static void test_guard_pages(void)
 	unsigned char *p = jent_zalloc(page_size, 0);
 
 	if (!p) {
-		JENT_UT_SKIP("the guard pages", "allocation failed");
+		JENT_UT_FAIL("%s: allocation failed", "the guard pages");
 		return;
 	}
 
@@ -234,15 +234,25 @@ static void test_guard_pages(void)
 
 static void test_memory(void)
 {
-	static const unsigned int modes[] = { 0, JENT_FORCE_SECURE_MEM };
+	static const struct {
+		int unlocked;
+		unsigned int flags;
+		const char *what;
+	} modes[] = {
+		{ 0, 0,			"ordinary memory" },
+		{ 0, JENT_FORCE_SECURE_MEM,	"secure memory" },
+		{ 1, 0,			"unlocked memory" },
+	};
 	unsigned int m;
 
 	jent_ut_group("jent_zalloc / jent_zfree / jent_memset_secure");
 
 	for (m = 0; m < sizeof(modes) / sizeof(modes[0]); m++) {
 		const size_t len = 4096;
-		unsigned char *p = jent_zalloc(len, modes[m]);
-		const char *what = modes[m] ? "secure memory" : "ordinary memory";
+		unsigned char *p = modes[m].unlocked ?
+				   jent_zalloc_unlocked(len) :
+				   jent_zalloc(len, modes[m].flags);
+		const char *what = modes[m].what;
 		size_t i;
 		unsigned int nonzero = 0;
 
@@ -251,7 +261,7 @@ static void test_memory(void)
 			 * Secure memory can legitimately be unavailable: it is
 			 * locked into RAM, and RLIMIT_MEMLOCK may not allow it.
 			 */
-			if (modes[m])
+			if (modes[m].flags)
 				JENT_UT_SKIP(what, "allocation failed, "
 					     "possibly an RLIMIT_MEMLOCK limit");
 			else
@@ -293,16 +303,9 @@ static void test_memory(void)
 		JENT_UT_EQ(byte, 0x5a, "a zero-length wipe writes nothing");
 	}
 
-	jent_ut_checks++;
-	{
-		int secure = jent_memory_is_secure(JENT_FORCE_SECURE_MEM);
-
-		if (secure != 0 && secure != 1)
-			JENT_UT_FAIL("jent_memory_is_secure returned %d", secure);
-		else
-			printf("  note: secure memory is %s\n",
-			       secure ? "available" : "unavailable");
-	}
+	/* Every backend wipes on free, which is what secure memory means. */
+	JENT_UT_EQ(jent_memory_is_secure(JENT_FORCE_SECURE_MEM), 1,
+		   "the memory is secure memory");
 }
 
 int main(void)
