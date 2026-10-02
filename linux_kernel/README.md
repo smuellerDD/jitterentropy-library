@@ -553,7 +553,7 @@ delivered to the reader exactly.
 When the kernel provides `CONFIG_PROC_FS`, the module creates the directory
 `/proc/jitterentropy/` that collects its read-only status and statistics files:
 
-* `version`: the Jitter RNG library version (e.g. `4.0.0`).
+* `version`: the Jitter RNG library version (e.g. `3.8.0`).
 
 * `config/`: a subdirectory grouping the effective runtime configuration
   shared by the kernel interfaces:

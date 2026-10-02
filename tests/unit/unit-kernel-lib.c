@@ -156,7 +156,7 @@ static void test_ioctls(void)
 
 static void test_proc(void)
 {
-	static const char version[] = "4.0.0\n";
+	static const char version[] = "3.8.0\n";
 	char path[32], buf[64], name[128];
 
 	jent_ut_group("the files in /proc/jitterentropy");

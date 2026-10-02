@@ -153,11 +153,9 @@ jobs:
 
       # The archive supplies jent_memset_secure(), which sha3.c calls. LDFLAGS
       # from the environment, as acvpparser's Makefile appends to it.
-      # JENT_370 enables the SHAKE-256 backend: the parser's own version gate
-      # (MAJ >= 3 && MIN >= 7) misses 4.0.
       - name: Build acvpparser against this tree
         run: |
-          CFLAGS=-DJENT_370 LDFLAGS="$PWD/build/libjitterentropy.a" \
+          LDFLAGS="$PWD/build/libjitterentropy.a" \
             make -C acvpparser jent JENT_SRC="$PWD" -j "$(nproc)"
 
       - name: Check its digests against hashlib

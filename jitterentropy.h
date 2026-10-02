@@ -148,13 +148,13 @@ extern "C" {
  * be updated (as long as this number is zero, the API is not considered stable
  * and can change without a bump of the major version).
  */
-#define JENT_MAJVERSION 4
+#define JENT_MAJVERSION 3
 
 /*
  * API compatible, ABI may change, functional enhancements only, consumer can be
  * left unchanged if enhancements are not considered.
  */
-#define JENT_MINVERSION 0
+#define JENT_MINVERSION 8
 
 /*
  * API / ABI compatible, no functional changes, no enhancements, bug fixes only.
