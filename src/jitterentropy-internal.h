@@ -608,11 +608,11 @@ struct rand_data
 	unsigned int selftest_failed:1;
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	unsigned int notime_running:1;		/* a started thread to stop */
 	volatile uint8_t notime_interrupt;	/* indicator to interrupt ctr */
 	volatile uint64_t notime_timer;		/* high-res timer mock-up */
 	uint64_t notime_prev_timer;		/* previous timer value */
 	void *notime_thread_ctx;		/* register thread data */
-	unsigned int notime_running;		/* a started thread to stop */
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 
 	uint64_t jent_common_timer_gcd;	/* Common divisor for all time deltas */
