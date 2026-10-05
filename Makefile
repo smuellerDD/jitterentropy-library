@@ -160,9 +160,30 @@ CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
 LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
-.PHONY: all scan install clean distclean check $(NAME) $(NAME)-static
+# jitterentropy-rngd, off by default as the CMake option ENABLE_RNGD is: the
+# daemon feeding the Jitter RNG into the Linux /dev/random, with its systemd
+# unit. Linked against the archive, so that the daemon runs from wherever it
+# is installed without an rpath to the library. The unit goes to
+# JENT_SYSTEMD_UNITDIR, relative to PREFIX unless absolute, as in CMake.
+ENABLE_RNGD ?= 0
+RNGD_NAME := $(NAME)-rngd
+RNGD_DIR := rngd
+RNGD_OBJS := jitterentropy-rngd.o
+SBINDIR := sbin
+JENT_SYSTEMD_UNITDIR ?= lib/systemd/system
+RNGD_UNITDIR := $(if $(filter /%,$(JENT_SYSTEMD_UNITDIR)),,$(PREFIX)/)$(JENT_SYSTEMD_UNITDIR)
+ifeq ($(ENABLE_RNGD),1)
+ifneq ($(UNAME_S),Linux)
+$(error ENABLE_RNGD needs Linux: the daemon feeds the Linux /dev/random)
+endif
+RNGD_ALL := $(RNGD_NAME)
+RNGD_INSTALL := install-rngd
+endif
 
-all: $(NAME) $(NAME)-static
+.PHONY: all scan install clean distclean check $(NAME) $(NAME)-static \
+	install-rngd check-rngd
+
+all: $(NAME) $(NAME)-static $(RNGD_ALL)
 
 lib$(NAME).a: $(OBJS)
 	$(AR) rcs lib$(NAME).a $(OBJS)
@@ -174,6 +195,16 @@ $(SOFILE): $(OBJS) $(VERSION_SCRIPT)
 $(NAME)-static: lib$(NAME).a
 $(NAME): $(SOFILE)
 
+$(RNGD_NAME): $(RNGD_OBJS) lib$(NAME).a
+	$(CC) $(CFLAGS) -o $@ $(RNGD_OBJS) lib$(NAME).a $(LDFLAGS)
+
+%.o: $(RNGD_DIR)/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# As CMake's rngd-version test: needs neither root nor the kernel.
+check-rngd: $(RNGD_NAME)
+	./$(RNGD_NAME) --version 2>&1 | grep -q '$(RNGD_NAME) $(LIBVERSION)'
+
 $(analyze_plists): %.plist: %.c
 	@echo "  CCSA  " $@
 	clang --analyze $(CFLAGS) $< -o $@
@@ -183,7 +214,7 @@ scan: $(analyze_plists)
 cppcheck:
 	cppcheck --force -q --enable=performance --enable=warning --enable=portability $(shell find * -name \*.h -o -name \*.c)
 
-install: install-man install-shared install-includes
+install: install-man install-shared install-includes $(RNGD_INSTALL)
 
 install-man:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
@@ -211,12 +242,26 @@ install-static:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
 	install -m 0755 lib$(NAME).a $(DESTDIR)$(PREFIX)/$(LIBDIR)/
 
+# jitterentropy-rngd and its unit, with ENABLE_RNGD=1. The unit names the
+# daemon where this install puts it.
+install-rngd: $(RNGD_NAME)
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(SBINDIR) $(DESTDIR)$(RNGD_UNITDIR)
+	$(INSTALL_STRIP) -m 0755 $(RNGD_NAME) $(DESTDIR)$(PREFIX)/$(SBINDIR)/
+	sed -e 's|@PATH@|$(PREFIX)/$(SBINDIR)|' $(RNGD_DIR)/jitterentropy.service.in \
+		> $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service
+	if grep -q '@[A-Z_]*@' $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service; then \
+		echo "$(RNGD_DIR)/jitterentropy.service.in has a placeholder the Makefile does not fill" >&2; \
+		$(RM) $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service; exit 1; \
+	fi
+	chmod 0644 $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service
+
 clean:
 	@- $(RM) $(NAME)
 	@- $(RM) $(OBJS)
 	@- $(RM) $(addprefix $(SRCDIR)/,$(C_OBJS)) $(addprefix $(ARCHDIR)/,$(C_OBJS))
 	@- $(RM) lib$(NAME).so* lib$(NAME).*dylib
 	@- $(RM) lib$(NAME).a
+	@- $(RM) $(RNGD_NAME) $(RNGD_OBJS)
 	@- $(RM) $(analyze_plists)
 
 distclean: clean
