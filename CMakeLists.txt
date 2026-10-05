@@ -314,6 +314,20 @@ if(STACK_PROTECTOR)
     endif()
 endif()
 
+# Clear the call-clobbered registers a function used before it returns, so
+# intermediate state of the noise source and the conditioning does not outlive
+# the call in registers, and fewer return-oriented gadgets remain. "used" rather
+# than "used-gpr": the vector registers a memcpy or the SHA-3 code touched are
+# cleared as well. GCC 11 and Clang 15 have it, and only for some targets
+# (x86, ARM64, ...), hence the probe; without it the build goes on unchanged.
+if(NOT MSVC AND NOT SUNPRO)
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag(-fzero-call-used-regs=used JITTER_ZERO_CALL_USED_REGS)
+    if(JITTER_ZERO_CALL_USED_REGS)
+        list(APPEND JITTER_C_FLAGS -fzero-call-used-regs=used)
+    endif()
+endif()
+
 # CONFIGURE_DEPENDS so an added source cannot leave a stale configure
 # producing an archive with missing objects.
 file(GLOB JITTER_SRC CONFIGURE_DEPENDS "src/*.c" "arch/*.c")

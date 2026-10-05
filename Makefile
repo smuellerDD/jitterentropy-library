@@ -70,6 +70,15 @@ ifeq "$(ENABLE_STACK_PROTECTOR)" "1"
   endif
 endif
 
+# Clear the call-clobbered registers a function used before it returns, vector
+# registers included. GCC 11 and Clang 15 have it, and only for some targets,
+# hence the probe. See CMakeLists.txt.
+ZCUR_USABLE := $(shell printf 'int main(void){return 0;}' \
+	| $(CC) -Werror -fzero-call-used-regs=used -x c - -o /dev/null > /dev/null 2>&1 && echo yes)
+ifeq "$(ZCUR_USABLE)" "yes"
+  CFLAGS += -fzero-call-used-regs=used
+endif
+
 # Change as necessary
 PREFIX := /usr/local
 # library target directory (either lib or lib64)
