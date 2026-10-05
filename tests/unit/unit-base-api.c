@@ -416,9 +416,9 @@ static void test_init(void)
 	 * The same contradiction the allocation refuses, reaching the check
 	 * through the initialization instead.
 	 */
-	JENT_UT_NE(jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER |
-					   JENT_FORCE_INTERNAL_TIMER), 0,
-		   "contradictory flags fail the initialization");
+	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER |
+					   JENT_FORCE_INTERNAL_TIMER), EPROGERR,
+		   "contradictory flags are refused as invalid arguments");
 }
 
 /*
