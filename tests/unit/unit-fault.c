@@ -655,6 +655,15 @@ static void test_gcd_failures(void)
 
 	JENT_UT_EQ(jent_gcd_selftest(0), 0,
 		   "and passes again with the allocator restored");
+
+	/* A failed GCD self test leaves the self tests marked as not run. */
+	jent_atomic_store_int(&jent_selftest_run, 1);
+	fi_arm(1);
+	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_DISABLE_INTERNAL_TIMER), EMEM,
+		   "an initialization whose GCD self test is denied fails");
+	fi_disarm();
+	JENT_UT_EQ(jent_atomic_load_int(&jent_selftest_run), 0,
+		   "and leaves the next allocation to run the self tests");
 }
 
 /*

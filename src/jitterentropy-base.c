@@ -1328,12 +1328,16 @@ static inline int jent_entropy_init_common_pre(unsigned int flags)
 	jent_health_cb_block_switch();
 
 	ret = jent_selftest(NULL);
-	if (ret)
-		return ret;
+	if (!ret)
+		ret = jent_gcd_selftest(flags);
 
-	ret = jent_gcd_selftest(flags);
-
-	jent_atomic_store_int(&jent_selftest_run, 1);
+	/*
+	 * Marked ahead of the startup measurement, whose own collector must
+	 * not run these tests again - but only if they passed, and unmarked
+	 * otherwise, as jent_entropy_init_common_post() does: a failure
+	 * returns before that.
+	 */
+	jent_atomic_store_int(&jent_selftest_run, !ret);
 
 	return ret;
 }
