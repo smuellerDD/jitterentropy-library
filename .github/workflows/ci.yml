@@ -801,7 +801,7 @@ jobs:
 
           syms=$(nix shell nixpkgs#binutils -c \
             nm $nmflags --defined-only "$OUT/$file")
-          grep -E ' [TtWw] jent_' <<<"$syms" | head -20
+          grep -m 20 -E ' [TtWw] jent_' <<<"$syms" || true
           grep -qE ' [TtWw] jent_entropy_init$' <<<"$syms" || {
             echo "::error::no jitterentropy symbols in $file"
             exit 1
