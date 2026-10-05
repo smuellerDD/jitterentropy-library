@@ -582,9 +582,48 @@ static int jent_sha3_256_tester(void)
 	return 0;
 }
 
+/*
+ * The collector's state absorbs far more than one block, in pieces of any
+ * length. Absorbing in three updates - 1, 140 and 300 bytes - takes the
+ * paths a short message never reaches: completing a partially filled block,
+ * and absorbing whole blocks of JENT_SHA3_256_SIZE_BLOCK bytes directly.
+ * The message is the concatenation of the first 1, 140 and 300 bytes of the
+ * sequence 0x00, 0x01, ..., 0xff, 0x00, ...
+ */
+static int jent_sha3_256_multiblock_tester(void)
+{
+	HASH_CTX_ON_STACK(ctx);
+	static const unsigned int chunks[] = { 1, 140, 300 };
+	static const uint8_t exp[] = {
+		0xC5, 0xE3, 0x16, 0x92, 0x0A, 0x0D, 0x7E, 0x5D, 0x6C, 0x84,
+		0x4C, 0x52, 0x9C, 0xA8, 0x82, 0x18, 0x8A, 0xB2, 0x29, 0x9D,
+		0xA5, 0xED, 0x65, 0x0D, 0xC6, 0x16, 0xF0, 0xD4, 0xA3, 0x72,
+		0x2E, 0x02
+	};
+	uint8_t msg[300], act[sizeof(exp)] = { 0 };
+	unsigned int i;
+
+	for (i = 0; i < sizeof(msg); i++)
+		msg[i] = (uint8_t)i;
+
+	jent_sha3_256_init(&ctx);
+	for (i = 0; i < sizeof(chunks) / sizeof(chunks[0]); i++)
+		jent_sha3_update(&ctx, msg, chunks[i]);
+	jent_sha3_final(&ctx, act);
+
+	for (i = 0; i < sizeof(exp); i++) {
+		if (exp[i] != act[i])
+			return 1;
+	}
+
+	return 0;
+}
+
 int jent_sha3_tester(void)
 {
 	if (jent_sha3_256_tester())
+		return 1;
+	if (jent_sha3_256_multiblock_tester())
 		return 1;
 	if (jent_shake256_tester())
 		return 1;
