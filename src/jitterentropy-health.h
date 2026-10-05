@@ -78,6 +78,7 @@ static inline uint64_t jent_delta_abs(uint64_t prev, uint64_t next)
 
 JENT_INTERNAL
 void jent_lag_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
+JENT_INTERNAL
 void jent_apt_duplicate(struct rand_data *new_ec, struct rand_data *old_ec);
 JENT_INTERNAL
 void jent_rct_duplicate(struct rand_data *new_ec);
@@ -109,6 +110,7 @@ unsigned int jent_stuck(struct rand_data *ec, uint64_t current_delta);
  * delta against whatever the collector last measured, so a replay should
  * discard its first result or insert the first stamp twice.
  */
+JENT_INTERNAL
 unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 					  uint64_t timestamp);
 JENT_INTERNAL

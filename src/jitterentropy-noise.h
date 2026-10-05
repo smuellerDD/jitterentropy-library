@@ -49,7 +49,9 @@ JENT_INTERNAL
 unsigned int jent_measure_jitter(struct rand_data *ec,
 				 uint64_t loop_cnt,
 				 uint64_t *ret_current_delta);
+JENT_INTERNAL
 void jent_random_data(struct rand_data *ec);
+JENT_INTERNAL
 void jent_read_random_block(struct rand_data *ec, char *dst, size_t dst_len);
 
 #ifdef __cplusplus

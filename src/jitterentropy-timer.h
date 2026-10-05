@@ -45,7 +45,9 @@ JENT_INTERNAL
 void jent_notime_disable(struct rand_data *ec);
 JENT_INTERNAL
 int jent_notime_switch(struct jent_notime_thread *new_thread);
+JENT_INTERNAL
 void jent_notime_force(void);
+JENT_INTERNAL
 int jent_notime_forced(void);
 
 #else /* JENT_CONF_ENABLE_INTERNAL_TIMER */
