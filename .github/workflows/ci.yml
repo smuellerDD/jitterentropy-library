@@ -158,9 +158,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 7.9 is the last RHEL 7 minor release; the other entries float.
-          - name: RHEL 7
-            image: registry.access.redhat.com/ubi7/ubi:7.9
+          # The RHEL 7 generation (glibc 2.17, gcc 4.8), pinned at its last
+          # minor release; the other entries float. CentOS, as the public UBI 7
+          # content no longer carries a toolchain.
+          - name: CentOS 7
+            image: quay.io/centos/centos:centos7.9.2009
             # No distro CMake meets the 3.22 floor here.
             cmake: kitware
           - name: RHEL 8
@@ -196,6 +198,16 @@ jobs:
             bash -euxo pipefail -c '
               # No apostrophes anywhere in here: the whole script is a
               # single-quoted argument to bash -c, and one would end it.
+
+              # mirrorlist.centos.org is gone: point CentOS 7 at the vault.
+              # gpgcheck stays on with the key the image ships.
+              if [ -f /etc/yum.repos.d/CentOS-Base.repo ]; then
+                sed -i \
+                  -e "s|^mirrorlist=|#mirrorlist=|" \
+                  -e "s|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=https://vault.centos.org/7.9.2009|" \
+                  /etc/yum.repos.d/CentOS-Base.repo
+              fi
+
               if command -v dnf > /dev/null; then
                 install="dnf -y install"
               elif command -v zypper > /dev/null; then
@@ -210,10 +222,10 @@ jobs:
               if [ "$CMAKE_SOURCE" = distro ]; then
                 $install cmake
               else
-                # tar is not in the RHEL 7 base image and the tarball needs it.
+                # The tarball needs tar, which not every base image carries.
                 $install tar
                 url=https://github.com/Kitware/CMake/releases/download
-                # Retries only: RHEL 7 ships curl 7.29, which has neither
+                # Retries only: CentOS 7 ships curl 7.29, which has neither
                 # --http1.1 nor --retry-all-errors, and no HTTP/2 either.
                 curl -fsSL --retry 5 --retry-delay 5 \
                   "$url/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-linux-x86_64.tar.gz" \
