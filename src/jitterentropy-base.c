@@ -1414,7 +1414,9 @@ int jent_entropy_init_ex(unsigned int osr, unsigned int flags)
 	jent_health_cb_block_switch();
 
 	/* Arguments every allocation refuses. */
-	if (osr > JENT_MAX_OSR || jent_memaccess_contradicts(flags))
+	if (osr > JENT_MAX_OSR || jent_memaccess_contradicts(flags) ||
+	    ((flags & JENT_DISABLE_INTERNAL_TIMER) &&
+	     (flags & JENT_FORCE_INTERNAL_TIMER)))
 		return EPROGERR;
 
 	/* NTG.1 forbids the internal timer. */
