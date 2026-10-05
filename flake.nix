@@ -99,61 +99,6 @@
           cross-mingw32 = crossFor { cross = p.mingw32; };
         };
 
-      # ndk-build over arch/android/Android.mk against the real NDK toolchain,
-      # which is unfree - hence a dedicated nixpkgs instance for this output.
-      #
-      # APP_PLATFORM is the NDK's own floor, not this library's: r29 takes API
-      # 21 upwards, and nothing the library calls is guarded above that except
-      # getrandom() at __INTRODUCED_IN(28), which the UUID backend answers with
-      # its /dev/urandom fallback. Building at the floor is what keeps that
-      # branch compiled at all.
-      androidFor = system:
-        let
-          pkgsAndroid = import nixpkgs {
-            inherit system;
-            config = {
-              allowUnfree = true;
-              android_sdk.accept_license = true;
-            };
-          };
-          ndk = (pkgsAndroid.androidenv.composeAndroidPackages {
-            includeNDK = true;
-          }).ndk-bundle;
-        in pkgsAndroid.stdenv.mkDerivation {
-          pname = "jitterentropy-android";
-          version = "3.7.1";
-          src = self;
-          nativeBuildInputs = [ ndk ];
-          dontConfigure = true;
-
-          buildPhase = ''
-            runHook preBuild
-            ndk-build \
-              NDK_PROJECT_PATH=null \
-              APP_BUILD_SCRIPT=$(pwd)/arch/android/Android.mk \
-              APP_PLATFORM=android-21 \
-              APP_ABI="arm64-v8a x86_64" \
-              APP_OPTIM=release \
-              NDK_OUT=$TMPDIR/obj \
-              NDK_LIBS_OUT=$TMPDIR/libs \
-              -j"$NIX_BUILD_CORES" V=1
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-            mkdir -p $out/lib
-            cp -r $TMPDIR/libs/* $out/lib/
-            runHook postInstall
-          '';
-
-          meta = {
-            description =
-              "Jitter RNG userspace library built with the Android NDK";
-            license = lib.licenses.bsd3;
-          };
-        };
-
       # rng-tools and ESDM built against this tree. A build of this repository
       # alone cannot see what breaks a consumer: a header that stops declaring
       # something, a symbol that stops being exported, a link dependency missing
@@ -965,12 +910,11 @@
           # The SD images boot Raspberry Pi boards, which are aarch64.
           // lib.optionalAttrs (system == "aarch64-linux")
             (sdImagesFor system pkgs)
-          # The NDK and the cross toolchains are x86_64-linux only, and so is
+          # The cross toolchains are x86_64-linux only, and so is
           # the EFI application - see efiFor above.
           // lib.optionalAttrs (system == "x86_64-linux") (crossTargets pkgs // {
             efi = efiFor pkgs "x86_64";
             efi-aarch64 = efiFor pkgs "aarch64";
-            android = androidFor system;
             # The module for 32-bit x86, built natively through pkgsi686Linux.
             # Reaches the div64 helpers that stand in for the libgcc division
             # routines the kernel does not provide.
