@@ -1018,7 +1018,7 @@ static void test_platform_query_failures(void)
 #if defined(JENT_ARCH_CACHE_LINUX)
 	/* The cache sizes. A libc that does not know leaves them at zero. */
 	{
-		long l1 = -1, l2 = -1, l3 = -1;
+		uint64_t l1 = UINT64_MAX, l2 = UINT64_MAX, l3 = UINT64_MAX;
 
 		fi_sysconf_mode = FI_SYSCONF_FAIL;
 		jent_get_cachesize_sysconf(&l1, &l2, &l3);
@@ -1032,13 +1032,13 @@ static void test_platform_query_failures(void)
 		 * away.
 		 */
 		fi_sysconf_mode = FI_SYSCONF_ZERO;
-		l1 = -1;
+		l1 = UINT64_MAX;
 		jent_get_cachesize_sysfs_dir("/nonexistent/jent/cpu",
 					     &l1, &l2, &l3);
 		JENT_UT_EQ(l1, 0, "a CPU count of zero is handled");
 
 		fi_sysconf_mode = FI_SYSCONF_HUGE;
-		l1 = -1;
+		l1 = UINT64_MAX;
 		jent_get_cachesize_sysfs_dir("/nonexistent/jent/cpu",
 					     &l1, &l2, &l3);
 		JENT_UT_EQ(l1, 0, "an implausible CPU count is capped");
