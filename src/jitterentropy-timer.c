@@ -377,27 +377,6 @@ int jent_notime_enable(struct rand_data *ec, unsigned int flags)
 	return 0;
 }
 
-/*
- * Whether the builtin counting thread cannot run here for want of a second
- * CPU or of a thread backend - the -ENOENT of jent_notime_init_flags(),
- * which the collector allocation reports as a NULL like a failed
- * allocation. More memory, or another try, does not mend it. An external
- * handler brings its own rule.
- */
-int jent_notime_cpus_missing(void)
-{
-	long ncpu;
-
-	if (notime_thread != &jent_notime_thread_builtin)
-		return 0;
-
-	if (!JENT_NOTIME_BUILTIN_BACKEND)
-		return 1;
-
-	ncpu = jent_ncpu();
-	return ncpu >= 0 && ncpu < 2;
-}
-
 int jent_notime_switch(struct jent_notime_thread *new_thread)
 {
 	if (jent_atomic_load_int(&jent_notime_switch_blocked))
