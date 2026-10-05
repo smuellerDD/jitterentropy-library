@@ -30,6 +30,7 @@ option(ENABLE_COVERAGE "Instrument the build for code coverage and add the 'cove
 option(ENABLE_FUZZING "Instrument the build for libFuzzer and build the fuzzing harness under tests/fuzz (Clang only, for development)" OFF)
 option(MOCK_TIMER "Allow the time source to be replaced by a caller-supplied callback (only for testing - a build with this on produces no entropy of its own)" OFF)
 option(ENABLE_TOOLS "Build and install the recording and validation tools (jitterentropy-rng, getrawentropy, extractlsb, ...), which live under tests/" ON)
+option(ENABLE_RNGD "Also build and install jitterentropy-rngd, the daemon feeding the Jitter RNG into the Linux /dev/random, and its systemd unit (Linux only)" OFF)
 option(BUILD_TESTING "Build the test programs and register the CTest suite" ON)
 
 # CMake sets MSVC itself; do the same for the others.
@@ -603,6 +604,15 @@ if(BUILD_TESTING)
 endif()
 
 # The three the suite drives, plus the rest of their directories.
+# jitterentropy-rngd and its systemd unit; see rngd/CMakeLists.txt.
+if(ENABLE_RNGD)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "ENABLE_RNGD needs Linux: the daemon feeds the Linux /dev/random")
+    endif()
+    add_subdirectory(rngd)
+endif()
+
 if(ENABLE_TOOLS OR BUILD_TESTING)
     add_subdirectory(tests/gcd)
     add_subdirectory(tests/health)
