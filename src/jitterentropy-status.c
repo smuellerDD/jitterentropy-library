@@ -47,12 +47,15 @@
 int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 {
 	size_t used;
+	int ret, truncated = 0;
 
 	if (!buf || buflen == 0)
 		return -1;
 
 	/*
-	 * Append to what is already in @buf, stopping once it is full.
+	 * Append to what is already in @buf, stopping once it is full. Every
+	 * piece is non-empty, so one that finds no room, or that snprintf()
+	 * reports as cut short, truncates the document.
 	 *
 	 * The guard is "used + 1 < buflen", not "used < buflen": snprintf()
 	 * always terminates within the size it is given, so strlen(buf) never
@@ -64,12 +67,20 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	#define jent_add_to_status(...)					\
 	{								\
 		used = strlen(buf);					\
-		if (used + 1 < buflen)					\
-			snprintf(buf + used, buflen - used, __VA_ARGS__);\
+		if (used + 1 < buflen) {				\
+			ret = snprintf(buf + used, buflen - used,	\
+				       __VA_ARGS__);			\
+			if (ret < 0 || (size_t)ret >= buflen - used)	\
+				truncated = 1;				\
+		} else {						\
+			truncated = 1;					\
+		}							\
 	}
 
 	/* needed as plain snprintf to make jent_add_to_status len calculation usable */
-	snprintf(buf, buflen, "{\n");
+	ret = snprintf(buf, buflen, "{\n");
+	if (ret < 0 || (size_t)ret >= buflen)
+		truncated = 1;
 
 	jent_add_to_status("\t\"version\": \"%d.%d.%d\"",
 			   JENT_MAJVERSION, JENT_MINVERSION, JENT_PATCHLEVEL)
@@ -215,8 +226,7 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 out:
 	jent_add_to_status("}\n");
 
-	used = strlen(buf);
-	return (used >= buflen - 1) ? -1 : 0;
+	return truncated ? -1 : 0;
 #undef jent_add_to_status
 }
 

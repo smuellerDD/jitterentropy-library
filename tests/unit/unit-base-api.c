@@ -311,22 +311,21 @@ static void test_status_truncation(void)
 			unterminated++;
 
 		/*
-		 * The direction that matters: success must never be reported
-		 * for a document that did not fit. The converse is not
-		 * asserted - jent_status() detects truncation from strlen()
-		 * alone and so reports a buffer of exactly strlen(document) +
-		 * 1 as too small. Conservative in the safe direction, and the
-		 * caller only has to allow one more byte.
+		 * Success exactly when the whole document and its NUL fit:
+		 * never for a document that did not, and not refused for one
+		 * that fits to the last byte.
 		 */
-		if (!ret && strlen(area.buf) != full)
+		if (!ret != (len > full) ||
+		    (!ret && strlen(area.buf) != full))
 			misreported++;
 	}
 
 	JENT_UT_EQ(overflows, 0, "no length writes outside the buffer");
 	JENT_UT_EQ(unterminated, 0, "every length leaves a NUL in the buffer");
-	JENT_UT_EQ(misreported, 0, "success is never reported for a truncated document");
-	JENT_UT_EQ(jent_status(ec, area.buf, full + 2), 0,
-		   "a buffer one byte larger than the document reports success");
+	JENT_UT_EQ(misreported, 0,
+		   "success is reported exactly for a document that fits");
+	JENT_UT_EQ(jent_status(ec, area.buf, full + 1), 0,
+		   "a buffer that fits the document and its NUL reports success");
 	printf("  note: swept %zu buffer lengths\n", full + 1);
 
 	jent_entropy_collector_free(ec);
