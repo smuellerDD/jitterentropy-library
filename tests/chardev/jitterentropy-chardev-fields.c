@@ -193,6 +193,7 @@ int main(int argc, char *argv[])
 	char *json;
 	uint64_t n;
 	uint32_t val;
+	__u64 memsize;
 	unsigned int maj, min, patch;
 	int fd, have_uuid;
 
@@ -274,6 +275,29 @@ int main(int argc, char *argv[])
 		else if (n != val)
 			fail("reinitializations: ioctl says %u, status "
 			     "document says %" PRIu64, val, n);
+	}
+
+	/* JENT_IOCMEMSIZE against configuration.memoryBlockSizeBytes. */
+	if (ioctl(fd, JENT_IOCMEMSIZE, &memsize)) {
+		fail("JENT_IOCMEMSIZE: %s", strerror(errno));
+	} else {
+		printf("memory size:      %llu\n", (unsigned long long)memsize);
+		if (json_u64(json, NULL, "memoryBlockSizeBytes", &n))
+			fail("no \"memoryBlockSizeBytes\" in the status document");
+		else if (n != memsize)
+			fail("memory size: ioctl says %llu, status document "
+			     "says %" PRIu64, (unsigned long long)memsize, n);
+	}
+
+	/* JENT_IOCHASHLOOPS against configuration.hashLoopCount.runtime. */
+	if (ioctl(fd, JENT_IOCHASHLOOPS, &val)) {
+		fail("JENT_IOCHASHLOOPS: %s", strerror(errno));
+	} else {
+		printf("hash loops:       %u\n", val);
+		if (find_object(json, "hashLoopCount", &obj, &obj_end))
+			fail("no \"hashLoopCount\" object in the status document");
+		else if (json_u64(obj, obj_end, "runtime", &n) || n != val)
+			fail("hash loops: ioctl says %u", val);
 	}
 
 	/* configuration.flags reports the same value one bit at a time. */
