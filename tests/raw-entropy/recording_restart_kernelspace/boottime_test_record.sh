@@ -10,7 +10,7 @@
 #	   enable configuration option `CONFIG_CRYPTO_USER_API_RNG`,
 #	   compile, install and reboot the kernel, and ensure that the
 #	   Linux kernel command line contains
-#	   `jitterentropy_rng.boot_raw_hires_test=1`
+#	   `jitterentropy_testing.boot_raw_hires_test=1`
 #	2. Compile getrawentropy.c and install into /usr/local/sbin
 #	3. Copy this file to /usr/local/sbin and make it executable and do not
 #	   forget restorecon if applicable
