@@ -40,8 +40,7 @@ jobs:
         run: |
           modules=$(nix eval --json .#packages.x86_64-linux --apply \
             'ps: builtins.filter
-                   (n: builtins.match "jitterentropy-module.*" n != null
-                       && n != "jitterentropy-module-i686")
+                   (n: builtins.match "jitterentropy-module.*" n != null)
                    (builtins.attrNames ps)')
           vms=$(nix eval --json .#checks.x86_64-linux --apply \
             'cs: builtins.attrNames cs')

@@ -9,7 +9,7 @@
       lib = nixpkgs.lib;
 
       # QEMU on the host architecture.
-      systems = [ "x86_64-linux" "aarch64-linux" "i686-linux" ];
+      systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: lib.genAttrs systems (system: f system);
 
       # The CMake build: the library plus its tools in bin.
@@ -81,13 +81,12 @@
         in {
           # The dedicated jent_get_nstime() backends: stcke, the PowerPC
           # timebase, rdtime, rdtime.d. armv7 covers the clock_gettime()
-          # fallback and, with i686, the 32-bit paths.
+          # fallback and the 32-bit paths.
           cross-s390x = crossFor { cross = p.s390x; };
           cross-ppc64 = crossFor { cross = p.powernv; };
           cross-riscv64 = crossFor { cross = p.riscv64; };
           cross-loongarch64 = crossFor { cross = p.loongarch64-linux; };
           cross-armv7 = crossFor { cross = p."armv7l-hf-multiplatform"; };
-          cross-i686 = crossFor { cross = p.gnu32; };
 
           # Both link widths, plus shared - the only configuration exercising
           # the dllexport/dllimport split and the bcrypt import library. The
@@ -915,11 +914,6 @@
           // lib.optionalAttrs (system == "x86_64-linux") (crossTargets pkgs // {
             efi = efiFor pkgs "x86_64";
             efi-aarch64 = efiFor pkgs "aarch64";
-            # The module for 32-bit x86, built natively through pkgsi686Linux.
-            # Reaches the div64 helpers that stand in for the libgcc division
-            # routines the kernel does not provide.
-            jitterentropy-module-i686 =
-              moduleFor pkgs.pkgsi686Linux pkgs.pkgsi686Linux.linuxPackages_latest.kernel;
           }));
 
       # `nix flake check` boots every VM and runs its assertions.
