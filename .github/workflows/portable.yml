@@ -260,7 +260,15 @@ jobs:
             exit 1
           }
           echo "modversion: $(pkg-config --modversion jitterentropy)"
-          # Only --static prints Libs.private.
+          # The library itself is in Libs for both kinds of build, so a plain
+          # --libs names it even where only the archive is installed. What a
+          # plain --libs may lack for a static build is Libs.private, the
+          # archive's own dependencies, which is why the link below still uses
+          # --static; this is the check that --static alone would hide.
+          if ! pkg-config --libs jitterentropy | grep -qw -- -ljitterentropy; then
+            echo "::error::pkg-config --libs does not name -ljitterentropy"
+            exit 1
+          fi
           if [ "${{ matrix.shared }}" = ON ]; then
             libs=$(pkg-config --libs jitterentropy)
           else
@@ -274,3 +282,20 @@ jobs:
           cc -std=c11 $cflags tests/linking/jitterentropy-linktest.c $libs \
             -Wl,-rpath,"$PWD/prefix/lib" -o linktest-pc
           ./linktest-pc
+
+      # An installed tool finds the shared library by itself: through the
+      # $ORIGIN-relative install rpath on ELF, and the absolute install name
+      # of the dylib on macOS. An invalid argument is the run: it reaches
+      # main(), which is all the loader has to allow, without depending on
+      # the noise source.
+      - name: Run an installed tool
+        if: runner.os != 'Windows' && matrix.shared == 'ON'
+        run: |
+          rc=0
+          env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH \
+            prefix/bin/jitterentropy-rng x 2> rng.err || rc=$?
+          cat rng.err
+          if [ "$rc" -ne 1 ] || ! grep -q 'Invalid rounds value' rng.err; then
+            echo "::error::installed jitterentropy-rng did not start (exit $rc)"
+            exit 1
+          fi

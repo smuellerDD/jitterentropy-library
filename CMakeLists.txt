@@ -187,13 +187,13 @@ if(ENABLE_COVERAGE)
     add_link_options(--coverage)
 endif()
 
-if(BUILD_SHARED_LIBS)
-  set(JITTER_PC_LIBS "-l${CMAKE_PROJECT_NAME}")
-  set(JITTER_PC_LIBS_PRIVATE "")
-else()
-  set(JITTER_PC_LIBS "")
-  set(JITTER_PC_LIBS_PRIVATE "-l${CMAKE_PROJECT_NAME}")
-endif()
+# Libs names the library for either build: "pkg-config --libs" without
+# --static is what most consumers run, and a static link through it must still
+# name the archive. Libs.private is for what the archive depends on
+# (-pthread, the stack protector flag, -lbcrypt), which only a static link has
+# to be told about; those are appended further down.
+set(JITTER_PC_LIBS "-l${CMAKE_PROJECT_NAME}")
+set(JITTER_PC_LIBS_PRIVATE "")
 
 # Appended to the Cflags line of the .pc file. Only the Windows static build
 # has anything to put here; see the JENT_STATIC_LIB branch further down.
@@ -340,6 +340,23 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     # As the Makefile: .so.<maj>.<min>.<patch>, SONAME .so.<maj>.
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR})
+
+# As the Makefile's -install_name: the installed dylib names itself by its
+# absolute path, so the installed tools and any consumer linked through
+# pkg-config load it without an LC_RPATH of their own. CMake's default,
+# @rpath/, left every installed tool aborting with "Library not loaded" - the
+# install tree carries no rpath to resolve it. $<INSTALL_PREFIX> is the prefix
+# of the install, not of the configure, so "cmake --install --prefix" is
+# honoured. The build tree keeps @rpath and CMake's build rpath.
+if(APPLE)
+    if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+        set(_jent_install_name_dir "${CMAKE_INSTALL_LIBDIR}")
+    else()
+        set(_jent_install_name_dir "$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}")
+    endif()
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        INSTALL_NAME_DIR "${_jent_install_name_dir}")
+endif()
 target_compile_options(${PROJECT_NAME} PRIVATE ${JITTER_C_FLAGS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${JITTER_LINKER_FLAGS})
 
@@ -610,6 +627,28 @@ endif()
 if(BUILD_TESTING)
     # Before the subdirectories, so their add_test() calls register.
     enable_testing()
+endif()
+
+# The installed tools find a shared library through an rpath relative to
+# themselves, $ORIGIN/../lib, so an install under any prefix - and one moved
+# elsewhere as a whole - runs without LD_LIBRARY_PATH. Only where the library
+# is not in a directory the linker searches anyway: an rpath there is dead
+# weight that rpmlint and Lintian report. Decided for the configured prefix:
+# configured for a linker directory such as /usr, an install moved elsewhere
+# by "cmake --install --prefix" needs -DCMAKE_INSTALL_RPATH='$ORIGIN/../lib'.
+# Set before the subdirectories, whose targets take it at creation; a
+# CMAKE_INSTALL_RPATH or CMAKE_SKIP_INSTALL_RPATH given on the command line
+# wins. macOS needs none - the install name above is absolute - and neither do
+# Windows, Cygwin and MSYS, which find DLLs on PATH.
+if(BUILD_SHARED_LIBS AND NOT APPLE AND NOT WIN32 AND NOT CYGWIN AND NOT MSYS
+   AND NOT DEFINED CMAKE_INSTALL_RPATH)
+    list(FIND CMAKE_C_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_FULL_LIBDIR}"
+         _jent_libdir_implicit)
+    if(_jent_libdir_implicit EQUAL -1)
+        file(RELATIVE_PATH _jent_bin_to_lib "${CMAKE_INSTALL_FULL_BINDIR}"
+             "${CMAKE_INSTALL_FULL_LIBDIR}")
+        set(CMAKE_INSTALL_RPATH "$ORIGIN/${_jent_bin_to_lib}")
+    endif()
 endif()
 
 # libjitterentropy-record, under tests/ so that nothing reaches it by

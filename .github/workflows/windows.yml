@@ -176,6 +176,15 @@ jobs:
             echo "::error::no jitterentropy.pc under $PKG_CONFIG_PATH"
             exit 1
           }
+          # The library itself is in Libs for both kinds of build, so a plain
+          # --libs names it even where only the archive is installed. What a
+          # plain --libs may lack for a static build is Libs.private, the
+          # archive's own dependencies, which is why the link below still uses
+          # --static; this is the check that --static alone would hide.
+          if ! pkg-config --libs jitterentropy | grep -qw -- -ljitterentropy; then
+            echo "::error::pkg-config --libs does not name -ljitterentropy"
+            exit 1
+          fi
           if [ "${{ matrix.shared }}" = ON ]; then
             libs=$(pkg-config --libs jitterentropy)
           else
