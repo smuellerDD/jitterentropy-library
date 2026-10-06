@@ -73,15 +73,15 @@ jobs:
             exit 1
           fi
 
-      # The unit and gcd tests through their own Makefiles - the fallback for
-      # a tree without CMake, which nothing else here builds - and, on Linux,
-      # the daemon's version check. Not tests/health: its Makefile compiles
-      # the health tests at -O2, which src/jitterentropy-health.c refuses.
+      # The unit, gcd and health tests through their own Makefiles - the
+      # fallback for a tree without CMake, which nothing else here builds -
+      # and, on Linux, the daemon's version check.
       - name: Run the tests
         run: |
           make -C tests/unit check
           make -C tests/gcd
           ./tests/gcd/gcd
+          make -C tests/health check
           if [ "${{ runner.os }}" = Linux ]; then
             make check-rngd $MAKEVARS
           fi

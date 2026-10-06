@@ -9,14 +9,14 @@
 #
 
 CC		?= gcc
-CFLAGS		+= -Wextra -Wall -pedantic -fPIC -O2 -std=c11
+# -O0 is mandatory, as for the CMake build of this program: it absorbs
+# src/jitterentropy-health.c, which refuses to compile at any other level (see
+# the #error there). No _FORTIFY_SOURCE, which needs optimization, and no
+# -flto, which has nothing to do for a single translation unit.
+CFLAGS		+= -Wextra -Wall -pedantic -fPIC -O0 -std=c11
 #Hardening
 CFLAGS		+= -DJENT_CONF_ENABLE_INTERNAL_TIMER -DJENT_STATIC_LIB
-CFLAGS		+= -D_FORTIFY_SOURCE=2 -fstack-protector-strong -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wconversion -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
-
-#Optimizations
-CFLAGS		+= -flto
-LDFLAGS		+= -flto
+CFLAGS		+= -fstack-protector-strong -fwrapv --param ssp-buffer-size=4 -fvisibility=hidden -fPIE -Wconversion -Wcast-align -Wmissing-field-initializers -Wshadow -Wswitch-enum
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
