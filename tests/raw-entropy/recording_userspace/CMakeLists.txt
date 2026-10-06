@@ -44,14 +44,16 @@ function(testprogram name)
         # Likewise its own timer, so its own pthread_create(). See
         # JITTER_THREAD_LIBRARIES in the top-level CMakeLists.txt.
         target_link_libraries(${name} ${JITTER_THREAD_LIBRARIES})
-        # And its own external crypto dependency. Empty in the default build.
-        if(EXTERNAL_CRYPTO)
-            target_include_directories(${name} PRIVATE ${LIBCRYPTO_INCLUDE_DIR})
-            target_link_libraries(${name} ${LIBCRYPTO_LIBRARY})
-        endif()
         # The stack protector needs none: add_link_options() covers it.
     else()
         target_link_libraries(${name} ${PROJECT_NAME})
+    endif()
+    # jitterentropy-memlock.h sets up the external crypto's secure heap
+    # itself, and the library links that dependency privately. Empty in the
+    # default build.
+    if(EXTERNAL_CRYPTO)
+        target_include_directories(${name} PRIVATE ${LIBCRYPTO_INCLUDE_DIR})
+        target_link_libraries(${name} ${LIBCRYPTO_LIBRARY})
     endif()
 
     if(MATH_LIBRARY)
