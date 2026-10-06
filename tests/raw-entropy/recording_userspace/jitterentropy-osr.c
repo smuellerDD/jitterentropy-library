@@ -17,6 +17,12 @@
  * DAMAGE.
  */
 
+/*
+ * The feature-test macros ahead of the first system header: under a strict
+ * -std=c11, glibc hides clock_gettime() and CLOCK_MONOTONIC otherwise.
+ */
+#include "arch/jitterentropy-arch-compat.h"
+
 #include "jitterentropy.h"
 #include "jitterentropy-internal.h"
 /*
@@ -113,8 +119,41 @@ static int parse_ulong(const char *str, unsigned long *val)
  * This functional inverse is the form that we use here.
  */
 double linearInverse(double y, double x1, double y1, double x2, double y2) {
-	assert(fabs(y1-y2)>=DBL_EPSILON);
+	/*
+	 * A guard rather than an assertion. Two timings of the same code can
+	 * come out equal - the measurement is of a machine under load, not of
+	 * a function - and the division then produced a NaN that propagated
+	 * into the oversampling rate the search went on to probe. Under
+	 * NDEBUG the assertion was not there at all.
+	 *
+	 * With no slope there is nothing to extrapolate along, so the second
+	 * point is the answer; the caller adjusts a guess that repeats one it
+	 * has already measured.
+	 */
+	if (fabs(y1 - y2) < DBL_EPSILON)
+		return x2;
 	return (y-y1)*((x2-x1)/(y2-y1)) + x1;
+}
+
+/*
+ * An oversampling rate the library will accept. Everything the search probes
+ * goes through jent_output_time(), which ends the program when the
+ * initialization refuses the rate - so an unclamped probe reports "selected
+ * OSR 24 too high" for an OSR the caller never chose, and any target time
+ * answering at 12 or above used to reach that.
+ *
+ * The argument is a double because that is what the interpolation produces,
+ * and a negative or NaN value has no conversion to unsigned int at all: one
+ * noisy measurement giving a negative slope used to land near UINT_MAX.
+ */
+static unsigned int jent_osr_clamp(double osr, unsigned int hi)
+{
+	/* NaN compares false here and lands on the floor. */
+	if (!(osr >= (double)JENT_MIN_OSR))
+		return JENT_MIN_OSR;
+	if (osr >= (double)hi)
+		return hi;
+	return (unsigned int)osr;
 }
 
 /*
@@ -390,7 +429,13 @@ int main(int argc, char * argv[])
 	 * using only this timing. We imagine that there is a fixed cost, so simple division overestimates
 	 * the time cost per osr, and so this produces a likely underestimate.
 	 */
-	firstLinearGuess = (unsigned int)(timeBound / (1U + minTime / minBound));
+	/*
+	 * One below JENT_MAX_OSR, so that the collision adjustment below has a
+	 * rate above it left to move to.
+	 */
+	firstLinearGuess = jent_osr_clamp((double)(timeBound /
+						   (1U + minTime / minBound)),
+					  JENT_MAX_OSR - 1);
 	fprintf(stderr, "The initial linear estimate is osr=%u\n", firstLinearGuess);
 	firstLinearTime = jent_output_time(rounds, firstLinearGuess, flags);
 
@@ -398,7 +443,8 @@ int main(int argc, char * argv[])
 	 * perform a full linear interpolation.
 	 * We are presently looking for an overestimate, so let's round up here.
 	 */
-	secondLinearGuess = (unsigned int)ceil(linearInverse((double)timeBound, (double)minBound, (double)minTime, (double)firstLinearGuess, (double)firstLinearTime));
+	secondLinearGuess = jent_osr_clamp(ceil(linearInverse((double)timeBound, (double)minBound, (double)minTime, (double)firstLinearGuess, (double)firstLinearTime)),
+					   JENT_MAX_OSR);
 	fprintf(stderr, "Linear interpolation suggests a cutoff of %u\n", secondLinearGuess);
 
 	/* These estimates were done in two related ways, but they could have produced the same value.
@@ -426,15 +472,38 @@ int main(int argc, char * argv[])
 		secondLinearTime = tmpTime;
 	}
 
-	/* Now secondLinearGuess > firstLinearGuess, and the time values should have a similar relationship. */
-	assert(secondLinearTime > firstLinearTime);
+	/*
+	 * Now secondLinearGuess > firstLinearGuess, and the time values should
+	 * have a similar relationship - but need not: nanoseconds per output
+	 * are not strictly monotonic in the oversampling rate on a machine
+	 * doing anything else at the same time. This used to be an assertion,
+	 * which turned an ordinary scheduling artefact into a SIGABRT (and
+	 * into nothing at all under NDEBUG). The branches below decide on the
+	 * timings against timeBound and do not need the ordering.
+	 */
+	if(secondLinearTime <= firstLinearTime)
+		fprintf(stderr, "Note: osr %u did not measure slower than osr %u; the machine is busy.\n",
+			secondLinearGuess, firstLinearGuess);
 
 	/* Use the linear interpolation guesses as bounds where possible. */
 	if(firstLinearTime > timeBound) {
 		/* Here, we have timeBound < firstLinearTime < secondLinearTime.
 		 * In this case, the linear interpolations didn't yield a minBound
 		 * so we'll proceed with the initial minBound.
+		 *
+		 * firstLinearGuess can be minBound itself: the estimate is
+		 * clamped to JENT_MIN_OSR, and the exchange above can move a
+		 * clamped secondLinearGuess here. The rate then measured once
+		 * within and once above the target time, and there is no lower
+		 * rate to search - this used to fail assert(maxBound > minBound).
+		 * The target is met at the minimum rate, report it.
 		 */
+		if(firstLinearGuess <= minBound) {
+			fprintf(stderr, "The target time is at the edge of JENT_MIN_OSR (%u); no lower rate exists.\n",
+				minBound);
+			printf("%u\n", minBound);
+			return 0;
+		}
 		maxBound = firstLinearGuess;
 		maxTime = firstLinearTime;
 	} else if(secondLinearTime > timeBound) {
@@ -451,24 +520,49 @@ int main(int argc, char * argv[])
 		minTime = secondLinearTime;
 	}
 
-	/* If we don't yet have a maxBound, find one. This will also adjust minBound up as the search goes.*/
+	/*
+	 * If we don't yet have a maxBound, find one. This will also adjust
+	 * minBound up as the search goes.
+	 *
+	 * Every probe is clamped to JENT_MAX_OSR. The doubling had no ceiling,
+	 * so once minBound reached 11 the next probe was 22 and
+	 * jent_output_time() ended the program complaining about an
+	 * oversampling rate the caller never asked for - which any target time
+	 * answering at 12 or above reached.
+	 */
 	if(maxBound == 0) {
-		maxBound = minBound*2;
+		maxBound = jent_osr_clamp((double)minBound * 2.0, JENT_MAX_OSR);
+
+		if(maxBound <= minBound) {
+			/* minBound is JENT_MAX_OSR: there is nothing above it. */
+			fprintf(stderr, "The target time is met at JENT_MAX_OSR (%u); no higher rate exists.\n",
+				(unsigned int)JENT_MAX_OSR);
+			printf("%u\n", minBound);
+			return 0;
+		}
+
 		fprintf(stderr, "Trying to find a maximum: %u", maxBound);
 		/* Locate the maxBound */
 		while((maxTime = jent_output_time(rounds, maxBound, flags)) <= timeBound) {
 			minBound = maxBound;
 			minTime = maxTime;
-			maxBound = maxBound * 2;
+
+			if(maxBound >= JENT_MAX_OSR) {
+				fprintf(stderr, ".\nThe target time is met at JENT_MAX_OSR (%u); no higher rate exists.\n",
+					(unsigned int)JENT_MAX_OSR);
+				printf("%u\n", minBound);
+				return 0;
+			}
+
+			maxBound = jent_osr_clamp((double)maxBound * 2.0,
+						  JENT_MAX_OSR);
 			fprintf(stderr, " %u", maxBound);
-			assert(maxBound > minBound);
 		}
 		fprintf(stderr, ".\nMaximum found: osr upper bound is < %u.\n", maxBound);
 	}
 
 	fprintf(stderr, "Desired osr upper bound is in [%u, %u)\n", minBound, maxBound);
 	assert(maxBound > minBound);
-	assert(maxTime > minTime);
 	assert(maxTime > timeBound);
 	assert(minTime <= timeBound);
 
@@ -488,8 +582,20 @@ int main(int argc, char * argv[])
 
 		fprintf(stderr, "Trying osr=%u. ", curosr);
 		curTime = jent_output_time(rounds, curosr, flags);
-		assert(curTime > minTime);
-		assert(curTime < maxTime);
+
+		/*
+		 * curTime is expected between minTime and maxTime, and used to
+		 * be asserted to be. It routinely is not: the measurement is of
+		 * a machine under load, so nanoseconds per output are not
+		 * strictly monotonic in the oversampling rate, and an ordinary
+		 * scheduling artefact aborted the tool - while under NDEBUG the
+		 * check was absent and left linearInverse() dividing by zero
+		 * instead. The search itself does not need the ordering: it
+		 * only asks which side of timeBound this rate falls on, and
+		 * that decision keeps the bracket valid either way.
+		 */
+		if(curTime <= minTime || curTime >= maxTime)
+			fprintf(stderr, "(timing out of order, the machine is busy) ");
 
 		if(curTime <= timeBound) {
 			fprintf(stderr, "Timing is less than or equal to the target time. ");
@@ -502,8 +608,11 @@ int main(int argc, char * argv[])
 		}
 
 		fprintf(stderr, "Desired osr upper bound is in [%u, %u)\n", minBound, maxBound);
+		/*
+		 * What the search maintains by construction, and nothing about
+		 * the ordering of the timings, which the machine decides.
+		 */
 		assert(maxBound > minBound);
-		assert(maxTime > minTime);
 		assert(maxTime > timeBound);
 		assert(minTime <= timeBound);
 	}
