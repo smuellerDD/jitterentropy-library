@@ -15,6 +15,7 @@
 #   $(src)/../src -> src/                (library internal headers)
 jitter_rng_c_args = -DLINUX_KERNEL					       \
 		    -I$(src) -I$(src)/.. -I$(src)/../src
+jent_recorddir = tests/raw-entropy/recording_library
 
 # The interface options are boolean: 'y' enables, anything else (unset, empty,
 # 'n') disables. This allows overriding the Kbuild.config defaults from the
@@ -125,7 +126,14 @@ CFLAGS_jitterentropy_hwrng.o = $(jitter_rng_c_args)
 
 ############################ Test Code Compilation #############################
 
+# The recording without a file of the recording library, which the test
+# interface records through. No -O0: it runs between the measurements, not in
+# them, as the test interface's own loop does.
 jitter_rng-$(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE)		       \
-	+= jitterentropy_testing.o
+	+= jitterentropy_testing.o					       \
+	   ../$(jent_recorddir)/jitterentropy-record-session.o
 
-CFLAGS_jitterentropy_testing.o = $(jitter_rng_c_args)
+CFLAGS_jitterentropy_testing.o = $(jitter_rng_c_args)			       \
+				 -I$(src)/../$(jent_recorddir)
+CFLAGS_../$(jent_recorddir)/jitterentropy-record-session.o =		       \
+	$(jitter_rng_c_args)

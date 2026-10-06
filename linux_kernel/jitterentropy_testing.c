@@ -3,13 +3,13 @@
  * Test interface for Jitter RNG.
  *
  * The debugfs file jent_raw_hires provides the raw noise data of the Jitter
- * RNG: each open allocates a dedicated Jitter RNG instance, each read drives
- * its measure_jitter operation and returns one u64 per measurement holding
- * the time delta as consumed by the health tests and the entropy pool (i.e.
- * including the division by the common timer GCD). Read sizes must be a
- * multiple of the u64 sample size; any other size is rejected with -EINVAL.
- * This mirrors the user space recording logic in
- * tests/raw-entropy/recording_userspace/jitterentropy-hashtime.c.
+ * RNG: each open allocates a dedicated recording, each read drives its
+ * measurements and returns one u64 per measurement holding the time delta as
+ * consumed by the health tests and the entropy pool (i.e. including the
+ * division by the common timer GCD). Read sizes must be a multiple of the
+ * u64 sample size; any other size is rejected with -EINVAL. The recording is
+ * the one of the user space recording tools, jitterentropy-record.h of
+ * tests/raw-entropy/recording_library.
  *
  * The file also implements the JENT_IOCSTATUS ioctl known from the character
  * device (see jitterentropy_uapi.h), returning the JSON status string of the
@@ -36,9 +36,8 @@
 #include <linux/string.h>
 #include <linux/uaccess.h>
 
-#include "jitterentropy-internal.h"
-#include "jitterentropy-noise.h"
 #include "jitterentropy.h"
+#include "jitterentropy-record.h"
 #include "jitterentropy_ioctl.h"
 #include "jitterentropy_testing.h"
 #include "jitterentropy_uapi.h"
@@ -152,18 +151,15 @@ err:
 /************** Raw High-Resolution Timer Entropy Data Handling **************/
 
 /*
- * Per-open state: each open() gets its own Jitter RNG instance, allocated
- * with the testing_osr/testing_flags values at open time. The measurement
- * routine is captured alongside so a testing_flags update between open() and
- * read() cannot make the recording routine disagree with the instance's
- * configuration.
+ * Per-open state: each open() gets its own recording, allocated with the
+ * testing_osr/testing_flags values at open time, which also fix the noise
+ * source it measures, so a testing_flags update between open() and read()
+ * cannot make the two disagree. @ec is its collector, for the status and
+ * field ioctls.
  */
 struct jent_testing_ctx {
+	struct jent_record *rec;
 	struct rand_data *ec;
-	unsigned int (*measure_jitter)(struct rand_data *ec,
-				       uint64_t loop_cnt,
-				       uint64_t *ret_current_delta,
-				       int health);
 	/*
 	 * Loop count applied to each raw noise measurement, settable via
 	 * JENT_IOCLOOPCNT: 0 (the default) selects the loop count the
@@ -179,6 +175,8 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 	struct jent_testing_ctx *ctx;
 	unsigned int osr;
 	unsigned int flags;
+	unsigned int source;
+	int ret;
 
 	/*
 	 * The file only exists if the kernel was not locked down at module
@@ -209,37 +207,55 @@ static int jent_testing_open(struct inode *inode, struct file *file)
 	flags = testing_flags;
 	osr = testing_osr;
 
-	if (flags & (JENT_TEST_HASHLOOP))
-		ctx->measure_jitter = jent_measure_jitter_ntg1_sha3;
-	else if (flags & (JENT_TEST_MEMACCLOOP))
-		ctx->measure_jitter = jent_measure_jitter_ntg1_memaccess;
+	/*
+	 * The recording selectors are the test interface's own and not
+	 * library flags; the hash loop takes precedence when both are set.
+	 */
+	if (flags & JENT_TEST_HASHLOOP)
+		source = JENT_RECORD_HASHLOOP;
+	else if (flags & JENT_TEST_MEMACCLOOP)
+		source = JENT_RECORD_MEMACCESS;
 	else
-		ctx->measure_jitter = jent_measure_jitter;
+		source = JENT_RECORD_COMMON;
+	flags &= ~(unsigned int)(JENT_TEST_HASHLOOP | JENT_TEST_MEMACCLOOP);
 
 	/*
-	 * Allocate the collector without the startup entropy collection and
-	 * its health-test reset ladder (mirroring the userspace recording
-	 * tools): the startup could silently escalate OSR, memory size and
-	 * hash loop count, but the recorded raw data must correspond exactly
-	 * to the requested testing_osr/testing_flags.
+	 * The collector comes without the startup entropy collection and its
+	 * health-test reset ladder (mirroring the userspace recording tools):
+	 * the startup could silently escalate OSR, memory size and hash loop
+	 * count, but the recorded raw data must correspond exactly to the
+	 * requested testing_osr/testing_flags. It runs the full SP800-90B
+	 * health test handling.
 	 */
-	ctx->ec = jent_entropy_collector_alloc_raw(osr, flags);
-	if (!ctx->ec) {
+	ret = jent_record_alloc(&ctx->rec, osr, flags, source);
+	if (ret != JENT_RECORD_OK) {
 		mutex_unlock(&jent_testing_read_lock);
-		/*
-		 * The allocation also fails on invalid parameters or a failed
-		 * power-up self test, not only on memory shortage.
-		 */
-		pr_warn("jitterentropy: raw entropy collector allocation failed (out of memory, invalid testing_osr/testing_flags or self-test failure)\n");
 		kvfree(ctx);
-		return -ENOMEM;
+		switch (ret) {
+		case JENT_RECORD_EINVAL:
+			/*
+			 * The memory access loop with no memory region to walk
+			 * would record zeroes that read() reports as a full
+			 * capture, and that an SP800-90B assessment would take
+			 * for one (getrawentropy --memaccess
+			 * --disable-memory-access), or an OSR above
+			 * JENT_MAX_OSR.
+			 */
+			pr_warn("jitterentropy: testing_osr/testing_flags cannot be recorded\n");
+			return -EINVAL;
+		case JENT_RECORD_ESELFTEST:
+			pr_warn("jitterentropy: self test of the conditioning failed\n");
+			return -EIO;
+		default:
+			/*
+			 * The allocation also fails on parameters the library
+			 * refuses, not only on memory shortage.
+			 */
+			pr_warn("jitterentropy: raw entropy collector allocation failed (out of memory or invalid testing_flags)\n");
+			return -ENOMEM;
+		}
 	}
-
-	/*
-	 * Match the userspace recording tools: enable the full SP800-90B
-	 * health test handling while recording.
-	 */
-	ctx->ec->is_fips_enabled = 1;
+	ctx->ec = jent_record_collector(ctx->rec);
 
 	jent_testing_log(ctx->ec);
 	mutex_unlock(&jent_testing_read_lock);
@@ -256,7 +272,7 @@ static int jent_testing_release(struct inode *inode, struct file *file)
 	if (!ctx)
 		return 0;
 
-	jent_entropy_collector_free(ctx->ec);
+	jent_record_free(ctx->rec);
 	kvfree(ctx);
 	file->private_data = NULL;
 
@@ -267,23 +283,14 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 					 size_t nbytes, loff_t *ppos)
 {
 	struct jent_testing_ctx *ctx = file->private_data;
-	struct rand_data *ec;
 	u64 *tmp = NULL;
-	u64 loop_cnt;
+	unsigned int loop_cnt;
 	ssize_t ret = 0;
 	int large_request = (nbytes > 256);
-
-	unsigned int (*measure_jitter)(struct rand_data *ec,
-				       uint64_t loop_cnt,
-				       uint64_t *ret_current_delta,
-				       int health);
 
 	/* Defense in depth, matching the ioctl handler: open() sets this. */
 	if (!ctx)
 		return -EFAULT;
-
-	ec = ctx->ec;
-	measure_jitter = ctx->measure_jitter;
 
 	if (!nbytes)
 		return 0;
@@ -310,7 +317,8 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 	 * Snapshot the JENT_IOCLOOPCNT setting under the lock: the whole
 	 * extract session records with one consistent loop count.
 	 */
-	loop_cnt = ctx->loop_cnt;
+	/* At most UINT_MAX, see jent_testing_ioctl_loopcnt(). */
+	loop_cnt = (unsigned int)ctx->loop_cnt;
 
 	/*
 	 * The intention of this interface is for collecting at least
@@ -344,22 +352,18 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 			schedule();
 
 		/*
-		 * Prime the common measurement (initialize ec->prev_time) so
-		 * the first recorded delta is not computed from a stale time
-		 * stamp (unprimed instance or the gap spent in copy_to_user()
-		 * between two rounds). The NTG.1 hash-loop and memory-access
-		 * variants prime themselves and need no separate priming.
-		 * The priming uses the configured loop count (loop_cnt 0),
-		 * mirroring the userspace recording tools, and stays out of
-		 * the health tests, as its delta is not one of the recording.
+		 * Prime the measurement so the first recorded delta is not
+		 * computed from a stale time stamp (unprimed instance or the
+		 * gap spent in copy_to_user() between two rounds). The priming
+		 * runs at the session's loop count, so the hash and memory
+		 * access loops the first recorded delta spans run at that
+		 * count like every other's, and stays out of the health tests,
+		 * as its delta is not one of the recording.
 		 */
-		if (measure_jitter == jent_measure_jitter)
-			jent_measure_jitter(ec, 0, NULL, 0);
+		jent_record_prime(ctx->rec, loop_cnt);
 
-		for (i = 0; i < samples; i++) {
-			/* Disregard stuck indicator */
-			measure_jitter(ec, loop_cnt, &tmp[i], 1);
-		}
+		for (i = 0; i < samples; i++)
+			tmp[i] = jent_record_sample(ctx->rec, loop_cnt);
 
 		not_copied = copy_to_user(buf, tmp, len);
 
