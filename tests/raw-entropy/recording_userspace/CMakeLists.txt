@@ -76,6 +76,45 @@ endfunction()
 # jitterentropy-rng is also what the rng-* tests run, so it is built whenever
 # either option is on; the other two are tools alone.
 testprogram(jitterentropy-rng)
+
+# The flags word encoded and decoded from the header's JENT_* macros alone:
+# nothing linked, and deterministic, so its tests gate.
+add_executable(jitterentropy-flags jitterentropy-flags.c)
+target_include_directories(jitterentropy-flags PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+target_compile_options(jitterentropy-flags PRIVATE ${JITTER_C_FLAGS})
+if(ENABLE_TOOLS)
+    install(TARGETS jitterentropy-flags)
+endif()
+if(BUILD_TESTING)
+    # JENT_NTG1 is 64, JENT_MAX_MEMSIZE_1MB 11 << 27, JENT_HASHLOOP_16 5 << 23
+    add_test(NAME flags-encode
+             COMMAND jitterentropy-flags ntg1 JENT_MAX_MEMSIZE_1MB
+                     --hloopcnt 4)
+    set_tests_properties(flags-encode PROPERTIES
+        PASS_REGULAR_EXPRESSION "^1518338112\n$")
+    add_test(NAME flags-decode
+             COMMAND jitterentropy-flags --decode 0x5a800040)
+    set_tests_properties(flags-decode PROPERTIES
+        PASS_REGULAR_EXPRESSION "JENT_NTG1 +0x00000040  set.*JENT_HASHLOOP_16.*JENT_MAX_MEMSIZE_1MB")
+    # The prefix is case-insensitive like the rest of the name
+    add_test(NAME flags-encode-mixed-case
+             COMMAND jitterentropy-flags JeNt_NtG1)
+    set_tests_properties(flags-encode-mixed-case PROPERTIES
+        PASS_REGULAR_EXPRESSION "^64\n$")
+    add_test(NAME flags-decode-not-first
+             COMMAND jitterentropy-flags ntg1 --decode 64)
+    set_tests_properties(flags-decode-not-first PROPERTIES WILL_FAIL TRUE)
+    # What the library refuses fails
+    add_test(NAME flags-decode-reserved
+             COMMAND jitterentropy-flags --decode 0x200)
+    add_test(NAME flags-encode-conflict
+             COMMAND jitterentropy-flags --ntg1 --force-internal-timer)
+    add_test(NAME flags-encode-field-twice
+             COMMAND jitterentropy-flags JENT_HASHLOOP_1 JENT_HASHLOOP_2)
+    set_tests_properties(flags-decode-reserved flags-encode-conflict
+        flags-encode-field-twice PROPERTIES WILL_FAIL TRUE)
+endif()
 if(ENABLE_TOOLS)
     testprogram(jitterentropy-hashtime AMALGAMATED)
     testprogram(jitterentropy-osr)
