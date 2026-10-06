@@ -162,7 +162,8 @@ struct jent_testing_ctx {
 	struct rand_data *ec;
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 				       uint64_t loop_cnt,
-				       uint64_t *ret_current_delta);
+				       uint64_t *ret_current_delta,
+				       int health);
 	/*
 	 * Loop count applied to each raw noise measurement, settable via
 	 * JENT_IOCLOOPCNT: 0 (the default) selects the loop count the
@@ -274,7 +275,8 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 				       uint64_t loop_cnt,
-				       uint64_t *ret_current_delta);
+				       uint64_t *ret_current_delta,
+				       int health);
 
 	/* Defense in depth, matching the ioctl handler: open() sets this. */
 	if (!ctx)
@@ -348,14 +350,15 @@ static ssize_t jent_testing_extract_user(struct file *file, char __user *buf,
 		 * between two rounds). The NTG.1 hash-loop and memory-access
 		 * variants prime themselves and need no separate priming.
 		 * The priming uses the configured loop count (loop_cnt 0),
-		 * mirroring the userspace recording tools.
+		 * mirroring the userspace recording tools, and stays out of
+		 * the health tests, as its delta is not one of the recording.
 		 */
 		if (measure_jitter == jent_measure_jitter)
-			jent_measure_jitter(ec, 0, NULL);
+			jent_measure_jitter(ec, 0, NULL, 0);
 
 		for (i = 0; i < samples; i++) {
 			/* Disregard stuck indicator */
-			measure_jitter(ec, loop_cnt, &tmp[i]);
+			measure_jitter(ec, loop_cnt, &tmp[i], 1);
 		}
 
 		not_copied = copy_to_user(buf, tmp, len);

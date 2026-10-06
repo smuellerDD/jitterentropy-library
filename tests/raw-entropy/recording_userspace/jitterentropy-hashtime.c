@@ -221,7 +221,8 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 #endif
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 			               uint64_t loop_cnt,
-				       uint64_t *ret_current_delta);
+				       uint64_t *ret_current_delta,
+				       int health);
 
 	FILE *out = NULL;
 	int ret = 0;
@@ -343,10 +344,10 @@ static int jent_one_test(const char *pathname, unsigned long rounds,
 
 	/* Prime the test */
 	if (jent_es == jent_common)
-		jent_measure_jitter(ec, 0, NULL);
+		jent_measure_jitter(ec, 0, NULL, 0);
 	for (size = 0; size < rounds; size++) {
 		/* Disregard stuck indicator */
-		measure_jitter(ec, loopcnt, &duration[size]);
+		measure_jitter(ec, loopcnt, &duration[size], 1);
 	}
 
 	/*
