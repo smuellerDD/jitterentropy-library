@@ -599,8 +599,9 @@ endif()
 
 # Two independent options: ENABLE_TOOLS decides what is installed for a user to
 # run, BUILD_TESTING what CTest is given. They overlap in gcd,
-# jitterentropy-health and jitterentropy-rng, which the suite drives and a user
-# also runs: those are built for either and installed only for the first.
+# jitterentropy-health, jitterentropy-rng and jitterentropy-flags, which the
+# suite drives and a user also runs: those are built for either and installed
+# only for the first.
 #
 # BUILD_TESTING is the conventional name packaging already passes, and
 # honouring it is safe only because the tools have an option of their own.
