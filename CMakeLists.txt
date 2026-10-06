@@ -29,6 +29,7 @@ option(ENABLE_THREAD_SANITIZER "Compile with the thread sanitizer, which is what
 option(ENABLE_COVERAGE "Instrument the build for code coverage and add the 'coverage' target (only for development)" OFF)
 option(ENABLE_FUZZING "Instrument the build for libFuzzer and build the fuzzing harness under tests/fuzz (Clang only, for development)" OFF)
 option(MOCK_TIMER "Allow the time source to be replaced by a caller-supplied callback (only for testing - a build with this on produces no entropy of its own)" OFF)
+option(ENABLE_RECORDING "Also build and install libjitterentropy-record: the library with the raw noise recording API of jitterentropy-record.h added, for recording where no tool can run; not for production" OFF)
 option(ENABLE_TOOLS "Build and install the recording and validation tools (jitterentropy-rng, getrawentropy, extractlsb, ...), which live under tests/" ON)
 option(ENABLE_RNGD "Also build and install jitterentropy-rngd, the daemon feeding the Jitter RNG into the Linux /dev/random, and its systemd unit (Linux only)" OFF)
 option(BUILD_TESTING "Build the test programs and register the CTest suite" ON)
@@ -388,9 +389,9 @@ endfunction()
 
 # Nothing at build time would notice the two drifting: a declaration missing
 # from the script just goes missing from the library. A function for the scope;
-# block() is CMake 3.25 and this project asks for 3.22. @marker is the line
-# that precedes each exported declaration of the header, and an empty
-# @linktest skips the check of the link test.
+# block() is CMake 3.25 and this project asks for 3.22. Also called for
+# libjitterentropy-record, whose header marks its API with JENT_RECORD_API and
+# which has no link test: @linktest empty skips that check.
 function(jent_check_version_script header script marker linktest)
     get_filename_component(header_name "${header}" NAME)
     get_filename_component(script_name "${script}" NAME)
@@ -611,7 +612,14 @@ if(BUILD_TESTING)
     enable_testing()
 endif()
 
-# The three the suite drives, plus the rest of their directories.
+# libjitterentropy-record, under tests/ so that nothing reaches it by
+# accident; see tests/raw-entropy/recording_library/CMakeLists.txt. After the
+# library target is complete, as it is copied from it, and after
+# enable_testing(), for its test.
+if(ENABLE_RECORDING)
+    add_subdirectory(tests/raw-entropy/recording_library)
+endif()
+
 # jitterentropy-rngd and its systemd unit; see rngd/CMakeLists.txt.
 if(ENABLE_RNGD)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -621,6 +629,7 @@ if(ENABLE_RNGD)
     add_subdirectory(rngd)
 endif()
 
+# The three the suite drives, plus the rest of their directories.
 if(ENABLE_TOOLS OR BUILD_TESTING)
     add_subdirectory(tests/gcd)
     add_subdirectory(tests/health)

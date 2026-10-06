@@ -160,6 +160,40 @@ CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
 LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
+# libjitterentropy-record, off by default as the CMake option ENABLE_RECORDING
+# is: the raw noise recording of RECORD_DIR, for recording where no tool can
+# run, under tests/ so that nothing reaches it by accident. It carries a copy
+# of the library of its own and exports nothing but the recording, so that it
+# links beside libjitterentropy: jitterentropy-record-lib.c compiles the copy
+# and the recording as one translation unit in which every function of the
+# copy is static, and the one object it yields is both the archive and the
+# shared library. On the ELF linkers record.lds limits the shared library's
+# exports to the API of jitterentropy-record.h, as version.lds does the
+# library's.
+ENABLE_RECORDING ?= 0
+RECORD_NAME := $(NAME)-record
+RECORD_DIR := tests/raw-entropy/recording_library
+RECORD_OBJS := jitterentropy-record-lib.o
+ifeq ($(UNAME_S),Darwin)
+RECORD_SONAME := lib$(RECORD_NAME).$(LIBMAJOR).$(SOEXT)
+RECORD_SOFILE := lib$(RECORD_NAME).$(LIBVERSION).$(SOEXT)
+RECORD_SONAME_FLAGS = -install_name $(PREFIX)/$(LIBDIR)/$(RECORD_SONAME) \
+	-current_version $(LIBVERSION) -compatibility_version $(LIBMAJOR)
+else
+RECORD_SONAME := lib$(RECORD_NAME).$(SOEXT).$(LIBMAJOR)
+RECORD_SOFILE := lib$(RECORD_NAME).$(SOEXT).$(LIBVERSION)
+RECORD_SONAME_FLAGS = -Wl,-soname,$(RECORD_SONAME)
+endif
+ifneq (,$(VERSION_SCRIPT))
+RECORD_VERSION_SCRIPT := $(RECORD_DIR)/record.lds
+RECORD_SO_LDFLAGS := -Wl,--version-script=$(RECORD_VERSION_SCRIPT)
+endif
+RECORD_SOLINK := lib$(RECORD_NAME).$(SOEXT)
+ifeq ($(ENABLE_RECORDING),1)
+RECORD_ALL := $(RECORD_NAME) $(RECORD_NAME)-static
+RECORD_INSTALL := install-record
+endif
+
 # jitterentropy-rngd, off by default as the CMake option ENABLE_RNGD is: the
 # daemon feeding the Jitter RNG into the Linux /dev/random, with its systemd
 # unit. Linked against the archive, so that the daemon runs from wherever it
@@ -181,9 +215,10 @@ RNGD_INSTALL := install-rngd
 endif
 
 .PHONY: all scan install clean distclean check $(NAME) $(NAME)-static \
+	$(RECORD_NAME) $(RECORD_NAME)-static install-record install-record-static \
 	install-rngd check-rngd
 
-all: $(NAME) $(NAME)-static $(RNGD_ALL)
+all: $(NAME) $(NAME)-static $(RECORD_ALL) $(RNGD_ALL)
 
 lib$(NAME).a: $(OBJS)
 	$(AR) rcs lib$(NAME).a $(OBJS)
@@ -194,6 +229,19 @@ $(SOFILE): $(OBJS) $(VERSION_SCRIPT)
 
 $(NAME)-static: lib$(NAME).a
 $(NAME): $(SOFILE)
+
+lib$(RECORD_NAME).a: $(RECORD_OBJS)
+	$(AR) rcs lib$(RECORD_NAME).a $(RECORD_OBJS)
+
+$(RECORD_SOFILE): $(RECORD_OBJS) $(RECORD_VERSION_SCRIPT)
+	$(CC) -shared $(RECORD_SONAME_FLAGS) -o $(RECORD_SOFILE) \
+		$(RECORD_OBJS) $(LDFLAGS) $(RECORD_SO_LDFLAGS)
+
+$(RECORD_NAME)-static: lib$(RECORD_NAME).a
+$(RECORD_NAME): $(RECORD_SOFILE)
+
+%.o: $(RECORD_DIR)/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(RNGD_NAME): $(RNGD_OBJS) lib$(NAME).a
 	$(CC) $(CFLAGS) -o $@ $(RNGD_OBJS) lib$(NAME).a $(LDFLAGS)
@@ -214,12 +262,22 @@ scan: $(analyze_plists)
 cppcheck:
 	cppcheck --force -q --enable=performance --enable=warning --enable=portability $(shell find * -name \*.h -o -name \*.c)
 
-install: install-man install-shared install-includes $(RNGD_INSTALL)
+install: install-man install-shared install-includes $(RECORD_INSTALL) \
+	$(RNGD_INSTALL)
+
+# The pages install-man installs: the library's, and the recording library's
+# where it is built.
+MANPAGES := doc/$(NAME).3
+ifeq ($(ENABLE_RECORDING),1)
+MANPAGES += doc/$(RECORD_NAME).3
+endif
 
 install-man:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
-	install -m 644 doc/$(NAME).3 $(DESTDIR)$(PREFIX)/share/man/man3/
-	gzip -n -f -9 $(DESTDIR)$(PREFIX)/share/man/man3/$(NAME).3
+	for page in $(MANPAGES); do \
+		install -m 644 $$page $(DESTDIR)$(PREFIX)/share/man/man3/ && \
+		gzip -n -f -9 $(DESTDIR)$(PREFIX)/share/man/man3/$${page##*/} || exit 1; \
+	done
 
 install-shared:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
@@ -238,9 +296,25 @@ install-includes:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(INCDIR)
 	install -m 0644 jitterentropy.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 
-install-static:
+install-static: $(if $(RECORD_INSTALL),install-record-static)
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
 	install -m 0755 lib$(NAME).a $(DESTDIR)$(PREFIX)/$(LIBDIR)/
+
+# libjitterentropy-record and its header, with ENABLE_RECORDING=1, as
+# CMakeLists.txt installs them.
+install-record: $(RECORD_SOFILE)
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR) $(DESTDIR)$(PREFIX)/$(INCDIR)
+	$(INSTALL_STRIP) -m 0755 $(RECORD_SOFILE) $(DESTDIR)$(PREFIX)/$(LIBDIR)/
+	$(STRIP_SHARED) $(DESTDIR)$(PREFIX)/$(LIBDIR)/$(RECORD_SOFILE)
+	$(RM) $(DESTDIR)$(PREFIX)/$(LIBDIR)/$(RECORD_SONAME)
+	ln -sf $(RECORD_SOFILE) $(DESTDIR)$(PREFIX)/$(LIBDIR)/$(RECORD_SONAME)
+	ln -sf $(RECORD_SONAME) $(DESTDIR)$(PREFIX)/$(LIBDIR)/$(RECORD_SOLINK)
+	install -m 0644 $(RECORD_DIR)/jitterentropy-record.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
+
+install-record-static: lib$(RECORD_NAME).a
+	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR) $(DESTDIR)$(PREFIX)/$(INCDIR)
+	install -m 0644 lib$(RECORD_NAME).a $(DESTDIR)$(PREFIX)/$(LIBDIR)/
+	install -m 0644 $(RECORD_DIR)/jitterentropy-record.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 
 # jitterentropy-rngd and its unit, with ENABLE_RNGD=1. The unit names the
 # daemon where this install puts it.
@@ -261,6 +335,8 @@ clean:
 	@- $(RM) $(addprefix $(SRCDIR)/,$(C_OBJS)) $(addprefix $(ARCHDIR)/,$(C_OBJS))
 	@- $(RM) lib$(NAME).so* lib$(NAME).*dylib
 	@- $(RM) lib$(NAME).a
+	@- $(RM) $(RECORD_OBJS)
+	@- $(RM) lib$(RECORD_NAME).so* lib$(RECORD_NAME).*dylib lib$(RECORD_NAME).a
 	@- $(RM) $(RNGD_NAME) $(RNGD_OBJS)
 	@- $(RM) $(analyze_plists)
 
