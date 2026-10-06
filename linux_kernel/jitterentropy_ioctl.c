@@ -55,8 +55,9 @@ int jent_ioctl_field_get(const struct rand_data *ec, unsigned int cmd,
 		/* The UAPI header states the length itself; it must agree. */
 		BUILD_BUG_ON(JENT_UUID_IOCTL_LEN != JENT_UUID_STRLEN);
 
-		if (jent_uuid(ec, (char *)out->value.uuid.uuid,
-			      sizeof(out->value.uuid.uuid)))
+		if (jent_entropy_collector_uuid(ec,
+						(char *)out->value.uuid.uuid,
+						sizeof(out->value.uuid.uuid)))
 			return -EIO;
 
 		/*

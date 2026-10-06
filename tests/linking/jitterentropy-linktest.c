@@ -159,13 +159,34 @@ int main(void)
 		FAIL("jent_status");
 	printf("jent_status:\n%s\n", status);
 
-	if (jent_uuid(ec, uuid, sizeof(uuid)))
-		FAIL("jent_uuid");
+	if (jent_entropy_collector_uuid(ec, uuid, sizeof(uuid)))
+		FAIL("jent_entropy_collector_uuid");
 	if (strlen(uuid) != (size_t)(JENT_UUID_STRLEN - 1))
-		FAIL("jent_uuid returned %u characters, expected %u",
+		FAIL("jent_entropy_collector_uuid returned %u characters, "
+		     "expected %u",
 		     (unsigned int)strlen(uuid),
 		     (unsigned int)(JENT_UUID_STRLEN - 1));
-	printf("jent_uuid: %s\n", uuid);
+	printf("jent_entropy_collector_uuid: %s\n", uuid);
+
+	if (jent_entropy_collector_osr(ec) < JENT_MIN_OSR)
+		FAIL("jent_entropy_collector_osr: %u",
+		     jent_entropy_collector_osr(ec));
+	printf("jent_entropy_collector_osr: %u\n",
+	       jent_entropy_collector_osr(ec));
+	printf("jent_entropy_collector_flags: 0x%x\n",
+	       jent_entropy_collector_flags(ec));
+	printf("jent_entropy_collector_memsize: %lu\n",
+	       (unsigned long)jent_entropy_collector_memsize(ec));
+	printf("jent_entropy_collector_health_failure: 0x%x\n",
+	       jent_entropy_collector_health_failure(ec));
+	printf("jent_entropy_collector_reinitializations: %u\n",
+	       jent_entropy_collector_reinitializations(ec));
+	printf("jent_entropy_collector_read_invocations: %llu\n",
+	       (unsigned long long)jent_entropy_collector_read_invocations(ec));
+	printf("jent_entropy_collector_bytes_output: %llu\n",
+	       (unsigned long long)jent_entropy_collector_bytes_output(ec));
+	printf("jent_entropy_collector_hashloops: %u\n",
+	       jent_entropy_collector_hashloops(ec));
 
 	jent_entropy_collector_free(ec);
 

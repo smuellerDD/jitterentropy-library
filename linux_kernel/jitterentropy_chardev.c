@@ -119,7 +119,8 @@ static void jent_chardev_instance_proc_create(struct jent_chardev_ctx *ctx)
 	if (!jent_chardev_proc_dir)
 		return;
 
-	if (jent_uuid(ctx->entropy_collector, name, sizeof(name)))
+	if (jent_entropy_collector_uuid(ctx->entropy_collector, name,
+					sizeof(name)))
 		return;
 
 	ctx->proc = proc_create_single_data(name, 0444, jent_chardev_proc_dir,

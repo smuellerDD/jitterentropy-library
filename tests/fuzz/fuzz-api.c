@@ -449,13 +449,13 @@ static void fz_op_uuid(struct fz_state *s, struct rand_data **slots)
 	char *buf = fz_buf();
 	int ret;
 
-	assert(jent_uuid(slots[slot], NULL, buflen) == -1);
-	assert(jent_uuid(NULL, buf, buflen) == -1);
-	assert(jent_uuid(slots[slot], buf, 0) == -1);
+	assert(jent_entropy_collector_uuid(slots[slot], NULL, buflen) == -1);
+	assert(jent_entropy_collector_uuid(NULL, buf, buflen) == -1);
+	assert(jent_entropy_collector_uuid(slots[slot], buf, 0) == -1);
 	fz_check_buf(0);
 
 	buf = fz_buf();
-	ret = jent_uuid(slots[slot], buf, buflen);
+	ret = jent_entropy_collector_uuid(slots[slot], buf, buflen);
 	if (ret) {
 		/* A refused call writes nothing at all. */
 		fz_check_buf(0);

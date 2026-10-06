@@ -356,7 +356,7 @@ static void ut_work_lifecycle(struct ut_worker *w)
 		 */
 		if (jent_status(ec, status, sizeof(status)))
 			w->status_err = 1;
-		if (jent_uuid(ec, w->uuid, sizeof(w->uuid)))
+		if (jent_entropy_collector_uuid(ec, w->uuid, sizeof(w->uuid)))
 			w->status_err = 1;
 
 		jent_entropy_collector_free(ec);
@@ -518,7 +518,7 @@ static void ut_notime_read(struct ut_worker *w, struct rand_data *ec)
 	w->osr_seen = ec->osr;
 	w->divisor = ec->jent_common_timer_gcd;
 
-	if (jent_uuid(ec, w->uuid, sizeof(w->uuid)))
+	if (jent_entropy_collector_uuid(ec, w->uuid, sizeof(w->uuid)))
 		w->status_err = 1;
 
 	rc = jent_read_entropy(ec, (char *)buf, sizeof(buf));

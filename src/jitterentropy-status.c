@@ -230,7 +230,8 @@ out:
 #undef jent_add_to_status
 }
 
-int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen)
+int jent_entropy_collector_uuid(const struct rand_data *ec, char *buf,
+				size_t buflen)
 {
 	size_t len;
 
@@ -243,4 +244,76 @@ int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen)
 
 	memcpy(buf, ec->uuid, len);
 	return 0;
+}
+
+/*
+ * The value of every accessor for a NULL collector, with errno set to EINVAL
+ * where there is one: not in a kernel, and not without a C library, where
+ * errno would be a symbol nothing defines.
+ */
+static unsigned int jent_entropy_collector_null(void)
+{
+#if !defined(LINUX_KERNEL) && !(defined(_KERNEL) && defined(__FreeBSD__)) && \
+    !defined(JENT_BAREMETAL)
+	errno = EINVAL;
+#endif
+	return 0;
+}
+
+unsigned int jent_entropy_collector_osr(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->osr;
+}
+
+unsigned int jent_entropy_collector_flags(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->flags;
+}
+
+/* No memory access region, no size. */
+size_t jent_entropy_collector_memsize(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->memmask ? (size_t)ec->memmask + 1 : 0;
+}
+
+unsigned int jent_entropy_collector_health_failure(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->health_failure;
+}
+
+unsigned int
+jent_entropy_collector_reinitializations(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->reinit_count;
+}
+
+uint64_t jent_entropy_collector_read_invocations(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->read_invocations;
+}
+
+uint64_t jent_entropy_collector_bytes_output(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->bytes_output;
+}
+
+unsigned int jent_entropy_collector_hashloops(const struct rand_data *ec)
+{
+	if (!ec)
+		return jent_entropy_collector_null();
+	return ec->hashloopcnt;
 }
