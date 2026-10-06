@@ -37,12 +37,14 @@ jobs:
       # the private copy's internal linkage beside libjitterentropy, with gcc
       # and clang, shared and static. ENABLE_RNGD: jitterentropy-rngd, which
       # no other CMake job builds, and its rngd-version test.
+      # ENABLE_KERNEL_LIB: libjitterentropy-kernel and jitter_rng.
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
             -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
             -DENABLE_RECORDING=ON \
+            -DENABLE_KERNEL_LIB=ON \
             -DENABLE_RNGD=ON
 
       - name: Build
