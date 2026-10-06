@@ -174,7 +174,8 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen)
 	jent_add_to_status( "\t\"configuration\": {\n");
 
 	jent_add_to_status( "\t\t\"osr\": %u,\n", ec->osr);
-	jent_add_to_status( "\t\t\"memoryBlockSizeBytes\": %u,\n", jent_memsize(ec->flags));
+	jent_add_to_status( "\t\t\"memoryBlockSizeBytes\": %u,\n",
+			   ec->memmask ? (unsigned int)(ec->memmask + 1) : 0);
 
 	jent_add_to_status("\t\t\"hashLoopCount\": {\n");
 	jent_add_to_status("\t\t\t\"runtime\": %u,\n", jent_hashloop_cnt(ec->flags));
