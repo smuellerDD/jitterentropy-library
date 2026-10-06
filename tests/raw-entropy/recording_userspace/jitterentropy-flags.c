@@ -169,8 +169,10 @@ static int jent_add(unsigned int *flags, unsigned int value, const char *arg)
 }
 
 /*
- * Report what jent_entropy_init_ex() and jent_entropy_collector_alloc()
- * refuse. Returns the number of reasons.
+ * Report the flags no configuration should use: the combinations
+ * jent_entropy_init_ex() and jent_entropy_collector_alloc() refuse, and a
+ * reserved bit or a field above its maximum, which the library ignores or
+ * clamps. Returns the number of reasons.
  */
 static int jent_refusals(unsigned int flags)
 {
