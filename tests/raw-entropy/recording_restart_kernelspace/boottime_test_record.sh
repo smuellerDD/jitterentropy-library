@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Copyright (C) 2023 - 2026, Stephan Mueller <smueller@chronox.de>
 #
@@ -60,7 +60,10 @@ then
 	echo "Test tool $KCAPIRNG not found"
 	testruns=$TESTS
 else
-	( (  /usr/local/sbin/getrawentropy -f /sys/kernel/debug/jitterentropy_testing/jent_raw_hires -s 1001 > $OUTFILE.$testruns.data ) & )
+	# The vanilla interface delivers the raw time stamps: --timestamps
+	# turns 1001 of them into the 1000 time deltas of the restart. The
+	# out-of-tree module delivers deltas, for which it is dropped.
+	( (  /usr/local/sbin/getrawentropy -f /sys/kernel/debug/jitterentropy_testing/jent_raw_hires -s 1000 --timestamps > $OUTFILE.$testruns.data ) & )
 	$KCAPIRNG -n "jitterentropy_rng" -b 2000
 fi
 
