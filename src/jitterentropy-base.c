@@ -1152,8 +1152,11 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 		goto out;
 	}
 
-	/* To initialize the prior time. */
-	jent_measure_jitter(ec, 0, NULL);
+	/*
+	 * To initialize the prior time. Its delta is measured from a time stamp
+	 * of no measurement and stays out of the health tests.
+	 */
+	jent_measure_jitter(ec, 0, NULL, 0);
 
 	/* We could perform statistical tests here, but the problem is
 	 * that we only have a few loop counts to do testing. These
@@ -1185,7 +1188,7 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 		start_time = ec->prev_time;
 
 		/* Invoke core entropy collection logic */
-		stuck = jent_measure_jitter(ec, 0, &delta);
+		stuck = jent_measure_jitter(ec, 0, &delta, 1);
 		end_time = ec->prev_time;
 
 		/* test whether timer works */

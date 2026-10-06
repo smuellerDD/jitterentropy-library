@@ -357,12 +357,14 @@ static void jent_memaccess_deterministic(struct rand_data *ec,
  * @param[in] ec Reference to entropy collector
  * @param[in] loop_cnt see jent_hash_time
  * @param[out] ret_current_delta Test interface: return time delta - may be NULL
+ * @param[in] health Run the health tests on the time delta
  *
  * @return: result of stuck test
  */
 unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 						uint64_t loop_cnt,
-						uint64_t *ret_current_delta)
+						uint64_t *ret_current_delta,
+						int health)
 {
 	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
 	uint64_t current_delta = 0;
@@ -398,7 +400,7 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 	 * Check whether we have a stuck measurement - and apply the health
 	 * tests.
 	 */
-	stuck = jent_stuck(ec, current_delta);
+	stuck = health ? jent_stuck(ec, current_delta) : 0;
 
 	/* Domain separation */
 	intermediary[JENT_OFFSET_DOMAINSEPARATOR] = 0x01;
@@ -421,12 +423,14 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
  * @param[in] ec Reference to entropy collector
  * @param[in] loop_cnt see jent_hash_loop
  * @param[out] ret_current_delta Test interface: return time delta - may be NULL
+ * @param[in] health Run the health tests on the time delta
  *
  * @return: result of stuck test
  */
 unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 					   uint64_t loop_cnt,
-					   uint64_t *ret_current_delta)
+					   uint64_t *ret_current_delta,
+					   int health)
 {
 	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
 	uint64_t time_now = 0;
@@ -463,7 +467,7 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	 * Check whether we have a stuck measurement - and apply the health
 	 * tests.
 	 */
-	stuck = jent_stuck(ec, current_delta);
+	stuck = health ? jent_stuck(ec, current_delta) : 0;
 
 	/* Domain separation */
 	intermediary[JENT_OFFSET_DOMAINSEPARATOR] = 0x02;
@@ -484,18 +488,20 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
  * entropy pool.
  *
  * WARNING: ensure that ->prev_time is primed before using the output
- * 	    of this function! This can be done by calling this function
- * 	    and not using its result.
+ * 	    of this function! This is done by a call with @health 0,
+ * 	    which keeps the priming delta out of the health tests.
  *
  * @param[in] ec Reference to entropy collector
  * @param[in] loop_cnt see jent_hash_loop
  * @param[out] ret_current_delta Test interface: return time delta - may be NULL
+ * @param[in] health Run the health tests on the time delta
  *
  * @return: result of stuck test
  */
 unsigned int jent_measure_jitter(struct rand_data *ec,
 				 uint64_t loop_cnt,
-				 uint64_t *ret_current_delta)
+				 uint64_t *ret_current_delta,
+				 int health)
 {
 	/* Size of intermediary ensures a Keccak operation during hash_update */
 	uint8_t intermediary[JENT_SIZEOF_INTERMEDIARY] = { 0 };
@@ -521,7 +527,7 @@ unsigned int jent_measure_jitter(struct rand_data *ec,
 	ec->prev_time = time_now;
 
 	/* Check whether we have a stuck measurement. */
-	stuck = jent_stuck(ec, current_delta);
+	stuck = health ? jent_stuck(ec, current_delta) : 0;
 
 	/* Invoke hash loop noise source */
 	jent_hash_loop(ec, intermediary, loop_cnt);
@@ -560,7 +566,8 @@ static void jent_random_data_one(
 	struct rand_data *ec,
 	unsigned int (*measure_jitter)(struct rand_data *ec,
 			               uint64_t loop_cnt,
-				       uint64_t *ret_current_delta))
+				       uint64_t *ret_current_delta,
+				       int health))
 {
 	unsigned int safety_factor = 0, ctr = 0;
 	uint64_t nosr;
@@ -592,7 +599,7 @@ static void jent_random_data_one(
 	/* Entropy collection loop */
 	while (!jent_health_failure(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
-		if (measure_jitter(ec, 0, NULL))
+		if (measure_jitter(ec, 0, NULL, 1))
 			continue;
 
 		if (++ctr >= ec->rct_mem_nosr)
@@ -647,8 +654,11 @@ void jent_random_data(struct rand_data *ec)
 		break;
 	case jent_startup_completed:
 	default:
-		/* priming of the ->prev_time value */
-		jent_measure_jitter(ec, 0, NULL);
+		/*
+		 * priming of the ->prev_time value, out of the health tests:
+		 * its delta reaches back to the previous block
+		 */
+		jent_measure_jitter(ec, 0, NULL, 0);
 		jent_random_data_one(ec, jent_measure_jitter);
 	}
 }

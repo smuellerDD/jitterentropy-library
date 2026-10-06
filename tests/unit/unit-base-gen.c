@@ -176,17 +176,17 @@ static void test_measure_jitter_variants(void)
 	}
 
 	/* Prime ->prev_time, as every caller does before measuring. */
-	jent_measure_jitter(ec, 0, NULL);
+	jent_measure_jitter(ec, 0, NULL, 1);
 
 	/* No delta wanted: the measurement still has to happen. */
 	for (i = 0; i < 16; i++)
-		jent_measure_jitter(ec, 0, NULL);
+		jent_measure_jitter(ec, 0, NULL, 1);
 	JENT_UT_TRUE(ec->prev_time != 0, "a measurement without a delta runs");
 
 	/* Delta wanted. */
 	for (i = 0; i < 64; i++) {
 		delta = 0;
-		jent_measure_jitter(ec, 0, &delta);
+		jent_measure_jitter(ec, 0, &delta, 1);
 		if (delta)
 			moved++;
 	}
@@ -194,15 +194,15 @@ static void test_measure_jitter_variants(void)
 
 	/* A caller-supplied loop count, as the recording tools use. */
 	delta = 0;
-	jent_measure_jitter(ec, 32, &delta);
+	jent_measure_jitter(ec, 32, &delta, 1);
 	JENT_UT_TRUE(1, "a caller-set loop count is accepted");
 
 	if (nomem && !jent_ut_settick(nomem)) {
 		JENT_UT_TRUE(nomem->mem == NULL,
 			     "the collector really has no memory block");
 		delta = 0;
-		jent_measure_jitter(nomem, 0, &delta);
-		jent_measure_jitter(nomem, 16, NULL);
+		jent_measure_jitter(nomem, 0, &delta, 1);
+		jent_measure_jitter(nomem, 16, NULL, 1);
 		JENT_UT_TRUE(1, "measuring without a memory block is a no-op");
 		jent_notime_unsettick(nomem);
 		jent_entropy_collector_free(nomem);
