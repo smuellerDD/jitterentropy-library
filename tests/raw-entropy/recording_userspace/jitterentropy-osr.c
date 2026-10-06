@@ -271,12 +271,14 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("Maximum memory value missing\n");
+				fprintf(stderr, "Maximum memory value missing\n");
 				return 1;
 			}
 
 			if (parse_ulong(argv[1], &val))
 				return 1;
+			/* A repeated option replaces the field rather than or-ing in. */
+			flags &= ~(unsigned int)JENT_MAX_MEMSIZE_MASK;
 			switch (val) {
 			case 0:
 				/* Allow to set no option */
@@ -342,7 +344,7 @@ int main(int argc, char * argv[])
 				flags |= JENT_MAX_MEMSIZE_512MB;
 				break;
 			default:
-				printf("Unknown maximum memory value\n");
+				fprintf(stderr, "Unknown maximum memory value\n");
 				return 1;
 			}
 		} else if (!strncmp(argv[1], "--hloopcnt", 10)) {
@@ -351,12 +353,13 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("Hash loop count value missing\n");
+				fprintf(stderr, "Hash loop count value missing\n");
 				return 1;
 			}
 
 			if (parse_ulong(argv[1], &val))
 				return 1;
+			flags &= ~(unsigned int)JENT_MAX_HASHLOOP_MASK;
 			switch (val) {
 			case 0:
 				flags |= JENT_HASHLOOP_1;
@@ -383,7 +386,7 @@ int main(int argc, char * argv[])
 				flags |= JENT_HASHLOOP_128;
 				break;
 			default:
-				printf("Unknown hashloop value\n");
+				fprintf(stderr, "Unknown hashloop value\n");
 				return 1;
 			}
 		} else {
