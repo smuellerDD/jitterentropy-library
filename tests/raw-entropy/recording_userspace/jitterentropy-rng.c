@@ -60,16 +60,32 @@ int main(int argc, char * argv[])
 	size_t i;
 
 	if (argc < 2) {
-		printf("%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>|--hloopcnt <NUM>|--hex]\n", argv[0]);
+		fprintf(stderr, "%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>|--hloopcnt <NUM>|--hex]\n", argv[0]);
 		return 1;
 	}
 
 	{
 		char *endp;
+		const char *p = argv[1];
 
-		/* Reject non-numeric input instead of treating it as 0. */
-		rounds = strtoull(argv[1], &endp, 10);
-		if (endp == argv[1] || *endp != '\0' || rounds >= ULLONG_MAX) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+
+		/*
+		 * Reject non-numeric input instead of treating it as 0, and a
+		 * sign with it: strtoull() accepts "-5" and wraps it round to
+		 * ULLONG_MAX - 4 with errno clear, so "jitterentropy-rng -5"
+		 * ran for what amounts to forever.
+		 */
+		if (*p == '-' || *p == '+') {
+			fprintf(stderr, "Invalid rounds value %s\n", argv[1]);
+			return 1;
+		}
+
+		errno = 0;
+		rounds = strtoull(p, &endp, 10);
+		if (errno || endp == p || *endp != '\0' ||
+		    rounds >= ULLONG_MAX) {
 			fprintf(stderr, "Invalid rounds value %s\n", argv[1]);
 			return 1;
 		}
@@ -227,7 +243,7 @@ int main(int argc, char * argv[])
 		} else if (!strncmp(argv[1], "--hex", 5)) {
 			hex = 1;
 		} else {
-			printf("Unknown option %s\n", argv[1]);
+			fprintf(stderr, "Unknown option %s\n", argv[1]);
 			return 1;
 		}
 
@@ -259,18 +275,19 @@ int main(int argc, char * argv[])
 
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
-		printf("The initialization failed with error code %d\n", ret);
+		fprintf(stderr, "The initialization failed with error code %d\n",
+			ret);
 		return ret;
 	}
 
 	ec_nostir = jent_entropy_collector_alloc(osr, flags);
 	if (!ec_nostir) {
-		printf("Jitter RNG handle cannot be allocated\n");
+		fprintf(stderr, "Jitter RNG handle cannot be allocated\n");
 		return 1;
 	}
 
 	if (jent_status(ec_nostir, status, sizeof(status))) {
-		printf("Cannot obtain status information\n");
+		fprintf(stderr, "Cannot obtain status information\n");
 		ret = 1;
 		goto out;
 	}
@@ -295,8 +312,12 @@ int main(int argc, char * argv[])
 	for (size = 0; size < rounds; size++) {
 		uint8_t tmp[32];
 
-		if (0 > jent_read_entropy_safe(&ec_nostir, (char*)tmp, sizeof(tmp))) {
-			fprintf(stderr, "FIPS 140-3 health test failed\n");
+		ssize_t rc = jent_read_entropy_safe(&ec_nostir, (char *)tmp,
+						    sizeof(tmp));
+
+		if (rc < 0) {
+			fprintf(stderr, "Reading random data failed with error code %zd\n",
+				rc);
 			ret = 1;
 			goto out;
 		}
