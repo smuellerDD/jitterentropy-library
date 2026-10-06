@@ -388,8 +388,13 @@ endfunction()
 
 # Nothing at build time would notice the two drifting: a declaration missing
 # from the script just goes missing from the library. A function for the scope;
-# block() is CMake 3.25 and this project asks for 3.22.
-function(jent_check_version_script header script linktest)
+# block() is CMake 3.25 and this project asks for 3.22. @marker is the line
+# that precedes each exported declaration of the header, and an empty
+# @linktest skips the check of the link test.
+function(jent_check_version_script header script marker linktest)
+    get_filename_component(header_name "${header}" NAME)
+    get_filename_component(script_name "${script}" NAME)
+
     set(header_api "")
     set(take_next FALSE)
     file(STRINGS "${header}" lines)
@@ -399,7 +404,7 @@ function(jent_check_version_script header script linktest)
                 list(APPEND header_api "${CMAKE_MATCH_1}")
             endif()
             set(take_next FALSE)
-        elseif(line MATCHES "^JENT_PRIVATE_STATIC$")
+        elseif(line MATCHES "^${marker}$")
             set(take_next TRUE)
         endif()
     endforeach()
@@ -424,8 +429,10 @@ function(jent_check_version_script header script linktest)
     if(header_api STREQUAL script_api)
         list(LENGTH header_api n)
         message(STATUS
-            "version.lds exports the ${n} functions of jitterentropy.h")
-        jent_check_linktest_calls("${linktest}" "${header_api}")
+            "${script_name} exports the ${n} functions of ${header_name}")
+        if(linktest)
+            jent_check_linktest_calls("${linktest}" "${header_api}")
+        endif()
         return()
     endif()
 
@@ -438,13 +445,13 @@ function(jent_check_version_script header script linktest)
         list(REMOVE_ITEM only_script ${header_api})
     endif()
     message(FATAL_ERROR
-        "version.lds and jitterentropy.h disagree. "
+        "${script_name} and ${header_name} disagree. "
         "Only in the header: ${only_header}. "
         "Only in the script: ${only_script}.")
 endfunction()
 
 jent_check_version_script("${CMAKE_CURRENT_SOURCE_DIR}/jitterentropy.h"
-                          "${JITTER_VERSION_SCRIPT}"
+                          "${JITTER_VERSION_SCRIPT}" JENT_PRIVATE_STATIC
                           "${CMAKE_CURRENT_SOURCE_DIR}/tests/linking/jitterentropy-linktest.c")
 
 # As bcrypt below: a static consumer links this archive's instrumented frames
