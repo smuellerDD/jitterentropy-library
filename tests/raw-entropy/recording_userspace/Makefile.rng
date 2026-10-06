@@ -1,12 +1,20 @@
 # Compile Noise Source as user space application
 
-CC ?= gcc
-CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
+CC ?= cc
+# "override" on every append, as the top level Makefile has: a plain += is
+# ignored for a variable set on the make command line, so "make CFLAGS=-g"
+# used to drop the include paths, -O0, the defines and the hardening. And once
+# a variable has an override, make ignores every later assignment to it that
+# lacks one, so all of them carry it.
+override CFLAGS +=-Wextra -Wall -pedantic -fPIC -O0
 #Hardening
-CFLAGS +=-fwrapv --param ssp-buffer-size=4
+override CFLAGS +=-fwrapv --param ssp-buffer-size=4
 ifneq (Darwin,$(shell uname))
-LDFLAGS +=-Wl,-z,relro,-z,now
+override LDFLAGS +=-Wl,-z,relro,-z,now
 endif
+
+# Enable internal timer support
+override CFLAGS += -DJENT_CONF_ENABLE_INTERNAL_TIMER
 
 GCCVERSIONFORMAT := $(shell echo `$(CC) -dumpversion | sed 's/\./\n/g' | wc -l`)
 ifeq "$(GCCVERSIONFORMAT)" "3"
@@ -16,9 +24,9 @@ else
 endif
 
 ifeq "$(GCC_GTEQ_490)" "1"
-  CFLAGS += -fstack-protector-strong
+  override CFLAGS += -fstack-protector-strong
 else
-  CFLAGS += -fstack-protector-all
+  override CFLAGS += -fstack-protector-all
 endif
 
 JENT_DIR := jitterentropy
@@ -40,16 +48,18 @@ vpath %.c $(JENT_DIR)/src $(JENT_DIR)/arch
 # $(JENT_DIR)/tests is for jitterentropy-memlock.h, shared with the unit tests.
 INCLUDE_DIRS := $(JENT_DIR) $(JENT_DIR)/src $(JENT_DIR)/tests
 LIBRARY_DIRS :=
-# macOS has no librt; the clock/timer functions live in libSystem.
-ifeq (Darwin,$(shell uname))
-LIBRARIES := pthread
-else
+# librt is a separate library only on Linux (glibc before 2.17) and Solaris;
+# elsewhere the clock functions live in libc, and OpenBSD has no librt at
+# all. Same rule as the top level Makefile.
+ifneq (,$(filter $(shell uname),Linux SunOS))
 LIBRARIES := rt pthread
+else
+LIBRARIES := pthread
 endif
 
-CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
-LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
-LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
+override CFLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
+override LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir))
+override LDFLAGS += $(foreach library,$(LIBRARIES),-l$(library))
 
 .PHONY: all clean distclean
 
