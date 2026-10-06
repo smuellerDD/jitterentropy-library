@@ -332,8 +332,9 @@ static void test_status_truncation(void)
 }
 
 /*
- * jent_uuid() hands out the instance identifier the status output carries. Its
- * contract is a buffer of at least JENT_UUID_STRLEN bytes.
+ * jent_entropy_collector_uuid() hands out the instance identifier the status
+ * output carries. Its contract is a buffer of at least JENT_UUID_STRLEN
+ * bytes.
  */
 static void test_uuid_api(void)
 {
@@ -342,14 +343,16 @@ static void test_uuid_api(void)
 	char status[8192];
 	char tiny[JENT_UUID_STRLEN - 1];	/* not `small`, see test_status() */
 
-	jent_ut_group("jent_uuid");
+	jent_ut_group("jent_entropy_collector_uuid");
 
 	if (!ec) {
-		JENT_UT_SKIP("jent_uuid", "no collector could be allocated");
+		JENT_UT_SKIP("jent_entropy_collector_uuid",
+			     "no collector could be allocated");
 		return;
 	}
 
-	JENT_UT_EQ(jent_uuid(ec, uuid, sizeof(uuid)), 0, "the UUID is produced");
+	JENT_UT_EQ(jent_entropy_collector_uuid(ec, uuid, sizeof(uuid)), 0,
+		   "the UUID is produced");
 	JENT_UT_EQ(strlen(uuid), JENT_UUID_STRLEN - 1,
 		   "and has the canonical length");
 
@@ -358,12 +361,13 @@ static void test_uuid_api(void)
 		JENT_UT_TRUE(strstr(status, uuid) != NULL,
 			     "and is the one jent_status reports");
 
-	JENT_UT_NE(jent_uuid(ec, tiny, sizeof(tiny)), 0,
+	JENT_UT_NE(jent_entropy_collector_uuid(ec, tiny, sizeof(tiny)), 0,
 		   "a buffer that is too small is an error");
-	JENT_UT_NE(jent_uuid(NULL, uuid, sizeof(uuid)), 0,
+	JENT_UT_NE(jent_entropy_collector_uuid(NULL, uuid, sizeof(uuid)), 0,
 		   "no entropy collector is an error");
-	JENT_UT_NE(jent_uuid(ec, NULL, sizeof(uuid)), 0, "no buffer is an error");
-	JENT_UT_NE(jent_uuid(ec, uuid, 0), 0,
+	JENT_UT_NE(jent_entropy_collector_uuid(ec, NULL, sizeof(uuid)), 0,
+		   "no buffer is an error");
+	JENT_UT_NE(jent_entropy_collector_uuid(ec, uuid, 0), 0,
 		   "a zero-length buffer is an error");
 
 	/* Two instances are two identities. */
@@ -372,7 +376,8 @@ static void test_uuid_api(void)
 		char other_uuid[JENT_UUID_STRLEN];
 
 		if (other) {
-			jent_uuid(other, other_uuid, sizeof(other_uuid));
+			jent_entropy_collector_uuid(other, other_uuid,
+						    sizeof(other_uuid));
 			jent_ut_checks++;
 			if (!strcmp(uuid, other_uuid))
 				JENT_UT_FAIL("%s",
@@ -382,6 +387,89 @@ static void test_uuid_api(void)
 	}
 
 	jent_entropy_collector_free(ec);
+}
+
+/*
+ * The jent_entropy_collector_* accessors read the instance's own fields, and
+ * a NULL instance is 0 with errno EINVAL.
+ */
+static void test_collector_accessors(void)
+{
+	struct rand_data *ec = jent_entropy_collector_alloc(0, 0);
+	char buf[64];
+
+	jent_ut_group("jent_entropy_collector_* accessors");
+
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_osr(NULL), 0, "NULL: osr 0");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_flags(NULL), 0, "NULL: flags 0");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_memsize(NULL), 0, "NULL: memsize 0");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_health_failure(NULL), 0,
+		   "NULL: no health failure");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_reinitializations(NULL), 0,
+		   "NULL: no reinitializations");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_read_invocations(NULL), 0,
+		   "NULL: no reads");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_bytes_output(NULL), 0,
+		   "NULL: no bytes");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_hashloops(NULL), 0,
+		   "NULL: hash loop count 0");
+	JENT_UT_EQ(errno, EINVAL, "and errno EINVAL");
+
+	if (!ec) {
+		JENT_UT_SKIP("jent_entropy_collector_* accessors",
+			     "no collector could be allocated");
+		return;
+	}
+
+	errno = 0;
+	JENT_UT_EQ(jent_entropy_collector_osr(ec), ec->osr, "the osr");
+	JENT_UT_TRUE(jent_entropy_collector_osr(ec) >= JENT_MIN_OSR,
+		     "which is at least JENT_MIN_OSR");
+	JENT_UT_EQ(jent_entropy_collector_flags(ec), ec->flags, "the flags");
+	JENT_UT_EQ(jent_entropy_collector_memsize(ec),
+		   (size_t)ec->memmask + 1, "the memory size");
+	JENT_UT_EQ(jent_entropy_collector_hashloops(ec), ec->hashloopcnt,
+		   "the hash loop count");
+	JENT_UT_EQ(jent_entropy_collector_health_failure(ec), 0,
+		   "no health failure standing");
+	JENT_UT_EQ(jent_entropy_collector_reinitializations(ec),
+		   ec->reinit_count, "the reinitializations");
+	JENT_UT_EQ(errno, 0, "errno untouched for an instance");
+
+	JENT_UT_EQ(jent_entropy_collector_read_invocations(ec), 0,
+		   "no reads yet");
+	JENT_UT_EQ(jent_entropy_collector_bytes_output(ec), 0, "no bytes yet");
+	if (jent_read_entropy(ec, buf, sizeof(buf)) == (ssize_t)sizeof(buf)) {
+		JENT_UT_EQ(jent_entropy_collector_read_invocations(ec), 1,
+			   "a read counted");
+		JENT_UT_EQ(jent_entropy_collector_bytes_output(ec),
+			   sizeof(buf), "and its bytes");
+	}
+
+	jent_entropy_collector_free(ec);
+
+	/* Without a memory access region there is no size. */
+	ec = jent_entropy_collector_alloc(0, JENT_DISABLE_MEMORY_ACCESS);
+	if (ec) {
+		JENT_UT_EQ(jent_entropy_collector_memsize(ec), 0,
+			   "no region, memsize 0");
+		jent_entropy_collector_free(ec);
+	}
 }
 
 /* Flag combinations that ask for two incompatible things are refused. */
@@ -575,6 +663,7 @@ int main(void)
 	test_status();
 	test_status_truncation();
 	test_uuid_api();
+	test_collector_accessors();
 	test_secure_memory_supported();
 	test_init();
 	test_selftest();

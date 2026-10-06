@@ -85,7 +85,8 @@ static int jent_selftest_execute(struct rand_data *ec)
 	 * Name the instance in every verdict logged - an unbound run carries
 	 * no UUID and goes unnamed.
 	 */
-	if (ec && !jent_uuid(ec, uuid, sizeof(uuid)) && uuid[0])
+	if (ec && !jent_entropy_collector_uuid(ec, uuid, sizeof(uuid)) &&
+	    uuid[0])
 		snprintf(instance, sizeof(instance), " (instance %s)", uuid);
 	else
 		instance[0] = '\0';

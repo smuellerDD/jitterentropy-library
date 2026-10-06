@@ -10,7 +10,16 @@
 {
 global:
 	jent_entropy_collector_alloc;
+	jent_entropy_collector_bytes_output;
+	jent_entropy_collector_flags;
 	jent_entropy_collector_free;
+	jent_entropy_collector_hashloops;
+	jent_entropy_collector_health_failure;
+	jent_entropy_collector_memsize;
+	jent_entropy_collector_osr;
+	jent_entropy_collector_read_invocations;
+	jent_entropy_collector_reinitializations;
+	jent_entropy_collector_uuid;
 	jent_entropy_init;
 	jent_entropy_init_ex;
 	jent_entropy_set_notime_cpu;
@@ -23,7 +32,6 @@ global:
 	jent_selftest;
 	jent_set_fips_failure_callback;
 	jent_status;
-	jent_uuid;
 	jent_version;
 
 local:

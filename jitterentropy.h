@@ -547,11 +547,67 @@ int jent_status(const struct rand_data *ec, char *buf, size_t buflen);
 #endif
 
 /*
- * Copy the instance UUID string (RFC 4122 version 4, JENT_UUID_STRLEN bytes
- * including the terminating NUL) into buf. Returns 0 on success, -1 on error.
+ * Copy the instance UUID string (RFC 9562 version 4, or 8 without a CSPRNG;
+ * JENT_UUID_STRLEN bytes including the terminating NUL) into buf. Returns 0 on
+ * success, -1 on error.
  */
 JENT_PRIVATE_STATIC
-int jent_uuid(const struct rand_data *ec, char *buf, size_t buflen);
+int jent_entropy_collector_uuid(const struct rand_data *ec, char *buf,
+				size_t buflen);
+
+/*
+ * Read-only accessors of an instance's settings and state, the numbers
+ * jent_status reports without its JSON. They follow the instance through the
+ * reallocations after a health test failure: the osr is at least JENT_MIN_OSR
+ * and raised on each, as is the memory size in effect where it is derived -
+ * one the caller set stays - and the hash loop count, whether set by the
+ * caller or not, up to JENT_MAX_HASHLOOP (128); a compile-time default above
+ * that stays as it is. Same rules as jent_status: the thread that owns the
+ * instance, or with generation stopped.
+ *
+ * Each returns 0 for a NULL ec and sets errno to EINVAL, except in a kernel or
+ * a JENT_BAREMETAL build, which have no errno; errno is left alone otherwise.
+ * No instance reports 0 as its osr.
+ *
+ * jent_entropy_collector_osr: the oversampling rate.
+ * jent_entropy_collector_flags: the JENT_* flags in effect: the memory size
+ *	and hash loop fields set to the values in effect (the memory size field
+ *	as given with JENT_DISABLE_MEMORY_ACCESS), JENT_FORCE_SECURE_MEM added
+ *	where implied, JENT_DISABLE_INTERNAL_TIMER under JENT_NTG1, and after a
+ *	reallocation in FIPS mode the timer flag of the clock in use.
+ * jent_entropy_collector_memsize: the bytes of the memory access region, 0
+ *	without.
+ * jent_entropy_collector_health_failure: the JENT_*_FAILURE bits standing, 0
+ *	if none. Set in every mode, but only in FIPS mode (JENT_NTG1 implies
+ *	it) does a failure stop the output; otherwise they are informational.
+ * jent_entropy_collector_reinitializations: reallocations after an intermittent
+ *	health test failure, each replacement counted - those of
+ *	jent_read_entropy_safe and of the startup every allocation runs.
+ * jent_entropy_collector_read_invocations: the successful reads of the
+ *	instance.
+ * jent_entropy_collector_bytes_output: the bytes those reads delivered.
+ * jent_entropy_collector_hashloops: the hash loop count per generated block.
+ *
+ * The read and byte counters carry over into a recovery's replacement, as the
+ * UUID does.
+ */
+JENT_PRIVATE_STATIC
+unsigned int jent_entropy_collector_osr(const struct rand_data *ec);
+JENT_PRIVATE_STATIC
+unsigned int jent_entropy_collector_flags(const struct rand_data *ec);
+JENT_PRIVATE_STATIC
+size_t jent_entropy_collector_memsize(const struct rand_data *ec);
+JENT_PRIVATE_STATIC
+unsigned int jent_entropy_collector_health_failure(const struct rand_data *ec);
+JENT_PRIVATE_STATIC
+unsigned int jent_entropy_collector_reinitializations(
+	const struct rand_data *ec);
+JENT_PRIVATE_STATIC
+uint64_t jent_entropy_collector_read_invocations(const struct rand_data *ec);
+JENT_PRIVATE_STATIC
+uint64_t jent_entropy_collector_bytes_output(const struct rand_data *ec);
+JENT_PRIVATE_STATIC
+unsigned int jent_entropy_collector_hashloops(const struct rand_data *ec);
 
 /* return secure memory support - memory zeroized on free, which every build
  * provides, so this returns 1; locking and core dump exclusion are extras it
