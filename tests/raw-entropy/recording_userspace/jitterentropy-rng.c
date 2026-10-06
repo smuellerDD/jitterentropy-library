@@ -18,6 +18,7 @@
  */
 
 #include "jitterentropy.h"
+#include "jitterentropy-internal.h"	/* the collector configuration */
 #include "jitterentropy-memlock.h"
 #include "jitterentropy-options.h"
 
@@ -31,6 +32,35 @@
 # include <fcntl.h>
 # include <io.h>
 #endif
+
+/*
+ * Report each health test failure of a FIPS or NTG.1 instance on stderr, as
+ * the kernel module logs them: stdout carries the random data. Intermittent
+ * failures in particular are otherwise invisible - jent_read_entropy_safe()
+ * recovers from them without returning an error - and a failed startup of a
+ * recovery shows up only as the error code of the read.
+ */
+static void jent_rng_health_failure(struct rand_data *ec,
+				    unsigned int health_failure)
+{
+	unsigned int bits = health_failure |
+			    (health_failure >> JENT_PERMANENT_FAILURE_SHIFT);
+	char uuid[JENT_UUID_STRLEN];
+
+	if (jent_entropy_collector_uuid(ec, uuid, sizeof(uuid)))
+		strcpy(uuid, "(unknown)");
+
+	fprintf(stderr, "%s health test failure 0x%x:%s%s%s%s, instance %s, reinit %u, osr %u, hashloop %u, memsize %u\n",
+		health_failure >> JENT_PERMANENT_FAILURE_SHIFT ?
+		"permanent" : "intermittent",
+		health_failure,
+		bits & JENT_RCT_FAILURE ? " RCT" : "",
+		bits & JENT_APT_FAILURE ? " APT" : "",
+		bits & JENT_LAG_FAILURE ? " lag" : "",
+		bits & JENT_RCT_MEM_FAILURE ? " RCT-mem" : "",
+		uuid, ec->reinit_count, ec->osr, ec->hashloopcnt,
+		ec->mem ? ec->memmask + 1 : 0);
+}
 
 int main(int argc, char * argv[])
 {
@@ -115,6 +145,14 @@ int main(int argc, char * argv[])
 	if (jent_init_secure_memory(flags))
 		fprintf(stderr,
 			"Cannot create the secure memory arena, allocating the entropy collector will fail\n");
+
+	/* Before jent_entropy_init_ex(): the library refuses it afterwards. */
+	ret = jent_set_fips_failure_callback(jent_rng_health_failure);
+	if (ret) {
+		fprintf(stderr, "Cannot register the health failure callback: %d\n",
+			ret);
+		return 1;
+	}
 
 	ret = jent_entropy_init_ex(osr, flags);
 	if (ret) {
