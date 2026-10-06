@@ -23,18 +23,20 @@
  * under tests/unit, both of which own the process they run in.
  *
  * In the compliance modes - JENT_NTG1 and JENT_FORCE_FIPS, which imply
- * JENT_FORCE_SECURE_MEM - the memory of the entropy collector must be locked
+ * JENT_FORCE_SECURE_MEM - the state of the entropy collector must be locked
  * into RAM: a lock the operating system refuses fails the allocation rather
- * than leaving the state where it may be swapped out. The bound on how much a
- * process may lock is well below the block a collector maps:
+ * than leaving the state where it may be swapped out. That state is a few
+ * pages per collector (the memory access region is not locked), bounded by:
  *
- *   - POSIX: RLIMIT_MEMLOCK, commonly 8 MB (and only 64 kB on older systems),
- *     which is why the raw entropy recording with large memory blocks has
- *     traditionally been run as root (see README.md).
+ *   - POSIX: RLIMIT_MEMLOCK, commonly 8 MB and 64 kB on older systems and on
+ *     Android.
  *
  *   - Windows: the process minimum working set, which VirtualLock() charges
  *     its pages against, failing with ERROR_WORKING_SET_QUOTA once that
  *     budget is exhausted.
+ *
+ * The defaults usually suffice; the tools raise the bound anyway so that the
+ * number of collectors a run allocates does not decide the outcome.
  *
  * Both are process-wide state the library does not touch: raising them affects
  * the whole host application, and neither can be restored on free, as another
@@ -79,8 +81,8 @@
  * The backend macros are the ones the library is compiled with: CMake puts
  * -D${EXTERNAL_CRYPTO} into JITTER_C_FLAGS, which every test program is built
  * with as well, so the arena configured below is exactly the one the library
- * then allocates from. AWS-LC needs no entry: it wipes its allocations but
- * keeps no arena to configure.
+ * then allocates from. AWS-LC needs no entry: it keeps no arena to configure
+ * and hands out ordinary heap memory.
  */
 #if defined(LIBGCRYPT)
 # include <gcrypt.h>
@@ -89,50 +91,35 @@
 #endif
 
 /*
- * Amount of lockable memory requested when the tool does not pin the size of
- * the memory access block with JENT_MAX_MEMSIZE_*: the collector then derives
- * it from the cache geometry at runtime, which this code cannot predict. 64 MB
- * covers the derived size on ordinary hardware, including --all-caches on a
- * desktop; where it does not - the summed caches of a large server - the
- * request is simply larger than needed, and a limit the system refuses to
- * grant is handled as a partial raise below.
+ * Bytes of lockable memory requested: room for the state of many collectors.
+ * The unlocked memory access region does not count, so the flags do not.
  */
-#define JENT_MEMLOCK_DEFAULT	(64ULL << 20)
+#define JENT_MEMLOCK_SIZE	(1ULL << 20)
 
 /*
- * Slack added to that block: the collector makes further (small) allocations
- * which are locked as well.
+ * Size of the secure memory arena jent_init_secure_memory() creates: above
+ * JENT_MEMLOCK_SIZE, and a power of two as OpenSSL's secure heap requires. The
+ * memory access region does not come out of the arena, so the flags do not
+ * count.
  */
-#define JENT_MEMLOCK_SLACK	(1ULL << 20)
+#define JENT_SECMEM_SIZE	(2ULL << 20)
 
-/*
- * Bytes the entropy collector instantiated with @flags may need to lock.
- *
- * The result is bounded by JENT_MAX_MEMSIZE_MAX plus the slack above, i.e. it
- * fits into a size_t (and into a SIZE_T / rlim_t) on every supported target,
- * 32-bit ones included.
- */
+/* Bytes the entropy collector instantiated with @flags may need to lock. */
 static inline unsigned long long jent_memlock_size(unsigned int flags)
 {
-	unsigned int memsize = JENT_FLAGS_TO_MAX_MEMSIZE(flags &
-							 JENT_MAX_MEMSIZE_MASK);
-	unsigned long long want;
-
+	(void)flags;
+#if defined(LIBGCRYPT) || defined(OPENSSL)
 	/*
-	 * The memory size field is wider than the sizes the library defines,
-	 * so an out-of-range value cannot make the shift below overflow.
+	 * The whole arena is locked at once, and with it the pages OpenSSL
+	 * puts around it: a limit sized for the collectors alone is below the
+	 * arena they are allocated from, and the lock of it is refused. The
+	 * collectors' own budget on top covers those pages and leaves the
+	 * rest of the process what it had.
 	 */
-	if (memsize > JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX))
-		memsize = JENT_FLAGS_TO_MAX_MEMSIZE(JENT_MAX_MEMSIZE_MAX);
-
-	if (flags & JENT_DISABLE_MEMORY_ACCESS)
-		want = 0;
-	else if (memsize)
-		want = 1ULL << (memsize + JENT_MAX_MEMSIZE_OFFSET);
-	else
-		want = JENT_MEMLOCK_DEFAULT;
-
-	return want + JENT_MEMLOCK_SLACK;
+	return JENT_SECMEM_SIZE + JENT_MEMLOCK_SIZE;
+#else
+	return JENT_MEMLOCK_SIZE;
+#endif
 }
 
 /* Whether @flags ask for memory that is guaranteed to be locked. */
@@ -211,10 +198,11 @@ static inline int jent_set_working_set(SIZE_T want)
 
 /*
  * Raise the process working set so that the entropy collector instantiated
- * with @flags can lock its memory. Best effort: the size requested is an upper
- * bound on what the collector may map, and the caller goes on to allocate it
- * either way. Returns 0 once the quota has been raised as far as this process
- * can raise it, and 1 only when the working set could not be changed at all.
+ * with @flags can lock its state. Best effort: the size requested is an upper
+ * bound on what the collectors of a run lock, and the caller goes on to
+ * allocate either way. Returns 0 once the quota has been raised as far as this
+ * process can raise it, and 1 only when the working set could not be changed
+ * at all.
  *
  * A request the system does not grant - it fails as the values approach the
  * physical memory available - is retried with half the size, down to
@@ -245,21 +233,19 @@ static inline int jent_raise_memlock_limit(unsigned int flags)
 
 /*
  * Raise RLIMIT_MEMLOCK so that the entropy collector instantiated with @flags
- * can lock its memory. Best effort: the size requested is an upper bound on
- * what the collector may map - the size it derives from the cache geometry is
- * not knowable here - and the caller goes on to allocate it either way.
- * Returns 0 once the limit has been raised as far as this process can raise
- * it, and 1 only when it could not be read or changed at all.
+ * can lock its state. Best effort: the size requested is an upper bound on
+ * what the collectors of a run lock, and the caller goes on to allocate either
+ * way. Returns 0 once the limit has been raised as far as this process can
+ * raise it, and 1 only when it could not be read or changed at all.
  *
  * Any process may raise its soft limit up to its hard limit; raising the hard
  * limit requires privilege (CAP_SYS_RESOURCE on Linux, root elsewhere). Both
  * are therefore requested in one call, and a rejected call is retried with the
  * hard limit left alone - which is what an unprivileged process gets, and all
  * it can get. Ending up at a hard limit below the requested size is not
- * reported as an error: the request is an upper bound, so the collector may
- * well fit under it, and where it does not the allocation failure the caller
- * reports is the accurate message. That is the case the recording README
- * describes as needing root.
+ * reported as an error: the request is an upper bound, so the collectors may
+ * well fit under it, and where they do not the allocation failure the caller
+ * reports is the accurate message.
  */
 static inline int jent_raise_memlock_limit(unsigned int flags)
 {
@@ -289,8 +275,7 @@ static inline int jent_raise_memlock_limit(unsigned int flags)
 
 	/*
 	 * Unprivileged: take the soft limit up to the hard limit, which is as
-	 * far as this process can go and is what allows the smaller memory
-	 * sizes to be recorded without root.
+	 * far as this process can go.
 	 */
 	if (getrlimit(RLIMIT_MEMLOCK, &lim))
 		return 1;
@@ -312,40 +297,19 @@ static inline int jent_raise_memlock_limit(unsigned int flags)
 
 #endif /* Windows */
 
-/*
- * Floor and ceiling of the secure memory arena created below. The floor is the
- * size the library used to reserve itself and is what a run with no memory
- * access (JENT_DISABLE_MEMORY_ACCESS) still needs for the collector state and
- * the small allocations around it. The ceiling bounds the largest request -
- * JENT_MAX_MEMSIZE_MAX rounded up - to a value that still fits the unsigned
- * int libgcrypt takes for GCRYCTL_INIT_SECMEM.
- */
-#define JENT_SECMEM_MIN		(2ULL << 20)
-#define JENT_SECMEM_MAX		(1ULL << 30)
-
-/*
- * Size of the arena for a collector instantiated with @flags: the memory the
- * collector may lock, rounded up to a power of two because OpenSSL's secure
- * heap requires that of its size.
- */
 static inline unsigned long long jent_secmem_size(unsigned int flags)
 {
-	unsigned long long want = jent_memlock_size(flags);
-	unsigned long long size = JENT_SECMEM_MIN;
-
-	while (size < want && size < JENT_SECMEM_MAX)
-		size <<= 1;
-
-	return size;
+	(void)flags;
+	return JENT_SECMEM_SIZE;
 }
 
 /*
  * Create the secure memory arena the library allocates the entropy collector
  * from when it is built against libgcrypt or OpenSSL. Returns 0 on success and
  * when the build has no arena to configure; 1 when the arena could not be
- * created, in which case the allocation of the collector is what fails later
- * on - the library refuses to hand out memory that did not come from the
- * arena.
+ * created or, with OpenSSL, not locked, in which case the allocation of the
+ * collector is what fails later on - the library refuses to hand out memory
+ * that did not come from the arena.
  *
  * Call this after jent_raise_memlock_limit(): both libraries lock the arena
  * into RAM as they create it, and only the raised limit lets them.
@@ -393,8 +357,23 @@ static inline int jent_init_secure_memory(unsigned int flags)
 	if (CRYPTO_secure_malloc_initialized())
 		return 0;
 
-	return CRYPTO_secure_malloc_init((size_t)jent_secmem_size(flags), 32) ?
-	       0 : 1;
+	/*
+	 * 1 is an arena that is locked. 2 is one OpenSSL created but could
+	 * not lock - usable, and exactly the swappable collector state this
+	 * header exists to rule out: the library only checks that an arena
+	 * is there, so it would allocate from it. Torn down again, as nothing
+	 * has been allocated from it yet, so that the allocation fails as it
+	 * does without an arena, and reported as the failure it is.
+	 */
+	switch (CRYPTO_secure_malloc_init((size_t)jent_secmem_size(flags), 32)) {
+	case 1:
+		return 0;
+	case 2:
+		(void)CRYPTO_secure_malloc_done();
+		return 1;
+	default:
+		return 1;
+	}
 
 #else
 
