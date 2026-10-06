@@ -5,7 +5,7 @@
  * The integration supports Linux 5.10 and every newer release. 5.10 is a
  * conservative baseline: all of the kernel APIs consumed by these interfaces
  * predate it. The memory helpers kvmalloc()/kvzalloc()/kvfree() (4.12) and
- * kvfree_sensitive() (5.7, used by the character-device and test interfaces),
+ * kvfree_sensitive() (5.8, used by the character-device and test interfaces),
  * compat_ptr_ioctl() (5.4, used by the character-device ioctl), the crypto RNG
  * registration, the hw_random framework, misc devices, debugfs and
  * u64_to_user_ptr() are all stable across the whole 5.10..latest range.
