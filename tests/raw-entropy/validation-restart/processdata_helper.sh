@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Process the entropy data
 
@@ -36,7 +36,7 @@ MASK_LIST="FF:8"
 # List used for ARM Cortext A9 and A7 processors
 #MASK_LIST="FF:4,8 7F8:4,8"
 
-# Maximum number of entries to be extracted from the original file
+# Maximum number of entries taken from each restart file
 MAX_EVENTS=1000
 
 ############################################################
@@ -103,13 +103,26 @@ fi
 # Also remove bit output files of a previous (possibly interrupted) run:
 # extractlsb creates them with O_EXCL and would fail on existing files,
 # leaving the stale data to be analyzed in step 3.
+#
+# The cap applies per restart: on the consolidated file it would keep only
+# the first restart, not the matrix of restarts ea_restart needs.
 rm -f $INPUTCONSOLIDATED $RESULTS_DIR/*bitout.data
+restarts=0
 for i in $NONIID_DATA
 do
+	# the pattern itself when nothing matches
+	[ -f "$i" ] || continue
 	echo "Process recorded entropy data $i"
 
-	cat $i >> $INPUTCONSOLIDATED
+	head -n $MAX_EVENTS $i >> $INPUTCONSOLIDATED
+	restarts=$((restarts + 1))
 done
+
+if [ "$restarts" -eq 0 ]
+then
+	echo "ERROR: No raw entropy data $NONIID_DATA" | tee -a $LOGFILE
+	exit 1
+fi
 
 #
 # Step 2: extract data
@@ -124,7 +137,7 @@ do
 		mask=${item%:*}
 		bits=${item#*:}
 
-		./$EXTRACT $file $filepath.${mask}bitout.data $MAX_EVENTS $mask 2>&1 | tee -a $LOGFILE
+		./$EXTRACT $file $filepath.${mask}bitout.data $((MAX_EVENTS * restarts)) $mask 2>&1 | tee -a $LOGFILE
 		if [ $? -ne 0 ]
 		then
 			echo "ERROR: Extraction of $file (mask $mask) failed" | tee -a $LOGFILE

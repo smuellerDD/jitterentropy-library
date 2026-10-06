@@ -45,17 +45,21 @@ EATOOL: Path of the program used from the Entropy Assessment restart tool
 
 BUILD_EXTRACT: Indicates whether the script will rebuild the extractlsb program
 from scratch (and remove it again on exit); with "no" it is not built at all
-and has to be built with `make` beforehand. The default is "yes", but
-processdata.sh sets "no" whenever RESULTS_DIR is set, which its own default
-always does; processdata_ntg1.sh builds it for its first set.
+and has to be built with `make` beforehand. The default is "yes";
+processdata.sh sets "no" when its caller gives RESULTS_DIR, as
+analyze_options.sh does after building extractlsb itself, and
+processdata_ntg1.sh builds it for its first set only.
 
 MASK_LIST: Indicates the extraction method from each sample item. You can
 indicate one or more methods; the script will generate one bit stream data
 file for each extraction method. See `../validation-runtime/README.md` for a
 more detailed explanation.
 
-MAX_EVENTS: the number of samples extracted from the restart data, which the
-script first concatenates into one file. The default is 1000.
+MAX_EVENTS: the number of samples taken from each restart file. The script
+concatenates the first MAX_EVENTS samples of every restart file into one file
+and extracts MAX_EVENTS times the number of restarts from it - with the
+default of 1000 and 1000 restarts the 1000 x 1000 matrix ea_restart expects.
+Without any restart file the script fails.
 
 ### Parameters of processdata.sh
 
