@@ -114,15 +114,6 @@ extern "C" {
 #define JENT_FALLTHROUGH	fallthrough
 
 /*
- * Test interface support (see jitterentropy-base.c): allocate an entropy
- * collector without running the startup entropy collection and its
- * health-test reset ladder. Only intended for the kernel test interface
- * (linux_kernel/jitterentropy_testing.c).
- */
-struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
-						   unsigned int flags);
-
-/*
  * 64-bit division / modulo with a 64-bit divisor.
  *
  * The plain C operators on 64-bit operands are lowered to libgcc helper
@@ -675,6 +666,19 @@ struct rand_data
 	unsigned int lag_scoreboard[JENT_LAG_HISTORY_SIZE];
 #endif /* JENT_HEALTH_LAG_PREDICTOR */
 };
+
+#if defined(LINUX_KERNEL) || defined(JENT_RAW_COLLECTOR)
+/*
+ * A collector without the startup, for the raw noise recordings of
+ * linux_kernel/jitterentropy_testing.c and tests/raw-entropy/recording_library.
+ */
+JENT_INTERNAL
+struct rand_data *jent_entropy_collector_alloc_raw(unsigned int osr,
+						   unsigned int flags);
+/* Its self tests of the conditioning: 0, EHASH or EGCD. */
+JENT_INTERNAL
+int jent_raw_selftest(unsigned int flags);
+#endif
 
 #ifdef __cplusplus
 }
