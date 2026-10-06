@@ -1,6 +1,8 @@
-cmake_minimum_required(VERSION 3.22)
-
-project(jitterentropy C)
+# Only ever add_subdirectory()'d from the top-level CMakeLists.txt, whose
+# library target and JITTER_C_FLAGS everything below uses. No project() here: a
+# second project(jitterentropy) rewrote the cached jitterentropy_SOURCE_DIR and
+# jitterentropy_BINARY_DIR to this directory for everything configured after
+# it, and cleared PROJECT_VERSION here.
 set(CMAKE_C_STANDARD 11)
 
 # Whether floor() and ceil() need -lm depends on the C library. Deliberately
