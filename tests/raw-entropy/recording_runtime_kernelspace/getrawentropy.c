@@ -331,7 +331,7 @@ out:
  * --ntg1 Enable flag JENT_NTG1
  * --force-fips Enable flag JENT_FORCE_FIPS
  * --disable-memory-access Enable flag JENT_DISABLE_MEMORY_ACCESS
- * --disable-internal-timer Enable flag JENT_FORCE_INTERNAL_TIMER
+ * --disable-internal-timer Enable flag JENT_DISABLE_INTERNAL_TIMER
  * --force-internal-timer Enable flag JENT_FORCE_INTERNAL_TIMER
  * --osr Apply the given OSR value
  * --loopcnt Apply the given loop count value for the operation (i.e. apply it

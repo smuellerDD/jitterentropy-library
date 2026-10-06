@@ -36,7 +36,7 @@ install(CODE [[
 install(FILES ${_jent_unit_installed} DESTINATION ${JENT_SYSTEMD_UNITDIR})
 
 # Needs neither root nor the kernel: the daemon links and reports the
-# library's version. The service itself is tested in a VM, see nix/rngd.nix.
+# library's version.
 if(BUILD_TESTING)
     add_test(NAME rngd-version COMMAND jitterentropy-rngd --version)
     set_tests_properties(rngd-version PROPERTIES
