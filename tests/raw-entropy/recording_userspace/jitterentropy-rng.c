@@ -19,6 +19,7 @@
 
 #include "jitterentropy.h"
 #include "jitterentropy-memlock.h"
+#include "jitterentropy-options.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -31,24 +32,6 @@
 # include <io.h>
 #endif
 
-/*
- * Parse a complete numeric option value. A plain strtoul(str, NULL, 10) turns
- * a typo (or a follow-up option consumed as value) into 0 and the tool would
- * silently record with a configuration different from what was requested.
- */
-static int parse_ulong(const char *str, unsigned long *val)
-{
-	char *endptr;
-
-	errno = 0;
-	*val = strtoul(str, &endptr, 10);
-	if (endptr == str || *endptr != '\0' || errno != 0) {
-		fprintf(stderr, "Invalid numeric value \"%s\"\n", str);
-		return 1;
-	}
-	return 0;
-}
-
 int main(int argc, char * argv[])
 {
 	unsigned long long size, rounds;
@@ -60,7 +43,7 @@ int main(int argc, char * argv[])
 	size_t i;
 
 	if (argc < 2) {
-		fprintf(stderr, "%s <number of measurements> [--ntg1|--force-fips|--disable-memory-access|--disable-internal-timer|--force-internal-timer|--all-caches|--osr <OSR>|--max-mem <NUM>|--hloopcnt <NUM>|--hex]\n", argv[0]);
+		fprintf(stderr, "%s <number of measurements> [" JENT_OPTIONS_USAGE "|" JENT_OPTIONS_USAGE_OSR "|--hex]\n", argv[0]);
 		return 1;
 	}
 
@@ -94,155 +77,12 @@ int main(int argc, char * argv[])
 	argv++;
 
 	while (argc > 1) {
-		if (!strncmp(argv[1], "--ntg1", 6))
-			flags |= JENT_NTG1;
-		else if (!strncmp(argv[1], "--force-fips", 12))
-			flags |= JENT_FORCE_FIPS;
-		else if (!strncmp(argv[1], "--disable-memory-access", 23))
-			flags |= JENT_DISABLE_MEMORY_ACCESS;
-		else if (!strncmp(argv[1], "--disable-internal-timer", 24))
-			flags |= JENT_DISABLE_INTERNAL_TIMER;
-		else if (!strncmp(argv[1], "--force-internal-timer", 22))
-			flags |= JENT_FORCE_INTERNAL_TIMER;
-		else if (!strncmp(argv[1], "--all-caches", 12))
-			flags |= JENT_CACHE_ALL;
-		else if (!strncmp(argv[1], "--osr", 5)) {
-			unsigned long val;
+		int ret_opt = jent_parse_option(&argc, &argv, &flags, &osr);
 
-			argc--;
-			argv++;
-			if (argc <= 1) {
-				fprintf(stderr, "OSR value missing\n");
-				return 1;
-			}
-
-			if (parse_ulong(argv[1], &val) || val >= UINT_MAX)
-				return 1;
-			osr = (unsigned int)val;
-		} else if (!strncmp(argv[1], "--max-mem", 9)) {
-			unsigned long val;
-
-			argc--;
-			argv++;
-			if (argc <= 1) {
-				fprintf(stderr, "Maximum memory value missing\n");
-				return 1;
-			}
-
-			if (parse_ulong(argv[1], &val))
-				return 1;
-			/* A repeated option replaces the field rather than or-ing in. */
-			flags &= ~(unsigned int)JENT_MAX_MEMSIZE_MASK;
-			switch (val) {
-			case 0:
-				/* Allow to set no option */
-				break;
-			case 1:
-				flags |= JENT_MAX_MEMSIZE_1kB;
-				break;
-			case 2:
-				flags |= JENT_MAX_MEMSIZE_2kB;
-				break;
-			case 3:
-				flags |= JENT_MAX_MEMSIZE_4kB;
-				break;
-			case 4:
-				flags |= JENT_MAX_MEMSIZE_8kB;
-				break;
-			case 5:
-				flags |= JENT_MAX_MEMSIZE_16kB;
-				break;
-			case 6:
-				flags |= JENT_MAX_MEMSIZE_32kB;
-				break;
-			case 7:
-				flags |= JENT_MAX_MEMSIZE_64kB;
-				break;
-			case 8:
-				flags |= JENT_MAX_MEMSIZE_128kB;
-				break;
-			case 9:
-				flags |= JENT_MAX_MEMSIZE_256kB;
-				break;
-			case 10:
-				flags |= JENT_MAX_MEMSIZE_512kB;
-				break;
-			case 11:
-				flags |= JENT_MAX_MEMSIZE_1MB;
-				break;
-			case 12:
-				flags |= JENT_MAX_MEMSIZE_2MB;
-				break;
-			case 13:
-				flags |= JENT_MAX_MEMSIZE_4MB;
-				break;
-			case 14:
-				flags |= JENT_MAX_MEMSIZE_8MB;
-				break;
-			case 15:
-				flags |= JENT_MAX_MEMSIZE_16MB;
-				break;
-			case 16:
-				flags |= JENT_MAX_MEMSIZE_32MB;
-				break;
-			case 17:
-				flags |= JENT_MAX_MEMSIZE_64MB;
-				break;
-			case 18:
-				flags |= JENT_MAX_MEMSIZE_128MB;
-				break;
-			case 19:
-				flags |= JENT_MAX_MEMSIZE_256MB;
-				break;
-			case 20:
-				flags |= JENT_MAX_MEMSIZE_512MB;
-				break;
-			default:
-				fprintf(stderr, "Unknown maximum memory value\n");
-				return 1;
-			}
-		} else if (!strncmp(argv[1], "--hloopcnt", 10)) {
-			unsigned long val;
-
-			argc--;
-			argv++;
-			if (argc <= 1) {
-				fprintf(stderr, "Hash loop count value missing\n");
-				return 1;
-			}
-
-			if (parse_ulong(argv[1], &val))
-				return 1;
-			flags &= ~(unsigned int)JENT_MAX_HASHLOOP_MASK;
-			switch (val) {
-			case 0:
-				flags |= JENT_HASHLOOP_1;
-				break;
-			case 1:
-				flags |= JENT_HASHLOOP_2;
-				break;
-			case 2:
-				flags |= JENT_HASHLOOP_4;
-				break;
-			case 3:
-				flags |= JENT_HASHLOOP_8;
-				break;
-			case 4:
-				flags |= JENT_HASHLOOP_16;
-				break;
-			case 5:
-				flags |= JENT_HASHLOOP_32;
-				break;
-			case 6:
-				flags |= JENT_HASHLOOP_64;
-				break;
-			case 7:
-				flags |= JENT_HASHLOOP_128;
-				break;
-			default:
-				fprintf(stderr, "Unknown hashloop value\n");
-				return 1;
-			}
+		if (ret_opt < 0)
+			return 1;
+		if (ret_opt > 0) {
+			/* One of the options all tools share. */
 		} else if (!strncmp(argv[1], "--hex", 5)) {
 			hex = 1;
 		} else {
