@@ -52,18 +52,21 @@ echo $((testruns+1)) > $STATE
 # for i in jent_raw_noise_restart.??.data; do mv $i $(echo $i | cut -d. -f1).000$(echo $i | cut -d. -f2).$(echo $i | cut -d. -f3) ; done
 # for i in jent_raw_noise_restart.???.data; do mv $i $(echo $i | cut -d. -f1).00$(echo $i | cut -d. -f2).$(echo $i | cut -d. -f3) ; done
 # for i in jent_raw_noise_restart.????.data; do mv $i $(echo $i | cut -d. -f1).0$(echo $i | cut -d. -f2).$(echo $i | cut -d. -f3) ; done
-printf -v testruns "%05d" $testruns
+#
+# Padded into a name of its own: as a number, the padded value would be read as
+# octal by the arithmetic below, which aborts the script at 00008.
+printf -v runid "%05d" "$testruns"
 
 if [ ! -x "$KCAPIRNG" ]
 then
-	echo "Test tool $KCAPIRNG not found" > $OUTFILE.$testruns.data
+	echo "Test tool $KCAPIRNG not found" > $OUTFILE.$runid.data
 	echo "Test tool $KCAPIRNG not found"
 	testruns=$TESTS
 else
 	# The vanilla interface delivers the raw time stamps: --timestamps
 	# turns 1001 of them into the 1000 time deltas of the restart. The
 	# out-of-tree module delivers deltas, for which it is dropped.
-	( (  /usr/local/sbin/getrawentropy -f /sys/kernel/debug/jitterentropy_testing/jent_raw_hires -s 1000 --timestamps > $OUTFILE.$testruns.data ) & )
+	( (  /usr/local/sbin/getrawentropy -f /sys/kernel/debug/jitterentropy_testing/jent_raw_hires -s 1000 --timestamps > $OUTFILE.$runid.data ) & )
 	$KCAPIRNG -n "jitterentropy_rng" -b 2000
 fi
 

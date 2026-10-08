@@ -1,12 +1,12 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # This test is intended to analyze the entropy rate of the common operation
 # when adjusting the hashloop count and memory size. It invokes the common
 # operation with all supported memory sizes and hashloop iteration counts and
 # measures its execution time.
 #
-# The testing disables the maximum memory check to allow analyzing all
-# memory sizes.
+# Each memory size is set explicitly with --max-mem, which the library uses
+# as given, so that all memory sizes can be analyzed.
 
 . ./invoke_testing_helper.sh
 
