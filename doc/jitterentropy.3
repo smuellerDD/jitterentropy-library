@@ -112,7 +112,14 @@ to the API function receives the Jitter RNG state with the parameter
 .BR ec
 and the FIPS health test failure with the parameter
 .BR health_failure .
-his function must be called before
+The callback is invoked in FIPS mode only - with
+.BR JENT_FORCE_FIPS ,
+.B JENT_NTG1
+or the FIPS mode of the system - every time the health test results of an
+instance are checked while failure bits stand, with every bit then standing.
+As the bits of an instance stay set, it may be invoked more than once for the
+same failure.
+This function must be called before
 .BR jent_entropy_init ()
 as after this call, the change of the callback is denied.
 .LP
@@ -146,12 +153,12 @@ parameters which should be identical to the subsequent invocation of
 .BR jent_entropy_collector_alloc ().
 When specifying an oversampling rate
 .IR osr
-different than the default, the startup test honor this value and adjust
+different than the default, the startup test honors this value and adjusts
 the self-test cut-off thresholds to the same values as used at runtime.
 .LP
 .BR jent_selftest ()
-runs the known answer tests of the conditioning component, SHA3-256 and
-XDRBG-256. These are the tests
+runs the known answer tests of the conditioning component: SHA3-256,
+SHAKE-256 and XDRBG-256. These are the tests
 .BR jent_entropy_init ()
 performs before any other, offered separately for callers that have to repeat
 them periodically over the lifetime of a long-running process, as FIPS 140-3
@@ -224,22 +231,22 @@ high-resolution timer instead of using the hardware time stamp. Commonly,
 the startup self test performed with
 .BR jent_entropy_init ()
 uses the hardware timer with precedence if it is identified to be appropriate
-for entropy collection. If the internal timer is not compiled, requesting
-this flag returns an error. Even though a separate thread is spawned
-to provide a high-resolution time stamp, this entire operation is completely
-thread-safe as all relevant data is maintained as part of the
+for entropy collection, and falls back to the internal timer otherwise; once
+it has fallen back, or the internal timer has been forced anywhere in the
+process, every later collector of the process uses the internal timer. If the
+internal timer is not compiled, requesting this flag returns an error. The
+counting thread and its state belong to the
 .IR entropy_collector
-data structure.
+it was spawned for, so instances do not interfere with one another; this does
+not make a single instance safe to use from two threads.
 .TP
 .B JENT_DISABLE_INTERNAL_TIMER
 This flag can be used to ensure that the internal timer is not used.
 If this flag is used together with
 .B JENT_FORCE_INTERNAL_TIMER
 this is treated as an error and the allocation returns NULL. Also,
-in case
-.BR jent_entropy_init ()
-detects that the internal timer shall be used but the disable flag
-is set, the allocation returns NULL.
+in case the startup self test concluded that the internal timer shall be
+used, the allocation returns NULL.
 .TP
 .B JENT_FORCE_FIPS
 Force full FIPS 140 and SP800-90B compliance irrespective of the
@@ -307,10 +314,9 @@ caller.
 .IR len
 is a length value provided by the caller indicating the number
 of bytes the CPU Jitter Random Number Generator shall generate.
-The caller can provide any value greater than 0. The caller
-must ensure that
+The caller must ensure that
 .IR data
-is at least als big as
+is at least as big as
 .IR len
 indicates. The function returns the number of bytes generated
 when the request is successfully completed. In case of an error, one of
@@ -356,8 +362,22 @@ indicates that the Repetition Count Test with memory failed permanently.
 indicates that a
 .BR jent_selftest ()
 run bound to this instance failed; it lasts until a later bound run passes.
+A
+.I len
+of 0 generates nothing and returns 0, or the error an instance out of
+service would return for a longer request.
 .LP
-When either online health test fails the Jitter RNG will not
+Health test failures are reported only in FIPS mode - with
+.BR JENT_FORCE_FIPS ,
+.B JENT_NTG1
+or the FIPS mode of the system. Outside it,
+.BR jent_read_entropy ()
+never returns an RCT, APT, lag or RCT-with-memory error; the failures are
+still recorded, see
+.BR jent_entropy_collector_health_failure ()
+below.
+.LP
+When a health test failure is reported, the Jitter RNG will not
 have any data provided in
 .IR data .
 The entropy collector instance will remain in error state. To recover,
@@ -375,7 +395,8 @@ fact that the assumed entropy rate of the noise source is lower.
 is a service function to and therefore operates identically to
 .BR jent_read_entropy ()
 with the exception that it automatically re-allocates the entropy collector
-if a health test failure is observed. Before reallocation, a
+if an intermittent health test failure is reported, which happens in FIPS
+mode only. Before reallocation, a
 new power-on health test is performed. The allocation of the new entropy
 collector automatically increases the OSR by one. This is done based
 on the idea that a health test failure indicates that the assumed
@@ -460,7 +481,7 @@ future use.
 .LP
 .BR jent_version ()
 returns
-.BR JENT_VERSION.
+.BR JENT_VERSION .
 .PP
 .SH FIPS 140-3 Considerations
 In order for the Jitter RNG to execute compliant to FIPS 140-3 and by
@@ -471,11 +492,11 @@ considerations must be applied:
 The FIPS mode is enabled by using the
 .IR JENT_FORCE_FIPS
 flag during initialization of the Jitter RNG library. On Linux, the
-the FIPS mode is transparently enabled if the entire operating system
+FIPS mode is transparently enabled if the entire operating system
 was booted in FIPS mode, usually by using the "fips=1" Linux kernel
 command line parameter.
 .TP
-.B Perform heursitic entropy analysis
+.B Perform heuristic entropy analysis
 The test tool set provided as part of the Jitter RNG library source
 distribution contains the helper to obtain raw noise data at runtime
 as well as at initialization time to calculate the SP800-90B entropy rate.
@@ -503,6 +524,6 @@ for cryptographic operations, the output of
 can be used for seeding a deterministic random number generator.
 .PP
 .SH SEE ALSO
-http://www.chronox.de provides the design description,
+https://www.chronox.de/jent/ provides the design description,
 the entropy and statistical analyses as well as a number of
 test cases.

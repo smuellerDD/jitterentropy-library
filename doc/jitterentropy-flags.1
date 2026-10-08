@@ -82,13 +82,8 @@ or
 .B JENT_NTG1
 imply it.
 .SH EXIT STATUS
-0 on success. 1 for an invalid argument, and for flags that
-.BR jent_entropy_init_ex ()
-and
-.BR jent_entropy_collector_alloc ()
-of
-.BR jitterentropy (3)
-refuse: a reserved bit, a field value above its maximum,
+0 on success. 1 for an invalid argument, and for flags the tool reports as
+refused: a reserved bit, a field value above its maximum,
 .B JENT_FORCE_INTERNAL_TIMER
 with
 .B JENT_DISABLE_INTERNAL_TIMER
@@ -101,7 +96,17 @@ with
 or
 .BR JENT_NTG1 .
 The number or the table is printed nonetheless, and the reasons go to
-standard error. The system's FIPS mode, which refuses
+standard error.
+.PP
+The combinations are what
+.BR jent_entropy_init_ex ()
+and
+.BR jent_entropy_collector_alloc ()
+of
+.BR jitterentropy (3)
+refuse. The library of this version does not refuse the first two: it
+makes no use of a reserved bit and clamps a field to its maximum. The
+system's FIPS mode, in which the library refuses
 .B JENT_DISABLE_MEMORY_ACCESS
 as well, is not checked.
 .SH EXAMPLES
