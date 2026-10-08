@@ -12,7 +12,7 @@
 .\" Formatted or processed versions of this manual, if unaccompanied by
 .\" the source, must acknowledge the copyright and authors of this work.
 .\" License.
-.TH JITTER_RNG 4 2026-09-30 "jitterentropy x.y.z" "Kernel Interfaces Manual"
+.TH JITTER_RNG 4 2026-10-08 "jitterentropy x.y.z" "Kernel Interfaces Manual"
 .\" groff re-enables hyphenation per paragraph unless HY is 0.
 .nr HY 0
 .nh
@@ -136,7 +136,10 @@ flags of every collector, as in
 - the module has no internal timer - and, in FIPS or NTG.1 mode,
 .B JENT_DISABLE_MEMORY_ACCESS
 refuse the load. The memory size and hash loop fields set the memory access
-region and the hash loop count of every collector.
+region and the hash loop count of every collector; a memory size above the
+bound of
+.B max_memsize
+refuses the load.
 .TP
 .BR ntg1 =1
 AIS 20/31 NTG.1 compliant operation; sets
@@ -153,10 +156,33 @@ implies it.
 Size the memory access region from all data caches; sets
 .BR JENT_CACHE_ALL .
 .TP
+.BR max_memsize =\fIn\fR
+The memory access region of every collector in kB, a power of two up to
+524288, 65536 on a 32 bit kernel; any other value refuses the load. It sets
+the memory size field of
+.B flags
+and takes precedence over it, and the health test recovery then raises only
+the oversampling rate and the hash loop count. 0, the default, derives the
+size from the cache size and lets the recovery double it.
+.TP
+.BR max_instances =\fIn\fR
+The open character device instances allowed at once, 256 by default, 0 for
+no limit. A caller with
+.B CAP_SYS_RESOURCE
+is exempt.
+.TP
+.BR max_kcapi_instances =\fIn\fR
+The crypto API instances allowed at once for each user and container, 256
+by default, 0 for no limit. A caller with
+.B CAP_SYS_RESOURCE
+is exempt.
+.TP
 .BR selftest_interval =\fIn\fR
 Seconds between two self test runs of each instance. 0, the default, runs
 none after the load. A value above 2592000, 30 days, is lowered to it with a
-warning.
+warning; on a 32 bit kernel the bound is 2147483 at a
+.B HZ
+of 500 and 1073741 at 1000.
 .TP
 .BR hwrng_quality =\fIn\fR
 The entropy declared to
@@ -194,10 +220,11 @@ A buffer too small fails with
 .B EOVERFLOW
 and reports the length needed.
 .TP
-.BR JENT_IOCUUID ", " JENT_IOCVERSION ", " JENT_IOCOSR ", " JENT_IOCFLAGS ", " JENT_IOCHEALTH ", " JENT_IOCOUTPUT ", " JENT_IOCREINIT
+.BR JENT_IOCUUID ", " JENT_IOCVERSION ", " JENT_IOCOSR ", " JENT_IOCFLAGS ", " JENT_IOCHEALTH ", " JENT_IOCOUTPUT ", " JENT_IOCREINIT ", " JENT_IOCMEMSIZE ", " JENT_IOCHASHLOOPS
 A single value of the status document: the identifier, the library version,
 the oversampling rate, the flags, the health test failures, the output
-counters and the reinitializations - what the
+counters, the reinitializations, the memory access region in bytes - 0
+without memory access - and the hash loop count - what the
 .B jent_entropy_collector_*
 accessors of
 .BR jent_status (3)
@@ -218,45 +245,66 @@ Test interface only, the character device fails it with
 .BR ENOTTY :
 set the loop count of the measurements recorded, a
 .I __u64
-up to 4294967295; 0, the default, keeps the configured one.
+up to
+.BR JENT_LOOPCNT_MAX ,
+65536; 0, the default, keeps the configured one.
 .SH ERRORS
 .TP
 .B EAGAIN
 A nonblocking read found the instance busy: another reader, its periodic self
 test, or a status ioctl or
 .I /proc
-read of it. On every interface also a read whose intermittent health test
-failure could not be recovered from.
+read of it.
 .TP
 .B EFAULT
 The module load: the startup of the Jitter RNG failed - its self tests, the
-timer, the startup health tests or the
-.B osr
-and
-.B flags
-it refuses; the kernel log names the error code. Under
+timer or the startup health tests; the kernel log names the error code. Under
 .I fips=1
 the kernel panics instead. A failed
 .BR JENT_IOCSELFTEST .
-On every interface a read on an instance with a permanent health test or
-self test failure; under
+On the crypto API a read on an instance with a permanent health test or self
+test failure; under
 .I fips=1
-a permanent health test failure panics the kernel.
+the kernel panics instead.
 .TP
 .B EINVAL
-On the test interface: an open with a
+The module load: an
+.B osr
+above 20, the
+.B flags
+refused under
+.BR PARAMETERS ,
+or a
+.B max_memsize
+that is not one of the sizes listed there. On the test interface: an open
+with a
 .B testing_osr
 above 20 or that records the memory access loop with
 .BR JENT_DISABLE_MEMORY_ACCESS ,
 a read of a size that is not a multiple of 8, and a
 .B JENT_IOCLOOPCNT
-above 4294967295.
+above 65536.
 .TP
 .B EIO
-A
+On every interface a read whose intermittent health test failure could not
+be recovered from, or was not tried, as by a nonblocking read; a later
+blocking read retries the recovery. On the character device and
+.I /dev/hwrng
+a read on an instance with a permanent health test or self test failure;
+under
+.I fips=1
+the kernel panics instead. A
 .B JENT_IOCSTATUS
 or a status file read for which no status document could be produced; an
 open of the test interface whose self test of the conditioning failed.
+.TP
+.B ENFILE
+An open of the character device beyond
+.BR max_instances ,
+or a crypto API instantiation beyond
+.BR max_kcapi_instances ,
+by a caller without
+.BR CAP_SYS_RESOURCE .
 .TP
 .B ENODATA
 A single value ioctl on an instance that has none.
