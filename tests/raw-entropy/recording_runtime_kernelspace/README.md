@@ -33,7 +33,7 @@ vanilla kernel follow these steps:
    the following command with a tool from libkcapi using the following command
 	`kcapi-rng -n "jitterentropy_rng" -b 2000000 > /dev/null`
 
-5. Process the obtained data with validation-runtime-kernel/processdata.sh
+5. Process the obtained data with validation-runtime/processdata.sh
 
    NOTE: The generated output is already in the correct format for
    processdata.sh and does not need to be converted any more.
@@ -48,7 +48,9 @@ Unlike the vanilla kernel interface, the out-of-tree module's debugfs interface
 delivers the output time deltas of the measure_jitter operation directly (i.e.
 the raw noise values as consumed by the health tests and the entropy pool,
 including the division by the common timer GCD). getrawentropy therefore prints
-the values unmodified; do NOT use the `--timestamps` option here.
+the values unmodified; do NOT use the `--timestamps` option here. The interface
+accepts u64 samples only, whatever the kernel version: compile getrawentropy
+with `-DRAW_DATATYPE_U64`, as the `invoke_testing*.sh` scripts do.
    
 ### Linux Entropy Recording and Validation
 
@@ -76,7 +78,7 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
   Jitter RNG. Its analysis tool is `validation-runtime/processdata.sh`
   
 * `invoke_testing_fips.sh`: This test tool initializes the Jitter RNG with
-  `JENT_FIPS` to obtain the FIPS 140 behavior. Its analysis tool is
+  `JENT_FORCE_FIPS` to obtain the FIPS 140 behavior. Its analysis tool is
   `validation-runtime/processdata.sh`
   
 * `invoke_testing_ntg1.sh`: This test tool initializes the Jitter RNG with

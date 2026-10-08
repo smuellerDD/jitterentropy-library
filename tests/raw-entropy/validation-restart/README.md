@@ -24,7 +24,7 @@ Use one of the following tools:
 * Common case: `processdata.sh` obtains the entropy rate for the restart test
   data obtained with `invoke_testing.sh` or `invoke_testing_fips.sh`.
   
-* NTG.1 case: `processdata_ntg.sh` obtains the entropy rate for the restart
+* NTG.1 case: `processdata_ntg1.sh` obtains the entropy rate for the restart
   test data obtained with `invoke_testing_ntg1.sh`.
 
 ## Conclusion
@@ -43,25 +43,31 @@ LOGFILE: Name of the log file. The default is $RESULTS_DIR/processdata.log.
 EATOOL: Path of the program used from the Entropy Assessment restart tool
 (usually, ea_restart).
 
-BUILD_EXTRACT: Indicates whether the script will build the extractlsb program.
-The default is "yes".
+BUILD_EXTRACT: Indicates whether the script will rebuild the extractlsb program
+from scratch (and remove it again on exit); with "no" it is not built at all
+and has to be built with `make` beforehand. The default is "yes", but
+processdata.sh sets "no" whenever RESULTS_DIR is set, which its own default
+always does; processdata_ntg1.sh builds it for its first set.
 
 MASK_LIST: Indicates the extraction method from each sample item. You can
 indicate one or more methods; the script will generate one bit stream data
-file set (var and single) for each extraction method. See below for a more
-detailed explanation.
+file for each extraction method. See `../validation-runtime/README.md` for a
+more detailed explanation.
 
-MAX_EVENTS: the size of the sample that will be extracted from the sample data.
-The default is 100000 (a 1% of the size of the sample file specified in the
-ROUNDS define macro). Notice that the minimum value suggested by SP800-90B is
-1000000, so you'll have to increase the default value (notice that this
-severely impacts in the performance and memory requirements of the python tool).
+MAX_EVENTS: the number of samples extracted from the restart data, which the
+script first concatenates into one file. The default is 1000.
 
 ### Parameters of processdata.sh
 
 ENTROPYDATA_DIR: Location of the sample data files (with .data extension)
 
-RESULTS_DIR: Location for the interim data bit streams (var and single),
-and results.
+RESULTS_DIR: Location for the interim data bit streams and results.
+processdata_ntg1.sh stores its three sets in `../results-analysis-restart`,
+`../results-analysis-hashloop-restart` and
+`../results-analysis-memaccloop-restart`.
+
+processdata.sh takes both from the environment. A result file already present
+in RESULTS_DIR is kept rather than computed again, so remove it to repeat an
+analysis.
 
 [1] https://github.com/usnistgov/SP800-90B_EntropyAssessment

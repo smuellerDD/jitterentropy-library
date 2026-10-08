@@ -1,76 +1,47 @@
 # Jitter RNG Daemon
 
-Using the Jitter RNG core, the rngd provides an entropy source that feeds
-into the Linux /dev/random device if its entropy runs low. It updates the
-/dev/random entropy estimator such that the newly provided entropy
-unblocks /dev/random.
+`jitterentropy-rngd` feeds the output of the Jitter RNG into the Linux
+`/dev/random` device with the `RNDADDENTROPY` ioctl: once at startup, whenever
+the kernel's entropy estimate runs low, and every ten minutes regardless (by
+default; `--phase1` and `--phase2` change that schedule). It needs root
+(`CAP_SYS_ADMIN`). The man page `doc/jitterentropy-rngd.1` lists its options.
 
-The seeding of /dev/random also ensures that /dev/urandom benefits from
-entropy. Especially during boot time, when the entropy of Linux is low,
-the Jitter RNGd provides a source of sufficient entropy.
+It used to be a project of its own,
+<https://github.com/smuellerDD/jitterentropy-rngd>, carrying a copy of the
+library. Here it links the library of this tree and shares its version;
+`CHANGES.md` in this directory is its history up to that point.
 
-By using the SP800-90B-compliant Jitter RNG core library, the RNGd itself
-is now fully SP800-90B compliant.
+## Build
 
-## Build Instructions
+	cmake -S . -B build -DENABLE_RNGD=ON
+	cmake --build build
+	cmake --install build
 
-To generate the shared library `make` followed by `make install`.
+or, linking the library's archive into the daemon,
 
-## Usage
+	make ENABLE_RNGD=1
+	make install ENABLE_RNGD=1
 
-See jitterentropy --help or see the man page jitterentropy-rngd.1.
+Both install the daemon to `sbin` and the systemd unit `jitterentropy.service`;
+`make install` installs its man page as well. The unit goes to
+`lib/systemd/system` below the prefix; `-DJENT_SYSTEMD_UNITDIR=<dir>`
+(`JENT_SYSTEMD_UNITDIR=<dir>` with make) names another directory.
 
-## Systemd Unit File
+## Systemd unit
 
-A systemd unit file is provided with jitterentropy.service which can be
-copied to /etc/systemd/system and enabled with the command
-`systemctl enable jitterentropy`.
+	systemctl enable --now jitterentropy
 
-The unit file ensures that the Jitter RNGd is started as one of the first
-daemons during the user space start process. This shall guarantee that
-any cryptographic daemons, like sshd or a web server, benefits from a seeded
-/dev/random and /dev/urandom device at the time they start up.
+The unit starts the daemon before `sysinit.target`, so that services needing
+random numbers find `/dev/random` seeded. It is of `Type=notify`: the daemon
+reports readiness once the kernel took its first injection.
 
-## Docker [![Docker CI](https://github.com/smuellerDD/jitterentropy-rngd/actions/workflows/docker-build-image.yml/badge.svg?event=push)](https://github.com/smuellerDD/jitterentropy-rngd/actions/workflows/docker-build-image.yml)
+## Docker
 
-Run using `docker compose`:
+From the root of the source tree:
 
-```sh
-docker compose up -d
-```
+	docker build -f rngd/Dockerfile -t jitterentropy-rngd .
+	docker run -d --name=rngd --restart=always \
+	    --cap-add=SYS_ADMIN --cap-drop=ALL \
+	    --network=none jitterentropy-rngd
 
-Manual steps:
-
-1. Build an image from the latest source code.
-```sh
-docker build -t smuellerdd/jitterentropy-rngd \
-    'https://github.com/smuellerDD/jitterentropy-rngd.git'
-```
-
-2. Create and run a container using the newly built image.
-```sh
-docker run -d --name=rngd --restart=always \
-    --cap-add=SYS_ADMIN --cap-drop=ALL \
-    --network=none smuellerdd/jitterentropy-rngd
-```
-
-## Version Numbers
-The version numbers for this library have the following schema:
-MAJOR.MINOR.PATCHLEVEL
-
-Changes in the major number implies API and ABI incompatible changes, or
-functional changes that require consumer to be updated (as long as this
-number is zero, the API is not considered stable and can change without a
-bump of the major version).
-
-Changes in the minor version are API compatible, but the ABI may change.
-Functional enhancements only are added. Thus, a consumer can be left
-unchanged if enhancements are not considered. The consumer only needs to
-be recompiled.
-
-Patchlevel changes are API / ABI compatible. No functional changes, no
-enhancements are made. This release is a bug fixe release only. The
-consumer can be left unchanged and does not need to be recompiled.
-
-## Author
-Stephan Mueller <smueller@chronox.de>
+or `docker compose -f rngd/docker-compose.yaml up -d`.
