@@ -139,6 +139,7 @@ $(NAMES): %: %.c
 
 # The mocked time source is compiled into this one program only.
 unit-mock: CFLAGS += -DJENT_CONF_ENABLE_MOCK_TIMER
+unit-noise: CFLAGS += -DJENT_CONF_ENABLE_MOCK_TIMER
 
 DBG-all: CFLAGS += -g -DDEBUG
 DBG-all: $(NAMES)
