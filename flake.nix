@@ -258,8 +258,12 @@
           boot.extraModprobeConfig = ''
             options jitter_rng verbose=1 ntg1=1 cache_all=1 selftest_interval=15
           '';
+          # libjitterentropy-kernel and its jitter_rng tool as well, which
+          # need the module: this is the only place they meet a real one.
           environment.systemPackages = [
-            (toolsFor pkgs)
+            ((toolsFor pkgs).overrideAttrs (old: {
+              cmakeFlags = (old.cmakeFlags or [ ]) ++ [ "-DENABLE_KERNEL_LIB=ON" ];
+            }))
           ] ++ (with pkgs; [
             fx
             htop
@@ -368,6 +372,17 @@
             # O_NONBLOCK reads: short-read cap and EAGAIN on contention.
             print(machine.succeed("python3 /etc/jitterentropy-nonblock-test.py"))
 
+            # libjitterentropy-kernel through its tool: the module and an
+            # instance, the status document, random bytes in both forms, and
+            # the self test, which needs CAP_SYS_ADMIN - the test runs as root.
+            print(machine.succeed("jitter_rng --info"))
+            machine.succeed("jitter_rng --status | jq -e .uuid")
+            machine.succeed("test \"$(jitter_rng --random 64 | wc -c)\" = 64")
+            machine.succeed(
+                "jitter_rng --random 16 --hex | grep -Eqx '[0-9a-f]{32}'"
+            )
+            print(machine.succeed("jitter_rng --selftest"))
+
             # The debugfs raw entropy test interface delivers the raw noise
             # time deltas of the measure_jitter operation.
             machine.succeed("dmesg --clear")
@@ -443,7 +458,7 @@
                          "jitterentropy-hashtime", "jitterentropy-cpuinfo",
                          "gcd", "extractlsb", "getrawentropy",
                          "jitterentropy-chardev-status",
-                         "jitterentropy-chardev-fields"):
+                         "jitterentropy-chardev-fields", "jitter_rng"):
                 machine.succeed(f"command -v {tool}")
           '';
         };

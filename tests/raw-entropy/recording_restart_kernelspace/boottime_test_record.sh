@@ -11,7 +11,8 @@
 #	   compile, install and reboot the kernel, and ensure that the
 #	   Linux kernel command line contains
 #	   `jitterentropy_testing.boot_raw_hires_test=1`
-#	2. Compile getrawentropy.c and install into /usr/local/sbin
+#	2. Compile getrawentropy.c and install into /usr/local/sbin - from
+#	   Linux 6.13 on with -DRAW_DATATYPE_U64, see getrawentropy.c
 #	3. Copy this file to /usr/local/sbin and make it executable and do not
 #	   forget restorecon if applicable
 #	4. Copy boottime_test_record.service to /etc/systemd/system/

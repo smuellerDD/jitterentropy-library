@@ -249,6 +249,13 @@ $(RNGD_NAME): $(RNGD_OBJS) lib$(NAME).a
 %.o: $(RNGD_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# The unit and health tests, through their own Makefiles: they absorb the
+# library sources rather than linking the library, so nothing here has to be
+# built first. CMake/CTest remains the primary way to run them.
+check:
+	$(MAKE) -C tests/unit check
+	$(MAKE) -C tests/health check
+
 # As CMake's rngd-version test: needs neither root nor the kernel.
 check-rngd: $(RNGD_NAME)
 	./$(RNGD_NAME) --version 2>&1 | grep -q '$(RNGD_NAME) $(LIBVERSION)'

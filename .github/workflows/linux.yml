@@ -419,8 +419,40 @@ jobs:
   fuzz:
     name: fuzzing
     runs-on: ubuntu-latest
+    # actions: read for the corpus of an earlier run below.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v5
+
+      # The corpus the last clean run on master kept, so that each run goes
+      # on from there rather than from nothing. Taken from the most recent
+      # completed run that still has one: a run whose fuzzing failed uploads
+      # none, and artifacts expire. None at all is not an error, and neither is
+      # a repository whose default branch has no such workflow yet.
+      - name: Fetch the corpus of an earlier run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          found=
+          for run in $(gh run list --repo "$GITHUB_REPOSITORY" \
+                         --workflow linux.yml --branch master \
+                         --status completed --limit 10 \
+                         --json databaseId --jq '.[].databaseId' ||
+                       true); do
+            if gh run download "$run" --repo "$GITHUB_REPOSITORY" \
+                 --name fuzz-corpus --dir . 2>/dev/null; then
+              found=$run
+              break
+            fi
+          done
+          if [ -n "$found" ]; then
+            echo "starting from the corpus of run $found:" \
+                 "$(find corpus-health corpus-api -type f 2>/dev/null | wc -l) inputs"
+          else
+            echo "::notice::no earlier corpus, starting from nothing"
+          fi
 
       # Without the sanitizers: they cost fuzz-api about a factor of ten in
       # executions per second, which is most of what it has. The corpus this
@@ -486,7 +518,7 @@ jobs:
 
       # Only reached when nothing above crashed, so this is the corpus of a
       # clean run: worth keeping, as the next run starts from it rather than
-      # from nothing.
+      # from nothing - see the first step.
       - name: Upload the corpus
         uses: actions/upload-artifact@v6
         with:

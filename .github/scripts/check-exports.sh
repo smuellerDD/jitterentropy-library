@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Check that a shared library of the Makefile build exports the global: list
-# of its version script and nothing else. CMakeLists.txt checks that list
-# against the header at configure time; this checks the built library against
-# the list.
+# Check that a shared library exports the global: list of its version script
+# and nothing else. CMakeLists.txt checks that list against the header at
+# configure time; this checks the built library against the list - in CI for
+# the Makefile build, and as the exported-symbols* tests of a shared CMake
+# build.
 #
 # Every defined global counts, not only the jent_ ones: on macOS, where the
 # linker takes no version script, -fvisibility=hidden alone limits the export

@@ -109,11 +109,19 @@ static int write_config(const struct opts *opts, const char *file,
 	snprintf(filename, sizeof(filename), "%s/%s", opts->sysfs_dir, file);
 	config = fopen(filename, "r+");
 	/*
-	 * If we cannot open the file, we silently ignore that (e.g. for older)
-	 * variants of the in-kernel Jitter RNG.
+	 * Without the file - an older in-kernel Jitter RNG, or a parameter
+	 * directory that is not the module's - the default can still be
+	 * recorded, which is what the instance uses anyway. Anything else
+	 * would be recorded with the default instead of what was asked for,
+	 * and the recording would not say so.
 	 */
-	if (!config)
-		return 0;
+	if (!config) {
+		if (!val)
+			return 0;
+		printf("Configuration parameter %s cannot be set (%s), so %u cannot be applied\n",
+		       filename, strerror(errno), val);
+		return -EINVAL;
+	}
 
 	/* Create string to write and write it */
 	snprintf(filename, sizeof(filename), "%u", val);
