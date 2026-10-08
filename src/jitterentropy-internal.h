@@ -447,8 +447,10 @@ static inline uint64_t jent_umod64(uint64_t dividend, uint64_t divisor)
 /* Here, not in jitterentropy-sha3.h: struct rand_data embeds it. */
 struct jent_sha_ctx {
 	uint64_t state[25];
-	uint8_t partial[JENT_SHA3_256_SIZE_BLOCK];
 	size_t msg_len;
+	uint8_t partial[JENT_SHA3_256_SIZE_BLOCK];
+	/* XDRBG scratch, in the collector's secure memory, not on the stack. */
+	uint8_t xdrbg_block[JENT_XDRBG_SIZE_STATE + JENT_SHA3_256_SIZE_DIGEST];
 	uint8_t r;
 	uint8_t rword;
 	/*
@@ -458,9 +460,6 @@ struct jent_sha_ctx {
 	uint8_t digestsize;
 	uint8_t padding;
 	uint8_t initially_seeded:1;
-
-	/* XDRBG scratch, in the collector's secure memory, not on the stack. */
-	uint8_t xdrbg_block[JENT_XDRBG_SIZE_STATE + JENT_SHA3_256_SIZE_DIGEST];
 };
 
 /*
@@ -580,14 +579,6 @@ struct rand_data
 	unsigned short rct_mem_cutoff;	/* RCT intermittent cutoff */
 	unsigned short rct_mem_cutoff_permanent; /* RCT permanent cutoff */
 
-	unsigned int apt_base_set:1;	/* APT base reference set? */
-	unsigned int is_fips_enabled:1;
-	unsigned int enable_notime:1;	/* Use internal high-res timer */
-	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
-	unsigned int in_recovery:1;	/* Flag to indicate a recovery op. */
-	unsigned int stuck_prime:2;	/* Deltas the stuck test still takes
-					 * as its reference, not judged */
-
 	/*
 	 * A jent_selftest() run bound to this instance failed. Deliberately
 	 * not a bit in health_failure: that word only reports under FIPS,
@@ -596,6 +587,14 @@ struct rand_data
 	 * another thread, and setting a bitfield would rewrite its neighbors.
 	 */
 	int selftest_failed;
+
+	unsigned int apt_base_set:1;	/* APT base reference set? */
+	unsigned int is_fips_enabled:1;
+	unsigned int enable_notime:1;	/* Use internal high-res timer */
+	unsigned int max_mem_set:1;	/* Maximum memory configured by user */
+	unsigned int in_recovery:1;	/* Flag to indicate a recovery op. */
+	unsigned int stuck_prime:2;	/* Deltas the stuck test still takes
+					 * as its reference, not judged */
 
 #ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
 	unsigned int notime_running:1;		/* a started thread to stop */
