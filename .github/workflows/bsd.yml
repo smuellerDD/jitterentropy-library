@@ -29,9 +29,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y cmake gmake
+            pkg install -y bash cmake gmake
           run: |
-            sh .github/scripts/vm-build-and-test.sh
+            bash .github/scripts/vm-build-and-test.sh
 
   openbsd:
     name: OpenBSD
@@ -45,9 +45,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg_add -I cmake gmake
+            pkg_add -I bash cmake gmake
           run: |
-            sh .github/scripts/vm-build-and-test.sh
+            bash .github/scripts/vm-build-and-test.sh
 
   netbsd:
     name: NetBSD
@@ -61,9 +61,9 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            /usr/sbin/pkg_add cmake gmake
+            /usr/sbin/pkg_add bash cmake gmake
           run: |
-            sh .github/scripts/vm-build-and-test.sh
+            bash .github/scripts/vm-build-and-test.sh
 
   dragonflybsd:
     name: DragonFly BSD
@@ -77,6 +77,6 @@ jobs:
           usesh: true
           copyback: false
           prepare: |
-            pkg install -y cmake gmake
+            pkg install -y bash cmake gmake
           run: |
-            sh .github/scripts/vm-build-and-test.sh
+            bash .github/scripts/vm-build-and-test.sh
