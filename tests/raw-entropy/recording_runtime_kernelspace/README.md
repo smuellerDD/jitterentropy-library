@@ -159,13 +159,8 @@ for the timing variations when selecting a memory block size that is larger than
 the L1 data cache size. This approach now allows to almost exclusively
 measure the timing variations derived from L2 or higher caches, or RAM itself.
   
-The access pattern is selected when the module is compiled, so the module
-has to be built for this test with
-`make -C linux_kernel KCFLAGS=-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS` and loaded
-before the script is invoked with `JENT_DETERMINISTIC_MODULE=1`. The loaded
-module does not report its pattern; the script refuses to run without that
-confirmation, as a module built without the define measures the random access
-pattern instead.
+The memory access loop recorded with `--memaccess` always uses the
+deterministic access pattern, so the module needs no special build for it.
 
 The script `invoke_testing_memloop.sh` performs the testing with all commonly
 supported memory sizes. Along with the analysis script 
