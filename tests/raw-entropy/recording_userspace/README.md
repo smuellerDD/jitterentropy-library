@@ -19,6 +19,10 @@ need to test a different code tree, please pull the respective code.
 The results are stored in `../results-measurements` which then needs to be
 processed with the `validation-runtime` and `validation-restart` logic.
 
+A runtime data set holds 1000000 samples and the restart data sets are
+1000 x 1000 (`NUM_EVENTS`, `NUM_EVENTS_RESTART` and `NUM_RESTART` in
+`invoke_testing_helper.sh`), as SP800-90B requires for an assessment.
+
 For analyzing different aspects of the Jitter RNG, different flavors of the
 test script are provided as follows which all obtain the raw unconditioned
 noise data to be analyzed with the tool set given in `validation-runtime`:
@@ -27,7 +31,7 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
   Jitter RNG. Its analysis tool is `validation-runtime/processdata.sh`
   
 * `invoke_testing_fips.sh`: This test tool initializes the Jitter RNG with
-  `JENT_FIPS` to obtain the FIPS 140 behavior. Its analysis tool is
+  `JENT_FORCE_FIPS` to obtain the FIPS 140 behavior. Its analysis tool is
   `validation-runtime/processdata.sh`
   
 * `invoke_testing_ntg1.sh`: This test tool initializes the Jitter RNG with
@@ -38,9 +42,7 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
 * `invoke_testing_memloop.sh`: This test tool initializes the Jitter RNG with
   `JENT_NTG1` to obtain the BSI NTG.1 behavior. Its analysis tool is
   `validation-runtime/processdata_memloop.sh`. See [NTG.1 Raw Noise Sources] for
-  details. NOTE: This tool may need to be invoked with root permissions as it
-  attempts to allocate up to 512MB of mlock'ed memory (which typically exceeds
-  the ulimit for a normal user).
+  details.
   
 * `invoke_testing_hashloop.sh`: This test tool initializes the Jitter RNG with
   `JENT_NTG1` to obtain the BSI NTG.1 behavior. Its analysis tool is
@@ -54,21 +56,19 @@ noise data to be analyzed with the tool set given in `validation-runtime`:
   `validation-runtime/processdata_hashloop.sh` and
   `validation-runtime/processdata_memloop.sh`. The goal of the test is to
   analyze the common runtime behavior depending on the selected parameters for
-  the hashloop and memory size. NOTE: This tool may need to be invoked with root
-  permissions as it attempts to allocate up to 512MB of mlock'ed memory (which
-  typically exceeds the ulimit for a normal user).
+  the hashloop and memory size.
 
-The `JENT_NTG1` and `JENT_FORCE_FIPS` modes require the memory of the entropy
+The `JENT_NTG1` and `JENT_FORCE_FIPS` modes require the state of the entropy
 collector to be locked into RAM, i.e. the allocation fails when the operating
-system refuses the lock. How much memory may be locked is not set by the library
-but bounded per process by the operating system: `RLIMIT_MEMLOCK` on POSIX
-systems and the process working set quota on Windows. For these two modes the
-recording tools raise that limit as far as the process is allowed to - see
-`tests/jitterentropy-memlock.h`. Raising the `RLIMIT_MEMLOCK` *hard* limit requires
-privileges, so the large memory sizes (see the notes on root permissions above)
-still need the tool to be invoked as root, whereas the smaller ones now work as
-a normal user; where the limit is not sufficient, the tool reports that the
-Jitter RNG handle cannot be allocated.
+system refuses the lock. The memory access region is not part of that state and
+is never locked, so its size - up to 512MB in the memory size tests - does not
+count against the limit: a collector locks a few pages of state whatever its
+memory size, and the tools run as a normal user. How much memory may be locked is bounded per
+process by the operating system - `RLIMIT_MEMLOCK` on POSIX systems and the
+process working set quota on Windows - and the recording tools raise it as far
+as the process is allowed to (see `tests/jitterentropy-memlock.h`); where it is
+still not sufficient, the tool reports that the Jitter RNG handle cannot be
+allocated.
 
 ## Core Selection on Hybrid CPUs
 
@@ -234,37 +234,44 @@ above applies here as well.
 If the `invoke_testing.sh` is not helpful for performing the test, the following
 explanation outlines the specific test steps to be invoked manually.
 
-For recoding the raw entropic data, the user has to compile the code.
-To do that, he has to copy the following files into the recording directory
-prior compilation. These files are taken from his Jitter RNG implementation
-that he uses:
+The recording tools are compiled from the Jitter RNG code the `jitterentropy`
+symbolic link in this directory points to, which is the root of this source
+tree. To record a different Jitter RNG implementation, point the link to the
+root of that source tree instead - the tools take `jitterentropy.h` from there,
+the library code from its `src/` and `arch/` directories, and
+`jitterentropy-memlock.h` from its `tests/` directory.
 
-	* jitterentropy-base.c
+The raw entropy recording tool is compiled with:
 
-	* jitterentropy.h
+	make -f Makefile.hashtime
 
-Depending on the version of the Jitter RNG, the following commands have to
-be invoked for compiling the test tool:
+The raw entropy data is recorded with the following command, which writes
+`<rounds per repeat>` time deltas, one per line, into each of the
+`<number of repeats>` files `<filename>-0001.data`, `<filename>-0002.data`, ...:
 
-	* Jitter RNG 3.x: make -f Makefile.hashtime
+	./jitterentropy-hashtime <rounds per repeat> <number of repeats> <filename> [options]
 
-The test is now invoked with the following command:
+For example, the runtime data set and the restart data sets are recorded with:
 
-	* Jitter RNG 3.x:
+	./jitterentropy-hashtime 1000000 1 ../results-measurements/jent-raw-noise
+	./jitterentropy-hashtime 1000 1000 ../results-measurements/jent-raw-noise-restart
 
-		./jitterentropy-hashtime > /dev/shm/jent-raw.data
+Invoke the tool without arguments to list its options; the man pages
+`jitterentropy-hashtime.1`, `jitterentropy-rng.1` and `jitterentropy-osr.1` in
+`doc/` describe them. `jitterentropy-flags` turns the same options, or `JENT_*`
+names, into the flags number and back (`jitterentropy-flags.1`).
 
 In addition, the collection of output data from the Jitter RNG must be
 compiled with the following command:
 
 	make -f Makefile.rng
 
-To generate output data from the Jitter RNG for validation, invoke:
+To generate output data from the Jitter RNG for validation, invoke the
+following command, which writes the given number of 256 bit blocks to stdout
+(in hexadecimal with `--hex`, otherwise binary) and the status of the entropy
+collector to stderr:
 
-	./jitterentropy-rng 2> /dev/shm/jent.rngout
-
-The program is compiled to collect a sample of 10000000 events each (see 
-the ROUNDS parameter in Makefile).
+	./jitterentropy-rng <number of blocks> [options] > ../results-measurements/jent-conditioned.data
 
 ## NTG.1 Recording
 

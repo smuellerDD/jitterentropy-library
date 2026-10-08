@@ -4,7 +4,10 @@ The following Jitter RNG tests are available in the following
 directories:
 
 * `raw-entropy`: Gathering of the raw unprocessed entropy data and restart test
-  entropy data required for the SP800-90B analysis
+  entropy data required for the SP800-90B analysis. Its `recording_library`
+  is `libjitterentropy-record`, the recording as a library for programs where
+  none of the recording tools can run, built only with
+  `-DENABLE_RECORDING=ON` (CMake) or `ENABLE_RECORDING=1` (make)
 
 * `gcd`: Self test of the GCD analysis applied to the time deltas
 
@@ -17,6 +20,9 @@ directories:
 
 * `chardev`: Status reporting of the Linux kernel module character device
 
+* `linking`: A consumer of the installed library, built against an install
+  prefix through `find_package()` rather than as part of this build
+
 * `efi`: The library as an EFI application, which is the build with no
   operating system under it at all
 
@@ -26,11 +32,18 @@ directories:
 
 | Program | Covers |
 | --- | --- |
-| `unit-sha3` | `src/jitterentropy-sha3.c`: the library's own known answer tests, the FIPS 202 SHA3-256 vectors, incremental absorb, SHAKE256 / XDRBG block generation, state allocation |
+| `unit-sha3` | `src/jitterentropy-sha3.c`: the library's own known answer tests, the FIPS 202 SHA3-256 vectors, incremental absorb, SHAKE256 / XDRBG block generation, the rate of an initialized state |
 | `unit-gcd` | `src/jitterentropy-gcd.c`: the Euclidean GCD, the delta history analysis and each condition it reports, and the establish-once-per-clock semantics of the common timer GCD - the platform clock and the counting thread keep a divisor of their own |
-| `unit-arch` | `arch/`: the time source, CPU count, cache size discovery, FIPS mode query, the (secure) allocator, the OS CSPRNG and thread placement |
-| `unit-uuid` | `src/jitterentropy-uuid.c`: the RFC 4122 version 4 layout, the version and variant bits, and what is emitted when the platform has no CSPRNG to ask |
-| `unit-base` | `src/jitterentropy-base.c` and `src/jitterentropy-status.c`: the decoding of every memory size and hash loop flag, oversampling rate clamping, collector allocation, the `jent_read_entropy*` error contract, the JSON status and UUID output, the startup self tests, the compliance modes and the internal timer |
+| `unit-arch-cache` | `arch/`: cache size discovery - the sysfs walk, the CPUID and `/proc/cpuinfo` fallbacks, the `sysconf` fallback and the rounding of what they find |
+| `unit-arch-fips` | `arch/`: the FIPS mode query, including the file read behind it and its retry on `EINTR` |
+| `unit-arch-memory` | `arch/`: the (secure) allocator and its guard pages |
+| `unit-arch-ncpu` | `arch/`: the CPU count and the highest CPU - the Linux affinity mask and the set it grows, the online list and `sysconf` fallbacks behind it, and the Windows group affinity |
+| `unit-arch-sched` | `arch/`: thread placement and yielding, `jent_thread_pin_to_cpu()` and `jent_yield()` |
+| `unit-arch-timer` | `arch/`: the time source |
+| `unit-uuid` | `src/jitterentropy-uuid.c`: the RFC 9562 version 4 layout, the version and variant bits, the OS CSPRNG read behind it and its `/dev/urandom` fallback, and the counter-derived version 8 UUID used without a CSPRNG |
+| `unit-base-api` | `src/jitterentropy-base.c` and `src/jitterentropy-status.c` through the API: initialization, collector allocation and its conflicting flags, the `jent_entropy_collector_*` accessors, the `jent_read_entropy*` error contract, the JSON status and UUID output, the startup self tests and what a failed one stops, the compliance modes and the secure memory query |
+| `unit-base-config` | The decoding of every memory size and hash loop flag, oversampling rate clamping and the version |
+| `unit-base-gen` | The generation itself: the internal timer, the measurement and memory access variants, the startup states and the matrix of generation modes |
 | `unit-fault` | The failure paths, by fault injection: the allocator, `mmap`/`mprotect`/`mlock`, `sysconf`, the CPU affinity query, `getrandom()`, the FIPS indicator and the time source itself are each made to fail so the code behind them runs |
 | `unit-mock` | The mocked time source and `jent_health_insert_timestamp()`: registering a time source, replaying stamps through the health tests, and the collector reallocation that only happens when the startup measurements are bad |
 | `unit-notime` | The replaceable timer-less back end: registering an implementation, the guards on an incomplete one, and the thread backend when no thread can be created |
@@ -93,6 +106,7 @@ Each harness is built twice:
   ```
   cmake -S . -B build-fuzz -DENABLE_FUZZING=ON
   cmake --build build-fuzz
+  mkdir -p corpus-health corpus-api
   ./build-fuzz/tests/fuzz/fuzz-health -max_total_time=300 corpus-health/
   ./build-fuzz/tests/fuzz/fuzz-api    -max_total_time=300 corpus-api/
   ```
@@ -138,8 +152,9 @@ Two entry points judge time stamps the library did not measure itself.
 `jent_health_insert_timestamp()` runs the health tests over stamps handed to
 it, forming the delta exactly as the noise source does. That is what a raw
 entropy recording is replayed through: the same code that will judge the noise
-source at runtime, reaching the same verdict on the same numbers. It is part of
-the API and needs no special build. Note that the first stamp is a delta
+source at runtime, reaching the same verdict on the same numbers. It is
+internal, not exported, so a replay absorbs `src/jitterentropy-health.c` as
+`tests/health` does, but needs no special build. Note that the first stamp is a delta
 against whatever the collector last measured, so a replay should either discard
 its first result or insert the first stamp of the recording twice.
 
@@ -188,7 +203,21 @@ Assertions are limited to what each module promises its callers.
 Where a
 property cannot be established on the machine or in the build at hand - no
 discoverable cache size, no lockable memory, the lag predictor compiled out -
-the case is reported as skipped rather than passed over silently.
+the case is reported as skipped rather than passed over silently. A program
+none of whose cases could run exits with 77, which CTest reports as skipped
+rather than passed.
+
+A skip for want of a collector has to be earned. The reason is asked of
+something other than the allocation under test: whether memory can be
+locked at all, whether the startup over the same flags gives a verdict of the
+machine's clock, whether a repeated allocation comes after all. A collector
+that should have come and did not is a failure.
+
+The verdicts a clock the startup rejects produces - ESTUCK, EHEALTH, ERCT,
+EMINVARVAR - are the same ones a defect in the health tests produces. On a
+machine whose clock and lockable memory are known to be good, set
+`JENT_UT_STRICT=1` in the environment: every verdict of the machine then fails
+the case it would have skipped.
 
 A handful of branches are deliberately left uncovered, because reaching them
 would mean breaking the thing that detects them: the arms where a known-answer
@@ -205,11 +234,14 @@ into the test and reads the result back with `jent_health_failure()`. Each case
 verifies that the expected error is reported *and* that no unrelated health
 test reported one, so the failure is attributed to the test under examination.
 
-Both the common and the NTG.1 cutoff configurations are covered. The tool takes
-the oversampling rate as its only argument and defaults to `JENT_MIN_OSR`:
+Both the common and the NTG.1 cutoff configurations are covered. The program
+is `jitterentropy-health` in the CMake build (under `tests/health/` of the
+build directory, and installed with the tools) and `tests/health/health` when
+built with its own Makefile. It takes the oversampling rate as an optional
+argument, defaulting to `JENT_MIN_OSR`; `-h` / `--help` prints its usage:
 
 ```
-tests/health/health [osr]
+jitterentropy-health [osr]
 ```
 
 ## Recomputing the cutoffs
@@ -230,8 +262,13 @@ python3 tests/health/cutoffs.py            # print the cutoffs as C
 python3 tests/health/cutoffs.py --check    # compare against the source
 ```
 
-`--check` exits non-zero on a mismatch and takes about ten seconds. It is not
-part of the CTest suite, mpmath being a dependency nothing else here has.
+`--check` compares against `src/jitterentropy-health.c`, or against the file
+given after it (`--check FILE`), and exits non-zero on a mismatch; it takes
+about ten seconds. `--table NAME`, repeatable, restricts either to the lookup
+table of that name in the source (`jent_apt_cutoff_lookup`, say), leaving out
+the RCT macros, and `--dps N` sets the decimal digits mpmath works with
+(default 60). It is not part of the CTest suite, mpmath being a dependency
+nothing else here has.
 
 The common-case tables of the repetition count test with memory come out of
 that last formula as the cap of their window, which is a cutoff the test cannot
@@ -245,7 +282,7 @@ over them, which is how a raw entropy recording is judged by the very tests
 that will judge the noise source at runtime:
 
 ```
-tests/health/health --replay FILE [osr] [--ntg1]
+jitterentropy-health --replay FILE [osr] [--ntg1]
 ```
 
 One decimal or `0x`-prefixed value per line; blank lines and `#` comments are
@@ -304,6 +341,11 @@ permanent cutoff of the RCT with memory in the common configuration, which
 the intermittent APT cutoff from osr 15 on, which has grown into the maximum of
 512 that FIPS 140-2 IG 7.19 resolution #16 caps it at - the same value the
 permanent cutoff already has.
+
+## The daemon
+
+With `-DENABLE_RNGD=ON`, `rngd-version` runs `jitterentropy-rngd --version`,
+which needs neither root nor the kernel.
 
 ## With no operating system
 

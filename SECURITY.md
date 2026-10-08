@@ -8,6 +8,21 @@ basis.
 If you detect any new security issues, please file a bug report or send
 a private email to <smueller@chronox.de>.
 
+## 2026-09-25
+
+Fixed in 3.7.1.
+
+The measurement that primes `->prev_time` ahead of each block was passed to
+the health tests. Its delta spans the time since the previous block, and as the
+base symbol of an APT window it left that window unable to fire. In 3.7.0,
+the APT also kept its window across the stages of the FIPS / NTG.1 startup,
+comparing one noise source against a base symbol of the other. Both weakened
+the APT for the affected windows. Versions up to 3.7.0 are affected.
+
+The startup's monotonicity check derived the start time from the end time and
+a non-zero delta, so it could never count a timer running backwards and never
+returned `ENOMONOTONIC`. Versions up to 3.7.0 are affected.
+
 ## 2024-12-30
 
 The API call `jent_read_entropy_safe` contains the logic to transparently handle
