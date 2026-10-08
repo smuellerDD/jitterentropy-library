@@ -193,7 +193,7 @@ endif()
 # name the archive. Libs.private is for what the archive depends on
 # (-pthread, the stack protector flag, -lbcrypt), which only a static link has
 # to be told about; those are appended further down.
-set(JITTER_PC_LIBS "-l${CMAKE_PROJECT_NAME}")
+set(JITTER_PC_LIBS "-l${PROJECT_NAME}")
 set(JITTER_PC_LIBS_PRIVATE "")
 
 # Appended to the Cflags line of the .pc file. Only the Windows static build
@@ -751,7 +751,7 @@ if(BUILD_TESTING)
             list(APPEND _rng_tests rng-${_name})
         endforeach()
         set_tests_properties(${_rng_tests} PROPERTIES ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>")
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:${PROJECT_NAME}>")
     endif()
 endif()
 
