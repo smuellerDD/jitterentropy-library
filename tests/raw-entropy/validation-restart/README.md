@@ -46,9 +46,9 @@ EATOOL: Path of the program used from the Entropy Assessment restart tool
 BUILD_EXTRACT: Indicates whether the script will rebuild the extractlsb program
 from scratch (and remove it again on exit); with "no" it is not built at all
 and has to be built with `make` beforehand. The default is "yes";
-processdata.sh sets "no" when its caller gives RESULTS_DIR, as
-analyze_options.sh does after building extractlsb itself, and
-processdata_ntg1.sh builds it for its first set only.
+processdata.sh sets "no" when its caller gives RESULTS_DIR, which is then
+expected to have built extractlsb itself, and processdata_ntg1.sh builds it
+for its first set only.
 
 MASK_LIST: Indicates the extraction method from each sample item. You can
 indicate one or more methods; the script will generate one bit stream data

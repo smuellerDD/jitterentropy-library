@@ -6,8 +6,8 @@
 # Configuration values                                     #
 ############################################################
 
-# The first and second argument, or the environment as analyze_options.sh
-# passes them; processdata_helper.sh supplies the defaults.
+# The first and second argument, or the environment; processdata_helper.sh
+# supplies the defaults.
 ENTROPYDATA_DIR=${1:-$ENTROPYDATA_DIR}
 RESULTS_DIR=${2:-$RESULTS_DIR}
 
