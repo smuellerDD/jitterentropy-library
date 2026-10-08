@@ -26,7 +26,7 @@ jobs:
         os: [ windows-latest, windows-11-arm ]
         shared: [ 'ON', 'OFF' ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: cmake -S . -B build -DBUILD_SHARED_LIBS=${{ matrix.shared }}
@@ -53,7 +53,7 @@ jobs:
     name: clang-cl
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: cmake -S . -B build -T ClangCL
@@ -90,7 +90,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -132,7 +132,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -190,7 +190,7 @@ jobs:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf input
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cygwin/cygwin-install-action@v6
         with:

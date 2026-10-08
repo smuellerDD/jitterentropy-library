@@ -28,7 +28,7 @@ jobs:
         cc: [ gcc, clang ]
         shared: [ 'ON', 'OFF' ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: |
@@ -63,7 +63,7 @@ jobs:
     name: i686 (gcc -m32)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install 32-bit toolchain
         run: |
@@ -109,7 +109,7 @@ jobs:
             flags: '-static'
             expect: statically linked
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install musl toolchain
         run: |
@@ -190,7 +190,7 @@ jobs:
     env:
       CMAKE_VERSION: 3.31.9
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build and test in a ${{ matrix.name }} container
         run: |
@@ -249,7 +249,7 @@ jobs:
       matrix:
         cc: [ gcc, clang ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Configure
         run: |
@@ -308,7 +308,7 @@ jobs:
       matrix:
         cc: [ gcc, clang ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # A build of its own, not an addition to the sanitizers job: the thread
       # and the address sanitizer cannot be combined, and a run under one says
@@ -349,7 +349,7 @@ jobs:
     name: fuzzing
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Without the sanitizers: they cost fuzz-api about a factor of ten in
       # executions per second, which is most of what it has. The corpus this
@@ -417,7 +417,7 @@ jobs:
       # clean run: worth keeping, as the next run starts from it rather than
       # from nothing.
       - name: Upload the corpus
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fuzz-corpus
           path: |
@@ -430,7 +430,7 @@ jobs:
       # failed the job by then.
       - name: Upload the artifacts of a failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: fuzz-artifacts
           path: artifacts/
@@ -440,7 +440,7 @@ jobs:
     name: coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install gcovr
         run: |
@@ -466,7 +466,7 @@ jobs:
           cmake --build build --target coverage
 
       - name: Upload the report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-html
           path: build/coverage/

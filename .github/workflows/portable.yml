@@ -27,7 +27,7 @@ jobs:
       matrix:
         os: [ ubuntu-latest, macos-latest ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build
         run: make -j 4
@@ -113,7 +113,7 @@ jobs:
         os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest ]
         shared: [ 'ON', 'OFF' ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # CMAKE_INSTALL_LIBDIR is pinned so the later steps can name the install
       # tree, and the prefix is a native path for Windows cmake.
