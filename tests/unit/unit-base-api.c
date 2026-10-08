@@ -255,6 +255,165 @@ static void test_status(void)
 }
 
 /*
+ * The value of @key inside the object named @section of a status document, as
+ * the text after the colon: enough for the flat fields this checks, with no
+ * JSON parser. NULL when either is missing.
+ */
+static const char *ut_status_field(const char *doc, const char *section,
+				   const char *key)
+{
+	const char *p = section ? strstr(doc, section) : doc;
+
+	if (!p)
+		return NULL;
+	p = strstr(p, key);
+	if (!p)
+		return NULL;
+	p += strlen(key);
+	if (strncmp(p, ": ", 2))
+		return NULL;
+
+	return p + 2;
+}
+
+/* Whether the field reads as @want, followed by a separator. */
+static int ut_status_is(const char *doc, const char *section, const char *key,
+			const char *want)
+{
+	const char *v = ut_status_field(doc, section, key);
+	size_t len = strlen(want);
+
+	return v && !strncmp(v, want, len) &&
+	       (v[len] == ',' || v[len] == '\n');
+}
+
+/* The field as a number, or ~0 when it is missing or not one. */
+static unsigned long ut_status_num(const char *doc, const char *section,
+				   const char *key)
+{
+	const char *v = ut_status_field(doc, section, key);
+	char *end;
+	unsigned long n;
+
+	if (!v)
+		return ~0UL;
+	n = strtoul(v, &end, 10);
+
+	return end == v ? ~0UL : n;
+}
+
+/*
+ * What the status document says, not only that it is one: each health test
+ * failure bit lands in its own field and no other, and the configuration
+ * fields agree with the accessors that report the same state through another
+ * path. The collector's fields are set directly where reaching a state for
+ * real would take a failing noise source or a process-wide switch.
+ */
+static void test_status_values(void)
+{
+	static const struct {
+		unsigned int bit;
+		const char *section;
+		const char *key;
+	} bits[] = {
+		{ JENT_APT_FAILURE,		"\"apt\"",	   "\"intermittent\"" },
+		{ JENT_APT_FAILURE_PERMANENT,	"\"apt\"",	   "\"permanent\"" },
+		{ JENT_RCT_FAILURE,		"\"rct\"",	   "\"intermittent\"" },
+		{ JENT_RCT_FAILURE_PERMANENT,	"\"rct\"",	   "\"permanent\"" },
+		{ JENT_RCT_MEM_FAILURE,		"\"rctMemory\"", "\"intermittent\"" },
+		{ JENT_RCT_MEM_FAILURE_PERMANENT, "\"rctMemory\"", "\"permanent\"" },
+#ifdef JENT_HEALTH_LAG_PREDICTOR
+		{ JENT_LAG_FAILURE,		"\"lag\"",	   "\"intermittent\"" },
+		{ JENT_LAG_FAILURE_PERMANENT,	"\"lag\"",	   "\"permanent\"" },
+#endif
+	};
+	struct rand_data *ec = jent_entropy_collector_alloc(0, 0);
+	char buf[8192];
+	size_t i, j;
+
+	jent_ut_group("the values in jent_status");
+
+	if (!ec) {
+		JENT_UT_SKIP("the status values", "no collector could be allocated");
+		return;
+	}
+
+	for (i = 0; i < JENT_ARRAY_SIZE(bits); i++) {
+		unsigned int wrong = 0;
+
+		ec->health_failure = bits[i].bit;
+		if (jent_status(ec, buf, sizeof(buf))) {
+			JENT_UT_FAIL("%s", "no status document");
+			continue;
+		}
+
+		for (j = 0; j < JENT_ARRAY_SIZE(bits); j++) {
+			if (!ut_status_is(buf, bits[j].section, bits[j].key,
+					  i == j ? "true" : "false"))
+				wrong++;
+		}
+		jent_ut_checks++;
+		if (wrong)
+			JENT_UT_FAIL("failure bit 0x%x: %u health fields read wrong",
+				     bits[i].bit, wrong);
+	}
+	ec->health_failure = 0;
+
+	if (jent_status(ec, buf, sizeof(buf))) {
+		JENT_UT_FAIL("%s", "no status document");
+		jent_entropy_collector_free(ec);
+		return;
+	}
+
+	JENT_UT_EQ(ut_status_num(buf, "\"configuration\"", "\"osr\""),
+		   jent_entropy_collector_osr(ec),
+		   "the oversampling rate is the accessor's");
+	JENT_UT_EQ(ut_status_num(buf, "\"configuration\"",
+				 "\"memoryBlockSizeBytes\""),
+		   jent_entropy_collector_memsize(ec),
+		   "the memory size is the accessor's");
+	JENT_UT_EQ(ut_status_num(buf, "\"hashLoopCount\"", "\"runtime\""),
+		   jent_entropy_collector_hashloops(ec),
+		   "the hash loop count is the accessor's");
+	JENT_UT_EQ(ut_status_num(buf, "\"hashLoopCount\"", "\"initialization\""),
+		   jent_entropy_collector_hashloops(ec) * JENT_HASH_LOOP_INIT,
+		   "the startup hash loop count is the runtime one tripled");
+	JENT_UT_EQ(ut_status_num(buf, "\"memoryLoopCount\"", "\"runtime\""),
+		   ec->memaccessloops, "the memory loop count is the collector's");
+	JENT_UT_EQ(ut_status_num(buf, "\"memoryLoopCount\"", "\"initialization\""),
+		   ec->memaccessloops * JENT_MEM_ACC_LOOP_INIT,
+		   "the startup memory loop count is the runtime one tripled");
+	JENT_UT_EQ(ut_status_num(buf, NULL, "\"reinitializations\""), 0,
+		   "a fresh collector has not been reinitialized");
+
+	/*
+	 * Set directly: a real reallocation needs a failing noise source, and
+	 * forcing the internal timer is one-way for the whole process.
+	 */
+	ec->reinit_count = 3;
+	ec->enable_notime = (ec->enable_notime ? 0 : 1);
+	if (!jent_status(ec, buf, sizeof(buf))) {
+		JENT_UT_EQ(ut_status_num(buf, NULL, "\"reinitializations\""),
+			   3, "the reinitializations are the collector's");
+		JENT_UT_TRUE(ut_status_is(buf, "\"configuration\"",
+					  "\"internalTimer\"",
+					  ec->enable_notime ? "true" : "false"),
+			     "the internal timer field follows the collector");
+	} else {
+		JENT_UT_FAIL("%s", "no status document");
+	}
+	ec->enable_notime = (ec->enable_notime ? 0 : 1);
+	ec->reinit_count = 0;
+	if (!jent_status(ec, buf, sizeof(buf)))
+		JENT_UT_TRUE(ut_status_is(buf, "\"configuration\"",
+					  "\"internalTimer\"",
+					  ec->enable_notime ? "true" : "false"),
+			     "both ways round");
+
+	jent_entropy_collector_free(ec);
+}
+
+/*
  * Every write in jent_status() is guarded by "does the rest still fit", and
  * that guard only takes its false side when the buffer runs out at exactly
  * that write. Sweeping the buffer length across the whole document walks the
@@ -661,6 +820,7 @@ int main(void)
 	test_collector_alloc();
 	test_alloc_flag_conflicts();
 	test_status();
+	test_status_values();
 	test_status_truncation();
 	test_uuid_api();
 	test_collector_accessors();

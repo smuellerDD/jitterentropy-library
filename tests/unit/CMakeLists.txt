@@ -64,3 +64,5 @@ endif()
 # own absorbed copy rather than for the whole build.
 jent_unit_test(unit-mock)
 target_compile_definitions(unit-mock PRIVATE JENT_CONF_ENABLE_MOCK_TIMER)
+jent_unit_test(unit-noise)
+target_compile_definitions(unit-noise PRIVATE JENT_CONF_ENABLE_MOCK_TIMER)

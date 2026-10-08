@@ -235,6 +235,40 @@ static void jent_test_verify_clean(const char *name, struct rand_data *ec,
 		failures++;
 }
 
+/*
+ * For the sample before a cutoff: none of @absent may have been raised yet. A
+ * test that fires one sample early is stricter than SP800-90B allows and
+ * raises its false positive rate, which the cases reaching the cutoff cannot
+ * see.
+ */
+static void jent_test_verify_quiet(const char *name, struct rand_data *ec,
+				   unsigned int samples, unsigned int absent)
+{
+	unsigned int mask = jent_health_failure(ec);
+	const char *result = (mask & absent) ?
+			     "FAILED (reported before its cutoff)" : "passed";
+
+	printf("  %-34s %6u samples -> ", name, samples);
+	jent_test_print_mask(mask);
+	printf(" : %s\n", result);
+
+	if (mask & absent)
+		failures++;
+}
+
+/* A cutoff the test derived itself, against the one the collector holds. */
+static void jent_test_verify_cutoff(const char *name, unsigned int got,
+				    unsigned int want)
+{
+	const char *result = got == want ? "passed" : "FAILED (wrong cutoff)";
+
+	printf("  %-34s %6u cutoff  -> expected %u : %s\n", name, got, want,
+	       result);
+
+	if (got != want)
+		failures++;
+}
+
 static void jent_test_skip(const char *name, const char *reason)
 {
 	printf("  %-34s %6s    -> skipped: %s\n", name, "-", reason);
@@ -272,17 +306,41 @@ static void jent_test_rct(unsigned int osr,
 	const unsigned int testmask = JENT_RCT_FAILURE |
 				      JENT_RCT_FAILURE_PERMANENT;
 
+	unsigned int want, want_permanent;
+
 	jent_test_init(&ec, osr, inittype);
+
+	/*
+	 * The cutoffs of SP800-90B section 4.4.1, and NTG.1's eight-fold
+	 * stricter ones rounded up, derived here rather than read back from
+	 * the collector, so that a wrong divisor shows.
+	 */
+	want = JENT_HEALTH_RCT_INTERMITTENT_CUTOFF(osr);
+	want_permanent = JENT_HEALTH_RCT_PERMANENT_CUTOFF(osr);
+	if (inittype == jent_health_init_type_ntg1) {
+		want = (want + 7) / 8;
+		want_permanent = (want_permanent + 7) / 8;
+	}
+	jent_test_verify_cutoff("RCT intermittent cutoff", ec.rct_cutoff, want);
+	jent_test_verify_cutoff("RCT permanent cutoff",
+				ec.rct_cutoff_permanent, want_permanent);
+
 	cutoff = ec.rct_cutoff;
-	for (i = 0; i < cutoff; i++)
+	for (i = 0; i < cutoff - 1; i++)
 		jent_rct_insert(&ec, 1);
+	jent_test_verify_quiet("RCT intermittent, one before", &ec, cutoff - 1,
+			       testmask);
+	jent_rct_insert(&ec, 1);
 	jent_test_verify("RCT intermittent", &ec, cutoff, JENT_RCT_FAILURE,
 			 testmask);
 
 	jent_test_init(&ec, osr, inittype);
 	cutoff = ec.rct_cutoff_permanent;
-	for (i = 0; i < cutoff; i++)
+	for (i = 0; i < cutoff - 1; i++)
 		jent_rct_insert(&ec, 1);
+	jent_test_verify_quiet("RCT permanent, one before", &ec, cutoff - 1,
+			       JENT_RCT_FAILURE_PERMANENT);
+	jent_rct_insert(&ec, 1);
 	jent_test_verify("RCT permanent", &ec, cutoff,
 			 JENT_RCT_FAILURE_PERMANENT, testmask);
 }
@@ -312,16 +370,22 @@ static void jent_test_apt(unsigned int osr,
 		jent_test_skip("APT intermittent",
 			       "cutoff coincides with the permanent cutoff");
 	} else {
-		for (i = 0; i < cutoff; i++)
+		for (i = 0; i < cutoff - 1; i++)
 			jent_apt_insert(&ec, 0xc0ffee);
+		jent_test_verify_quiet("APT intermittent, one before", &ec,
+				       cutoff - 1, testmask);
+		jent_apt_insert(&ec, 0xc0ffee);
 		jent_test_verify("APT intermittent", &ec, cutoff,
 				 JENT_APT_FAILURE, testmask);
 	}
 
 	jent_test_init(&ec, osr, inittype);
 	cutoff = ec.apt_cutoff_permanent;
-	for (i = 0; i < cutoff; i++)
+	for (i = 0; i < cutoff - 1; i++)
 		jent_apt_insert(&ec, 0xc0ffee);
+	jent_test_verify_quiet("APT permanent, one before", &ec, cutoff - 1,
+			       JENT_APT_FAILURE_PERMANENT);
+	jent_apt_insert(&ec, 0xc0ffee);
 	jent_test_verify("APT permanent", &ec, cutoff,
 			 JENT_APT_FAILURE_PERMANENT, testmask);
 }
@@ -344,16 +408,22 @@ static void jent_test_lag(unsigned int osr,
 	cutoff = ec.lag_local_cutoff;
 	/* The first JENT_LAG_HISTORY_SIZE samples only prime the history. */
 	samples = JENT_LAG_HISTORY_SIZE + cutoff;
-	for (i = 0; i < samples; i++)
+	for (i = 0; i < samples - 1; i++)
 		jent_lag_insert(&ec, 0xc0ffee);
+	jent_test_verify_quiet("Lag local intermittent, one before", &ec,
+			       samples - 1, testmask);
+	jent_lag_insert(&ec, 0xc0ffee);
 	jent_test_verify("Lag local intermittent", &ec, samples,
 			 JENT_LAG_FAILURE, testmask);
 
 	jent_test_init(&ec, osr, inittype);
 	cutoff = ec.lag_local_cutoff_permanent;
 	samples = JENT_LAG_HISTORY_SIZE + cutoff;
-	for (i = 0; i < samples; i++)
+	for (i = 0; i < samples - 1; i++)
 		jent_lag_insert(&ec, 0xc0ffee);
+	jent_test_verify_quiet("Lag local permanent, one before", &ec,
+			       samples - 1, JENT_LAG_FAILURE_PERMANENT);
+	jent_lag_insert(&ec, 0xc0ffee);
 	jent_test_verify("Lag local permanent", &ec, samples,
 			 JENT_LAG_FAILURE_PERMANENT, testmask);
 

@@ -281,7 +281,8 @@ static void test_safe_recovery(void)
 	for (i = 0; i < sizeof(failures) / sizeof(failures[0]); i++) {
 		struct rand_data *ec =
 			jent_entropy_collector_alloc(0, JENT_FORCE_FIPS);
-		unsigned int osr_before;
+		unsigned int osr_before, hashloops_before;
+		size_t memsize_before;
 		ssize_t ret;
 
 		if (!ec) {
@@ -290,6 +291,8 @@ static void test_safe_recovery(void)
 		}
 
 		osr_before = ec->osr;
+		hashloops_before = jent_entropy_collector_hashloops(ec);
+		memsize_before = jent_entropy_collector_memsize(ec);
 		ec->health_failure = failures[i].bit;
 		ret = jent_read_entropy_safe(&ec, buf, sizeof(buf));
 
@@ -303,6 +306,17 @@ static void test_safe_recovery(void)
 				   "an intermittent failure is recovered from");
 			JENT_UT_TRUE(ec->osr > osr_before,
 				     "by raising the oversampling rate");
+			JENT_UT_TRUE(jent_entropy_collector_hashloops(ec) >
+				     hashloops_before,
+				     "and the hash loop count");
+			/*
+			 * The caller set no memory size, so the recovery
+			 * doubles the one the library derived - up to its
+			 * ceiling, which a default size is far below.
+			 */
+			JENT_UT_TRUE(jent_entropy_collector_memsize(ec) >
+				     memsize_before,
+				     "and the memory size");
 			JENT_UT_EQ(ec->reinit_count, 1u,
 				   "and the reinitialization is counted");
 		}
