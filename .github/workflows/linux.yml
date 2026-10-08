@@ -24,17 +24,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        # Every Ubuntu LTS still supported: each brings its own gcc, clang
+        # and glibc here, and its own kernel headers to linux-kmod and
+        # linux-dkms, which use the same list.
+        os: [ ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, ubuntu-22.04-arm, ubuntu-24.04-arm, ubuntu-26.04-arm ]
         cc: [ gcc, clang ]
         shared: [ 'ON', 'OFF' ]
     steps:
       - uses: actions/checkout@v5
 
+      # ENABLE_RECORDING: libjitterentropy-record gets record-colink here -
+      # the private copy's internal linkage beside libjitterentropy, with gcc
+      # and clang, shared and static. ENABLE_RNGD: jitterentropy-rngd, which
+      # no other CMake job builds, and its rngd-version test.
       - name: Configure
         run: |
           cmake -S . -B build \
             -DCMAKE_C_COMPILER=${{ matrix.cc }} \
-            -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+            -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
+            -DENABLE_RECORDING=ON \
+            -DENABLE_RNGD=ON
 
       - name: Build
         run: cmake --build build -j "$(nproc)"
@@ -93,6 +102,58 @@ jobs:
             ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
               echo "::warning::jitterentropy-rng $opt failed on this machine"
           done
+
+  # The only job building the stub half of jitterentropy-timer.c.
+  linux-no-internal-timer:
+    name: without internal timer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: cmake -S . -B build -DINTERNAL_TIMER=OFF
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run tests
+        run: |
+          ctest --test-dir build --output-on-failure -LE unreliable
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 > /dev/null
+
+  # acvpparser's jent backend, the CAVP test harness of the conditioner,
+  # #includes src/jitterentropy-sha3.c and builds it with -Werror. Unpinned:
+  # the current parser is the one that has to keep working.
+  linux-acvp-parser:
+    name: ACVP parser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/checkout@v5
+        with:
+          repository: smuellerDD/acvpparser
+          path: acvpparser
+
+      - name: Show the acvpparser revision
+        run: git -C acvpparser log -1 --format='%H %cd %s'
+
+      - name: Build the library
+        run: |
+          cmake -S . -B build -DBUILD_SHARED_LIBS=OFF
+          cmake --build build -j "$(nproc)" --target jitterentropy
+
+      # The archive supplies jent_memset_secure(), which sha3.c calls. LDFLAGS
+      # from the environment, as acvpparser's Makefile appends to it.
+      - name: Build acvpparser against this tree
+        run: |
+          LDFLAGS="$PWD/build/libjitterentropy.a" \
+            make -C acvpparser jent JENT_SRC="$PWD" -j "$(nproc)"
+
+      - name: Check its digests against hashlib
+        run: |
+          python3 .github/scripts/acvp-parser-check.py \
+            acvpparser/acvp-parser "$RUNNER_TEMP"
 
   linux-musl:
     name: musl, ${{ matrix.link }}
