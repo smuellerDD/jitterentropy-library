@@ -737,12 +737,15 @@ unsigned int jent_hashloop_cnt(unsigned int flags)
 }
 
 /*
- * Whether the startup self tests have run in this process. Written by whichever
+ * Whether an initialization has passed in this process. Written by whichever
  * thread gets there first and read by every allocation afterwards, so it is
- * reached through the atomic helpers: the store releases the state the tests
- * established - the timer's common GCD, the configuration switch blocks - and
- * the load acquires it, so a thread that skips the tests because this is set
- * also sees what they left behind.
+ * reached through the atomic helpers: the store releases the state the
+ * initialization established - the timer's common GCD, the configuration
+ * switch blocks - and the load acquires it, so a thread that skips the
+ * initialization because this is set also sees what it left behind. Set only
+ * once the whole initialization has passed, the startup measurement included:
+ * set earlier, an allocation racing a first initialization skipped its own
+ * and found no GCD yet.
  */
 static int jent_selftest_run = 0;
 
@@ -788,8 +791,13 @@ static struct rand_data
 	if (osr > JENT_MAX_OSR)
 		return NULL;
 
-	/* Force the self test to be run */
-	if (!jent_atomic_load_int(&jent_selftest_run) &&
+	/*
+	 * Run the initialization unless one has passed. Not for the collectors
+	 * that measure the clock: they are the initialization's own startup
+	 * measurement, or a recording that ran the self tests itself.
+	 */
+	if (!(flags & JENT_INT_MEASURE_CLOCK) &&
+	    !jent_atomic_load_int(&jent_selftest_run) &&
 	    jent_entropy_init_ex(osr, flags))
 		return NULL;
 
@@ -1341,21 +1349,23 @@ static inline int jent_entropy_init_common_pre(unsigned int flags)
 		ret = jent_gcd_selftest(flags);
 
 	/*
-	 * Marked ahead of the startup measurement, whose own collector must
-	 * not run these tests again - but only if they passed, and unmarked
-	 * otherwise, as jent_entropy_init_common_post() does: a failure
-	 * returns before that.
+	 * Unmarked if they failed, as jent_entropy_init_common_post() does: a
+	 * failure returns before that. Marked only there, once the startup
+	 * measurement has passed as well.
 	 */
-	jent_atomic_store_int(&jent_selftest_run, !ret);
+	if (ret)
+		jent_atomic_store_int(&jent_selftest_run, 0);
 
 	return ret;
 }
 
 static inline int jent_entropy_init_common_post(int ret)
 {
-	/* Unmark the execution of the self tests if they failed. */
-	if (ret)
-		jent_atomic_store_int(&jent_selftest_run, 0);
+	/*
+	 * Marked once everything passed, the common GCD established, and
+	 * unmarked if anything failed.
+	 */
+	jent_atomic_store_int(&jent_selftest_run, !ret);
 
 	return ret;
 }
