@@ -38,7 +38,7 @@ jobs:
               CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV=n
               CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=n
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install kernel headers
         run: |
@@ -73,7 +73,7 @@ jobs:
           - config: test-interface
             testinterface: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install DKMS and kernel headers
         run: |
@@ -191,7 +191,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.linux-in-tree-list.outputs.kernels) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: jitterentropy-library
 

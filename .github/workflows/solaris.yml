@@ -21,7 +21,7 @@ jobs:
     name: Solaris 11.4
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build and test in a Solaris VM
         uses: vmactions/solaris-vm@v1

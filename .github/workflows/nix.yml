@@ -28,7 +28,7 @@ jobs:
       consumers: ${{ steps.consumers.outputs.attrs }}
       crypto: ${{ steps.crypto.outputs.attrs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -136,7 +136,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.nix-list.outputs.pairs) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -177,7 +177,7 @@ jobs:
       matrix:
         attr: ${{ fromJSON(needs.nix-list.outputs.intree) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -207,7 +207,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -254,7 +254,7 @@ jobs:
       matrix:
         attr: ${{ fromJSON(needs.nix-list.outputs.cross) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -286,7 +286,7 @@ jobs:
       matrix:
         attr: ${{ fromJSON(needs.nix-list.outputs.consumers) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -331,7 +331,7 @@ jobs:
       matrix:
         attr: ${{ fromJSON(needs.nix-list.outputs.crypto) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -389,7 +389,7 @@ jobs:
     name: musl static
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: cachix/install-nix-action@v31
         with:
