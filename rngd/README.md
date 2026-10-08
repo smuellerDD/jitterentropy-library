@@ -1,5 +1,4 @@
-Jitter RNG Daemon
-=================
+# Jitter RNG Daemon
 
 Using the Jitter RNG core, the rngd provides an entropy source that feeds
 into the Linux /dev/random device if its entropy runs low. It updates the
@@ -13,18 +12,15 @@ the Jitter RNGd provides a source of sufficient entropy.
 By using the SP800-90B-compliant Jitter RNG core library, the RNGd itself
 is now fully SP800-90B compliant.
 
-Build Instructions
-==================
+## Build Instructions
 
 To generate the shared library `make` followed by `make install`.
 
-Usage
-=====
+## Usage
 
 See jitterentropy --help or see the man page jitterentropy-rngd.1.
 
-Systemd Unit File
-=================
+## Systemd Unit File
 
 A systemd unit file is provided with jitterentropy.service which can be
 copied to /etc/systemd/system and enabled with the command
@@ -35,8 +31,7 @@ daemons during the user space start process. This shall guarantee that
 any cryptographic daemons, like sshd or a web server, benefits from a seeded
 /dev/random and /dev/urandom device at the time they start up.
 
-Docker [![Docker CI](https://github.com/smuellerDD/jitterentropy-rngd/actions/workflows/docker-build-image.yml/badge.svg?event=push)](https://github.com/smuellerDD/jitterentropy-rngd/actions/workflows/docker-build-image.yml)
-======
+## Docker [![Docker CI](https://github.com/smuellerDD/jitterentropy-rngd/actions/workflows/docker-build-image.yml/badge.svg?event=push)](https://github.com/smuellerDD/jitterentropy-rngd/actions/workflows/docker-build-image.yml)
 
 Run using `docker compose`:
 
@@ -59,8 +54,7 @@ docker run -d --name=rngd --restart=always \
     --network=none smuellerdd/jitterentropy-rngd
 ```
 
-Version Numbers
-===============
+## Version Numbers
 The version numbers for this library have the following schema:
 MAJOR.MINOR.PATCHLEVEL
 
@@ -78,6 +72,5 @@ Patchlevel changes are API / ABI compatible. No functional changes, no
 enhancements are made. This release is a bug fixe release only. The
 consumer can be left unchanged and does not need to be recompiled.
 
-Author
-======
+## Author
 Stephan Mueller <smueller@chronox.de>
