@@ -265,18 +265,26 @@ cppcheck:
 install: install-man install-shared install-includes $(RECORD_INSTALL) \
 	$(RNGD_INSTALL)
 
-# The pages install-man installs: the library's, and the recording library's
-# where it is built.
-MANPAGES := doc/$(NAME).3
+# The pages install-man installs: the library's, the kernel module's where
+# there is one to load, the recording library's and the daemon's where they
+# are built. Each goes to the man<N> directory of its section.
+MANPAGES := doc/$(NAME).3 $(wildcard doc/jent_*.3)
+ifeq ($(UNAME_S),Linux)
+MANPAGES += doc/jitter_rng.4
+endif
 ifeq ($(ENABLE_RECORDING),1)
 MANPAGES += doc/$(RECORD_NAME).3
 endif
+ifeq ($(ENABLE_RNGD),1)
+MANPAGES += doc/$(RNGD_NAME).1
+endif
 
 install-man:
-	install -d -m 0755 $(DESTDIR)$(PREFIX)/share/man/man3
 	for page in $(MANPAGES); do \
-		install -m 644 $$page $(DESTDIR)$(PREFIX)/share/man/man3/ && \
-		gzip -n -f -9 $(DESTDIR)$(PREFIX)/share/man/man3/$${page##*/} || exit 1; \
+		man=$(DESTDIR)$(PREFIX)/share/man/man$${page##*.}; \
+		install -d -m 0755 $$man && \
+		install -m 644 $$page $$man/ && \
+		gzip -n -f -9 $$man/$${page##*/} || exit 1; \
 	done
 
 install-shared:

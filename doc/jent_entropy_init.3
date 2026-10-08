@@ -1,0 +1,249 @@
+'\" t
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JENT_ENTROPY_INIT 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jent_entropy_init, jent_entropy_init_ex, jent_selftest \- initialize and self-test the CPU Jitter Random Number Generator
+.SH LIBRARY
+Jitter RNG library
+.RI ( libjitterentropy ", " \-ljitterentropy ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy.h>
+.sp
+.BI "int jent_entropy_init(" void ");
+.sp
+.BI "int jent_entropy_init_ex(unsigned int " osr ", unsigned int " flags );
+.sp
+.BI "int jent_selftest(struct rand_data *" entropy_collector );
+.fi
+.SH DESCRIPTION
+.BR jent_entropy_init ()
+initializes the CPU Jitter Random Number Generator. The function
+first runs the self tests of the conditioning component and of the common
+timer divisor analysis, then performs statistical tests to verify that the
+underlying system offers the properties needed for measuring and collecting
+entropy. It tests the hardware timer and, where that fails and the internal
+timer is compiled in, the internal timer.
+If the initialization is successful, which implies that the
+statistical tests indicate the underlying system is appropriate,
+the call returns with
+.IR 0 .
+A return code other than
+.IR 0
+is one of the codes listed under
+.B ERRORS
+and indicates a failure where the calling application
+.B MUST NOT
+use the CPU Jitter Random Number Generator. Also note that,
+specifically error codes
+.IR ERCT
+and
+.IR EHEALTH
+indicate health test failure.
+.LP
+.BR jent_entropy_init_ex ()
+behaves identically to
+.BR jent_entropy_init ()
+except that it allows the caller to provide the
+.IR osr
+and
+.IR flags
+parameters. Pass the same values to every subsequent
+.BR jent_entropy_collector_alloc (3):
+the startup test validates exactly that configuration - the time source, the
+oversampling rate its cut-offs derive from, the memory size and the
+compliance mode. Once an initialization has passed, a collector allocation
+does not repeat it, so a collector allocated with other values is accepted on
+a startup that never tested them.
+When specifying an oversampling rate
+.IR osr
+different than the default, the startup test honors this value and adjusts
+the self-test cut-off thresholds to the same values as used at runtime.
+With
+.BR JENT_FORCE_INTERNAL_TIMER ,
+only the internal timer is tested; with
+.B JENT_DISABLE_INTERNAL_TIMER
+or
+.BR JENT_NTG1 ,
+only the hardware timer.
+An
+.I osr
+above
+.B JENT_MAX_OSR
+returns
+.IR EPROGERR ,
+as do
+.B JENT_FORCE_INTERNAL_TIMER
+together with
+.B JENT_DISABLE_INTERNAL_TIMER
+and
+.B JENT_DISABLE_MEMORY_ACCESS
+in FIPS or NTG.1 mode, all of which every collector allocation refuses.
+.B JENT_FORCE_INTERNAL_TIMER
+together with
+.B JENT_NTG1
+returns
+.IR ENOTIME .
+.LP
+Either call closes the window for the process-wide configuration:
+afterwards
+.BR jent_entropy_switch_notime_impl (3),
+.BR jent_entropy_set_notime_cpu ()
+and
+.BR jent_set_fips_failure_callback (3)
+return
+.IR \-EAGAIN ,
+whether the initialization passed or not.
+.LP
+.BR jent_selftest ()
+runs the known answer tests of the conditioning component: SHA3-256,
+SHAKE-256 and XDRBG-256. These are the
+tests
+.BR jent_entropy_init ()
+performs before any other. They are offered separately for callers that
+have to repeat them periodically over the lifetime of a long-running process,
+as FIPS 140-3 requires of a module that is not restarted, or on demand. The
+call returns
+.IR 0
+on success and
+.IR EHASH
+on failure, the same code
+.BR jent_entropy_init ()
+reports for it. The tests run on stack-local state alone, allocate nothing and
+never block; they may therefore be called from any thread at any time,
+including in parallel with entropy collection and before initialization -
+see
+.B THREAD SAFETY
+in
+.BR jitterentropy (3)
+for the one exception.
+The
+.IR entropy_collector
+argument binds the verdict to an instance: on failure, that instance is
+taken out of service and
+.BR jent_read_entropy (3)
+and
+.BR jent_read_entropy_safe ()
+return
+.B JENT_ERR_SELFTEST
+instead of data, in every mode of operation, not only under FIPS, until a
+later run bound to it passes. It may be
+.I NULL
+to obtain the verdict without binding it to an instance.
+.SH RETURN VALUE
+.BR jent_entropy_init (),
+.BR jent_entropy_init_ex ()
+and
+.BR jent_selftest ()
+return 0 on success and a positive error code otherwise.
+.SH ERRORS
+.BR jent_entropy_init ()
+and
+.BR jent_entropy_init_ex ()
+return 0 on success or one of the following positive codes;
+.BR jent_selftest ()
+returns 0 or
+.BR EHASH .
+Where both timers are tested, the code is the one of the last test.
+.TP
+.BR ENOTIME " (1)"
+No timer service is available. Also returned by
+.BR jent_entropy_init_ex ()
+for
+.B JENT_FORCE_INTERNAL_TIMER
+without the internal timer compiled in or together with
+.BR JENT_NTG1 ,
+and for the test of the hardware timer once the internal timer has been
+forced in the process.
+.TP
+.BR ECOARSETIME " (2)"
+The timer is too coarse for the RNG.
+.TP
+.BR ENOMONOTONIC " (3)"
+The timer is not monotonically increasing, or no reading reached the common
+timer divisor analysis.
+.TP
+.BR EMINVARIATION " (4)"
+Unused.
+.TP
+.BR EVARVAR " (5)"
+Unused.
+.TP
+.BR EMINVARVAR " (6)"
+The variations of the timer variations are too small.
+.TP
+.BR EPROGERR " (7)"
+Invalid argument to
+.BR jent_entropy_init_ex ():
+an
+.I osr
+above
+.BR JENT_MAX_OSR ,
+.B JENT_FORCE_INTERNAL_TIMER
+together with
+.BR JENT_DISABLE_INTERNAL_TIMER ,
+or
+.B JENT_DISABLE_MEMORY_ACCESS
+in FIPS or NTG.1 mode.
+.TP
+.BR ESTUCK " (8)"
+Too many stuck measurements during the startup.
+.TP
+.BR EHEALTH " (9)"
+A health test failed during the startup.
+.TP
+.BR ERCT " (10)"
+The repetition count test failed during the startup.
+.TP
+.BR EHASH " (11)"
+A known answer test of the conditioning component failed: SHA3-256,
+SHAKE-256 or XDRBG-256.
+.TP
+.BR EMEM " (12)"
+Memory for the startup could not be allocated - with
+.B JENT_FORCE_SECURE_MEM
+in effect, also memory with the extras it requires - or the internal timer
+could not be set up for it: fewer than two CPUs, no thread backend, or a
+counting thread that could not be started.
+.TP
+.BR EGCD " (13)"
+The self test of the common timer divisor analysis failed.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+See
+.B THREAD SAFETY
+in
+.BR jitterentropy (3)
+for the details.
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_entropy_init\fP(), \%\fBjent_entropy_init_ex\fP(), \%\fBjent_selftest\fP()
+T}	MT-Safe
+.TE
+.ad
+.SH SEE ALSO
+.BR jent_entropy_collector_alloc (3),
+.BR jent_read_entropy (3),
+.BR jitterentropy (3)
