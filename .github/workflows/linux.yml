@@ -1,0 +1,473 @@
+name: Linux
+
+# Linux user space: the CMake builds across the Ubuntu LTS releases and
+# architectures, 32 bit, musl, distributions, sanitizers, fuzzing and coverage.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux:
+    name: ${{ matrix.os }}, ${{ matrix.cc }}, ${{ matrix.shared == 'ON' && 'shared' || 'static' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        cc: [ gcc, clang ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure -LE unreliable
+
+      - name: Run tests
+        run: |
+          echo "RLIMIT_MEMLOCK soft=$(ulimit -Sl) hard=$(ulimit -Hl)"
+          cpuinfo=./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+          "$cpuinfo"
+          "$cpuinfo" --json | python3 -c 'import json,sys; json.load(sys.stdin)'
+          "$cpuinfo" --summary
+          export LD_LIBRARY_PATH="$PWD/build:$LD_LIBRARY_PATH"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  linux-32bit:
+    name: i686 (gcc -m32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 32-bit toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_FLAGS=-m32 \
+            -DCMAKE_EXE_LINKER_FLAGS=-m32 \
+            -DCMAKE_SHARED_LINKER_FLAGS=-m32
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run tests
+        run: |
+          file build/tests/gcd/gcd | grep -q '32-bit' || { echo "not a 32-bit build"; exit 1; }
+          ctest --test-dir build --output-on-failure -LE unreliable
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+          for opt in "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  linux-musl:
+    name: musl, ${{ matrix.link }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        link: [ dynamic, static ]
+        include:
+          - link: dynamic
+            flags: ''
+            expect: ld-musl
+          - link: static
+            flags: '-static'
+            expect: statically linked
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools binutils
+
+      # musl-gcc's specs drop the system include path, which carries the Linux
+      # UAPI headers jitterentropy_uapi.h needs. -idirafter keeps musl first.
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=musl-gcc \
+            -DCMAKE_C_FLAGS="${{ matrix.flags }} -idirafter /usr/include -idirafter /usr/include/x86_64-linux-gnu" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.flags }}"
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run tests
+        run: |
+          bin=build/tests/gcd/gcd
+          file "$bin"
+
+          if grep -q GLIBC < <(strings "$bin"); then
+            echo "::error::GLIBC symbol versions present, this is not musl"
+            exit 1
+          fi
+
+          file "$bin" | grep -q "${{ matrix.expect }}" || {
+            echo "::error::expected a ${{ matrix.link }} binary (${{ matrix.expect }})"
+            exit 1
+          }
+
+          ctest --test-dir build --output-on-failure -LE unreliable
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done
+
+  linux-distro:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The RHEL 7 generation (glibc 2.17, gcc 4.8), pinned at its last
+          # minor release; the other entries float. CentOS, as the public UBI 7
+          # content no longer carries a toolchain.
+          - name: CentOS 7
+            image: quay.io/centos/centos:centos7.9.2009
+            # No distro CMake meets the 3.22 floor here.
+            cmake: kitware
+          - name: RHEL 8
+            image: registry.access.redhat.com/ubi8/ubi:latest
+            cmake: distro
+          - name: RHEL 9
+            image: registry.access.redhat.com/ubi9/ubi:latest
+            cmake: distro
+          - name: RHEL 10
+            image: registry.access.redhat.com/ubi10/ubi:latest
+            cmake: distro
+          - name: SLES 15 SP7
+            image: registry.suse.com/bci/bci-base:15.7
+            cmake: distro
+          - name: SLES 16.1
+            image: registry.suse.com/bci/bci-base:16.1
+            cmake: distro
+          # quay.io: Docker Hub rate-limits anonymous pulls per source IP.
+          - name: Arch Linux
+            image: quay.io/archlinux/archlinux:latest
+            cmake: distro
+    env:
+      CMAKE_VERSION: 3.31.9
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a ${{ matrix.name }} container
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e CMAKE_SOURCE="${{ matrix.cmake }}" \
+            -e CMAKE_VERSION="$CMAKE_VERSION" \
+            "${{ matrix.image }}" \
+            bash -euxo pipefail -c '
+              # No apostrophes anywhere in here: the whole script is a
+              # single-quoted argument to bash -c, and one would end it.
+
+              # mirrorlist.centos.org is gone: point CentOS 7 at the vault.
+              # gpgcheck stays on with the key the image ships.
+              if [ -f /etc/yum.repos.d/CentOS-Base.repo ]; then
+                sed -i \
+                  -e "s|^mirrorlist=|#mirrorlist=|" \
+                  -e "s|^#baseurl=http://mirror.centos.org/centos/\$releasever|baseurl=https://vault.centos.org/7.9.2009|" \
+                  /etc/yum.repos.d/CentOS-Base.repo
+              fi
+
+              if command -v dnf > /dev/null; then
+                install="dnf -y install"
+              elif command -v zypper > /dev/null; then
+                install="zypper --non-interactive install"
+              elif command -v pacman > /dev/null; then
+                install="pacman -Sy --noconfirm --needed"
+              else
+                install="yum -y install"
+              fi
+              $install gcc make
+
+              if [ "$CMAKE_SOURCE" = distro ]; then
+                $install cmake
+              else
+                # The tarball needs tar, which not every base image carries.
+                $install tar
+                url=https://github.com/Kitware/CMake/releases/download
+                # Retries only: CentOS 7 ships curl 7.29, which has neither
+                # --http1.1 nor --retry-all-errors, and no HTTP/2 either.
+                curl -fsSL --retry 5 --retry-delay 5 \
+                  "$url/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-linux-x86_64.tar.gz" \
+                  -o /tmp/cmake.tar.gz
+                mkdir -p /opt/cmake
+                tar -xzf /tmp/cmake.tar.gz -C /opt/cmake --strip-components=1
+                export PATH=/opt/cmake/bin:$PATH
+              fi
+
+              MAKE=make sh .github/scripts/vm-build-and-test.sh
+            '
+
+  sanitizers:
+    name: ASan + UBSan, ${{ matrix.cc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run unit tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure -LE unreliable
+
+      - name: Run tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          bin=./build/tests/raw-entropy/recording_userspace
+
+          run_tolerated() {
+            log="$RUNNER_TEMP/sanitizer-run.log"
+
+            if "$@" > /dev/null 2> "$log"; then
+              return 0
+            fi
+
+            cat "$log"
+            if grep -qE 'Sanitizer|runtime error:' "$log"; then
+              echo "::error::sanitizer report from: $*"
+              exit 1
+            fi
+            echo "::warning::failed without a sanitizer finding: $*"
+          }
+
+          "$bin/jitterentropy-cpuinfo"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            "$bin/jitterentropy-rng" 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            run_tolerated "$bin/jitterentropy-rng" 256 $opt
+          done
+
+          run_tolerated "$bin/jitterentropy-hashtime" \
+            1000 2 "$RUNNER_TEMP/hashtime" --force-fips
+
+  thread-sanitizer:
+    name: TSan, ${{ matrix.cc }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v4
+
+      # A build of its own, not an addition to the sanitizers job: the thread
+      # and the address sanitizer cannot be combined, and a run under one says
+      # nothing about the other.
+      - name: Configure
+        run: |
+          cmake -S . -B build-tsan \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DENABLE_THREAD_SANITIZER=ON
+
+      - name: Build
+        run: cmake --build build-tsan -j "$(nproc)"
+
+      # The whole suite rather than unit-concurrency alone: most of it is
+      # single threaded and costs nothing to run here, and the two programs
+      # that do start the library's own counting thread are the ones the
+      # suppression file is about.
+      #
+      # halt_on_error, so a report fails the test that produced it. Without it
+      # the sanitizer counts the race and the suite still exits zero.
+      - name: Run the suite under the thread sanitizer
+        env:
+          TSAN_OPTIONS: halt_on_error=1:suppressions=${{ github.workspace }}/tests/tsan.supp
+        run: ctest --test-dir build-tsan --output-on-failure -LE unreliable
+
+      # unit-concurrency is the program written for this build, and its threads
+      # race whichever way the scheduler puts them - one clean run says less
+      # than several. Cheap enough to repeat: it is under a second of work.
+      - name: Repeat the concurrency test
+        env:
+          TSAN_OPTIONS: halt_on_error=1:suppressions=${{ github.workspace }}/tests/tsan.supp
+        run: |
+          for _ in $(seq 1 10); do
+            ./build-tsan/tests/unit/unit-concurrency > /dev/null
+          done
+
+  fuzz:
+    name: fuzzing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Without the sanitizers: they cost fuzz-api about a factor of ten in
+      # executions per second, which is most of what it has. The corpus this
+      # run produces is replayed under them below, which finds the same memory
+      # errors without paying for them on every mutation.
+      - name: Configure the search build
+        run: |
+          cmake -S . -B build-fuzz \
+            -DCMAKE_C_COMPILER=clang \
+            -DENABLE_FUZZING=ON
+
+      - name: Build
+        run: cmake --build build-fuzz -j "$(nproc)"
+
+      # Short, and a smoke test rather than a campaign: what it has to catch is
+      # a harness that no longer builds or a contract the library stopped
+      # holding, not the defect that needs an hour of mutation. -runs is not
+      # given, so each stops on its own clock.
+      #
+      # fuzz-health gets the longer run of the two because it is the one that
+      # can search: nothing in it measures the machine's timer.
+      # artifacts/ has to exist before libFuzzer is pointed at it: it writes a
+      # crash there rather than creating the directory, and refuses to start
+      # otherwise.
+      - name: Fuzz the health tests
+        run: |
+          mkdir -p corpus-health artifacts
+          ./build-fuzz/tests/fuzz/fuzz-health \
+            -max_total_time=180 -max_len=8192 \
+            -artifact_prefix=artifacts/ corpus-health
+
+      - name: Fuzz the public API
+        run: |
+          mkdir -p corpus-api artifacts
+          ./build-fuzz/tests/fuzz/fuzz-api \
+            -max_total_time=120 \
+            -artifact_prefix=artifacts/ corpus-api
+
+      # The corpus both runs built, through the same harnesses under the
+      # address and undefined behavior sanitizers. The standalone programs take
+      # the inputs as arguments and assert the same contracts.
+      - name: Configure the replay build
+        run: |
+          cmake -S . -B build-asan \
+            -DCMAKE_C_COMPILER=clang \
+            -DENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build-asan -j "$(nproc)"
+
+      - name: Replay the corpus under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -e
+          find corpus-health -type f -print0 |
+            xargs -0 -r -n 64 ./build-asan/tests/fuzz/fuzz-health-standalone \
+              > /dev/null
+          find corpus-api -type f -print0 |
+            xargs -0 -r -n 64 ./build-asan/tests/fuzz/fuzz-api-standalone \
+              > /dev/null
+
+      # Only reached when nothing above crashed, so this is the corpus of a
+      # clean run: worth keeping, as the next run starts from it rather than
+      # from nothing.
+      - name: Upload the corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus
+          path: |
+            corpus-health/
+            corpus-api/
+          if-no-files-found: warn
+
+      # Anything libFuzzer wrote out - a crash, a timeout, an out-of-memory -
+      # is the input needed to reproduce it, and the step above has already
+      # failed the job by then.
+      - name: Upload the artifacts of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gcovr
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcovr
+          gcovr --version
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=gcc \
+            -DENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Run unit tests
+        run: ctest --test-dir build --output-on-failure -LE unreliable
+
+      - name: Generate the HTML coverage report
+        run: |
+          echo "RLIMIT_MEMLOCK soft=$(ulimit -Sl) hard=$(ulimit -Hl)"
+          cmake --build build --target coverage
+
+      - name: Upload the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: build/coverage/
+          if-no-files-found: error

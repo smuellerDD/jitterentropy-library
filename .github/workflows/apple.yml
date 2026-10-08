@@ -1,0 +1,50 @@
+name: Apple
+
+# Apple platforms: macOS.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  macos:
+    name: ${{ matrix.os }}, ${{ matrix.shared == 'ON' && 'shared' || 'static' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-latest, macos-15-intel ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      - name: Run tests
+        run: |
+          ctest --test-dir build --output-on-failure -LE unreliable
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo
+          ./build/tests/raw-entropy/recording_userspace/jitterentropy-cpuinfo --json > /dev/null
+          export DYLD_LIBRARY_PATH="$PWD/build:$DYLD_LIBRARY_PATH"
+          for opt in "" "--all-caches" "--force-internal-timer"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null
+          done
+
+          for opt in "--force-fips" "--ntg1"; do
+            ./build/tests/raw-entropy/recording_userspace/jitterentropy-rng 256 $opt > /dev/null ||
+              echo "::warning::jitterentropy-rng $opt failed on this machine"
+          done

@@ -1,0 +1,82 @@
+name: BSD
+
+# The BSDs, each in a VM.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  freebsd:
+    name: FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg install -y cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
+
+  openbsd:
+    name: OpenBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in an OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg_add -I cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
+
+  netbsd:
+    name: NetBSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            /usr/sbin/pkg_add cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
+
+  dragonflybsd:
+    name: DragonFly BSD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test in a DragonFly BSD VM
+        uses: vmactions/dragonflybsd-vm@v1
+        with:
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg install -y cmake gmake
+          run: |
+            sh .github/scripts/vm-build-and-test.sh
