@@ -152,6 +152,13 @@
       # BUILD_SHARED_LIBS because CMakeLists.txt ties the two searches together:
       # a static jitterentropy makes it look for a static libcrypto.a, which is
       # not what these packages install.
+      #
+      # The unit tests are built and run as well: they absorb the backends
+      # themselves, so the configuration they compile in is the one the
+      # library is built with, and this is the only place that compiles them
+      # with an external crypto library. BUILD_TESTING explicitly, as the
+      # nixpkgs cmake hook passes it as OFF; the unreliable label holds the
+      # timing tests a loaded builder can fail.
       cryptoFor = pkgs:
         let
           backendFor = { name, external, dep }:
@@ -161,7 +168,14 @@
               cmakeFlags = (old.cmakeFlags or [ ]) ++ [
                 "-DEXTERNAL_CRYPTO=${external}"
                 "-DBUILD_SHARED_LIBS=ON"
+                "-DBUILD_TESTING=ON"
               ];
+              doCheck = true;
+              checkPhase = ''
+                runHook preCheck
+                ctest --output-on-failure -LE unreliable
+                runHook postCheck
+              '';
             });
         in {
           crypto-openssl = backendFor {
