@@ -164,8 +164,12 @@ jobs:
 
       - name: Show and check the installed module
         run: |
-          mapfile -t kos < <(find /lib/modules/"$KVER" -name 'jitter_rng.ko*' \
-                                  -not -path '*/build/*')
+          # A read loop rather than mapfile, which needs bash 4.
+          kos=()
+          while IFS= read -r ko; do
+            kos+=("$ko")
+          done < <(find /lib/modules/"$KVER" -name 'jitter_rng.ko*' \
+                        -not -path '*/build/*')
           echo "installed as: ${kos[*]:-nothing}"
           test "${#kos[@]}" = 1
           ko=${kos[0]}

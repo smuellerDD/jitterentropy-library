@@ -58,7 +58,7 @@ initialization
 
 ################################################################################
 # Measure with deterministic memory access
-CFLAGS="-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS -DJENT_TESTING_MEMSIZE_NO_BOUNDSCHECK" make -s -f Makefile.hashtime
+CFLAGS="-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS" make -s -f Makefile.hashtime
 
 size=1
 while [ $size -le 20 ]
