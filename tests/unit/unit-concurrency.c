@@ -814,6 +814,96 @@ static void test_concurrent_lifecycle(void)
 }
 
 /*
+ * A first allocation on several threads, with no initialization before it:
+ * each allocation runs the initialization itself, and one that arrives while
+ * another thread's is still measuring the clock must not be told there is no
+ * clock. Released together, every thread would find no initialization and run
+ * its own; so they are spread over the time one initialization takes, which
+ * puts the later ones into the earlier ones' measurement. The process-wide
+ * state an initialization leaves behind is cleared before every round, so
+ * each round is a first one.
+ */
+#define UT_FIRST_ALLOC_ROUNDS 8
+
+/* The duration of one initialization, in the units of jent_get_nstime(). */
+static uint64_t ut_init_duration;
+
+static void ut_init_state_reset(void)
+{
+	unsigned int clock;
+
+	jent_atomic_store_int(&jent_selftest_run, 0);
+	for (clock = 0; clock < JENT_GCD_CLOCKS; clock++)
+		jent_atomic_store_u32(&jent_common_timer_gcd[clock], 0);
+}
+
+static void ut_work_first_alloc(struct ut_worker *w)
+{
+	struct rand_data *ec;
+	uint64_t start, now;
+
+	jent_get_nstime(&start);
+	do {
+		jent_get_nstime(&now);
+	} while (now - start < ut_init_duration * w->idx / UT_MAX_THREADS);
+
+	ec = jent_entropy_collector_alloc(0, 0);
+
+	w->allocs = ec ? 1 : 0;
+	jent_entropy_collector_free(ec);
+}
+
+static unsigned int ut_no_flags(unsigned int idx)
+{
+	(void)idx;
+	return 0;
+}
+
+static void test_concurrent_first_alloc(void)
+{
+	struct ut_worker workers[UT_MAX_THREADS];
+	unsigned int nthreads = ut_threads();
+	unsigned int round, started = 0, i, allocs = 0, runs = 0;
+	uint64_t start, end;
+	int ret;
+
+	jent_ut_group("first allocations on several threads at once");
+
+	ut_init_state_reset();
+	jent_get_nstime(&start);
+	ret = jent_entropy_init();
+	jent_get_nstime(&end);
+	if (ret) {
+		JENT_UT_SKIP("the concurrent first allocation",
+			     "the startup does not pass on this machine");
+		return;
+	}
+	ut_init_duration = end - start;
+
+	for (round = 0; round < UT_FIRST_ALLOC_ROUNDS; round++) {
+		ut_init_state_reset();
+		ut_init_workers(workers, nthreads, ut_work_first_alloc,
+				ut_no_flags);
+
+		started = ut_run(workers, nthreads);
+		for (i = 0; i < started; i++)
+			allocs += (unsigned int)workers[i].allocs;
+		runs += started;
+	}
+
+	if (!runs) {
+		JENT_UT_SKIP("the concurrent first allocation",
+			     "no thread could be created");
+		return;
+	}
+	printf("  note: %u allocations over %u rounds\n", runs,
+	       UT_FIRST_ALLOC_ROUNDS);
+
+	JENT_UT_EQ(allocs, runs,
+		   "every first allocation builds a collector");
+}
+
+/*
  * The compliance mode is what closes the registration, so the allocating
  * threads have to ask for it. The registering threads carry it too and never
  * use it, which costs nothing and keeps the table in step with the indices.
@@ -1112,6 +1202,13 @@ int main(void)
 	 * one-way property and races nobody for it.
 	 */
 	test_concurrent_registrations();
+
+	/*
+	 * Clears the process-wide initialization state, so after the
+	 * registrations, which need it untouched, and before the life cycle,
+	 * which establishes it again.
+	 */
+	test_concurrent_first_alloc();
 	test_concurrent_lifecycle();
 
 	/*
