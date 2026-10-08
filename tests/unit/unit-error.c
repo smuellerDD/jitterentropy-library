@@ -243,10 +243,18 @@ static void test_failure_callback(void)
 	ec->health_failure = JENT_APT_FAILURE_PERMANENT;
 	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)),
 		   JENT_ERR_APT_PERMANENT, "the failure is still returned");
-	JENT_UT_NE(cb_calls, 0, "the callback was invoked");
+	JENT_UT_EQ(cb_calls, 1, "the callback was invoked once");
 	JENT_UT_TRUE(cb_ec == ec, "with the collector that failed");
 	JENT_UT_EQ(cb_failure, JENT_APT_FAILURE_PERMANENT,
 		   "and the failure bits that were raised");
+
+	/* The bits are sticky: every later invocation reports them once more. */
+	JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)),
+		   JENT_ERR_APT_PERMANENT, "a second read fails as well");
+	JENT_UT_EQ(cb_calls, 2, "and runs the callback once more");
+	JENT_UT_EQ(jent_read_entropy(ec, buf, 0), JENT_ERR_APT_PERMANENT,
+		   "a zero-length read reports the state");
+	JENT_UT_EQ(cb_calls, 3, "and runs the callback once more");
 
 	jent_entropy_collector_free(ec);
 
