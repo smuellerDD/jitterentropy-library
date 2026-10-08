@@ -239,7 +239,7 @@ Bottom line: From my perspective, I see no issue in using the Jitter RNG as a
 noise source in your environments.
 
 
-Note, applying the Shannon-Entropy formula to the data, we will get much 
+Note, applying the Shannon-Entropy formula to the data, we will get much
 higher entropy values.
 
 Note II: This assessment complies with the entropy assessments to be done for 
