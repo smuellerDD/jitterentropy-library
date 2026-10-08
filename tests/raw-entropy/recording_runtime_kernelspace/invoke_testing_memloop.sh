@@ -30,23 +30,13 @@
 #    will always be L1 data cache-misses for accessing the bytes in the memory.
 #
 
-# The access pattern is chosen when the module is compiled, and the loaded
-# module does not say which one it uses: build it with
-#	make -C linux_kernel KCFLAGS=-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS
-# load it and confirm with JENT_DETERMINISTIC_MODULE=1. Without that build the
-# module measures the random access pattern, which is not what the analysis
-# of this data assumes.
+# --memaccess records the NTG.1 memory access loop, which always uses the
+# deterministic access pattern: the module needs no special build for it.
+# JENT_TEST_MEASURE_RAW_MEMORY_ACCESS only selects the pattern of the common
+# noise source.
 #
 
 . ./invoke_testing_helper.sh
-
-if [ "$JENT_DETERMINISTIC_MODULE" != "1" ]
-then
-	echo "The loaded jitter_rng module must use the deterministic access pattern:"
-	echo "build it with make -C linux_kernel KCFLAGS=-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS,"
-	echo "load it and invoke this script with JENT_DETERMINISTIC_MODULE=1"
-	exit 1
-fi
 
 raw_entropy_ntg1_memloop()
 {
