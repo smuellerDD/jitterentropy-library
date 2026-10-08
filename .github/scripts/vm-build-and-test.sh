@@ -50,7 +50,7 @@ for shared in OFF ON; do
 	cmake --build "$build" -j "$ncpu"
 
 	# Not on the guests' default search path.
-	LD_LIBRARY_PATH="$PWD/$build:$LD_LIBRARY_PATH"
+	LD_LIBRARY_PATH="$PWD/$build${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 	export LD_LIBRARY_PATH
 
 	# Cygwin resolves its DLL through PATH, not LD_LIBRARY_PATH.
