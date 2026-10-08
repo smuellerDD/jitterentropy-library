@@ -20,7 +20,10 @@ jent_check_version_script(
     "${JITTER_KERNEL_VERSION_SCRIPT}" JENT_KERNEL_API "")
 
 # Versioned and hardened as the library is, with a version script of its own.
+# The hardening linker flags - -z now and -z relro among them - are not in its
+# LINK_OPTIONS but linked as libraries, so they are given here as there.
 if(BUILD_SHARED_LIBS)
+    target_link_libraries(${PROJECT_NAME}-kernel PRIVATE ${JITTER_LINKER_FLAGS})
     foreach(_jent_prop LINK_OPTIONS VERSION SOVERSION)
         get_target_property(_jent_value ${PROJECT_NAME} ${_jent_prop})
         if(NOT _jent_value STREQUAL "_jent_value-NOTFOUND")

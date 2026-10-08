@@ -15,6 +15,11 @@ kernel with `CONFIG_CRYPTO_JITTERENTROPY_TESTINTERFACE`, booted with
 
 `install.sh` installs the script and the service and enables it. It expects
 getrawentropy in `/usr/local/sbin/getrawentropy`, where the script calls it.
+Build it for the kernel it runs on: from Linux 6.13 on, the vanilla test
+interface stores its time stamps as `u64` (check the type of `jent_testing_rb`
+in `crypto/jitterentropy-testing.c`), and getrawentropy MUST then be built
+with `-DRAW_DATATYPE_U64`. Built without it, it reads each stamp as two `u32`
+halves, and every boot records nonsense deltas without any error.
 
 The script reads `/sys/kernel/debug/jitterentropy_testing/jent_raw_hires` and
 drives the RNG with `kcapi-rng -n "jitterentropy_rng"`. For the out-of-tree

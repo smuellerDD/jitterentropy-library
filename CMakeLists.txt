@@ -755,6 +755,37 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+# The export set of every shared library against its version script, as the
+# Makefile build is checked in CI: CMakeLists.txt compares the script with the
+# header at configure time, and these compare the built library with the
+# script. Linux and macOS, where .github/scripts/check-exports.sh can read the
+# dynamic symbol table; on macOS, with no version script, what it checks is
+# that -fvisibility=hidden alone limits the export set to the same list.
+if(BUILD_TESTING AND BUILD_SHARED_LIBS AND
+   (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE))
+    find_program(JENT_BASH bash)
+    if(JENT_BASH)
+        set(_jent_check_exports
+            "${CMAKE_CURRENT_SOURCE_DIR}/.github/scripts/check-exports.sh")
+        add_test(NAME exported-symbols
+                 COMMAND ${JENT_BASH} ${_jent_check_exports}
+                         $<TARGET_FILE:${PROJECT_NAME}>
+                         ${JITTER_VERSION_SCRIPT})
+        if(TARGET ${PROJECT_NAME}-record)
+            add_test(NAME exported-symbols-record
+                     COMMAND ${JENT_BASH} ${_jent_check_exports}
+                             $<TARGET_FILE:${PROJECT_NAME}-record>
+                             ${JITTER_RECORD_VERSION_SCRIPT})
+        endif()
+        if(TARGET ${PROJECT_NAME}-kernel)
+            add_test(NAME exported-symbols-kernel
+                     COMMAND ${JENT_BASH} ${_jent_check_exports}
+                             $<TARGET_FILE:${PROJECT_NAME}-kernel>
+                             ${JITTER_KERNEL_VERSION_SCRIPT})
+        endif()
+    endif()
+endif()
+
 # gcovr over lcov: it reads either compiler's counters, needs no capture step
 # and writes the HTML itself; lcov + genhtml where it is absent. tests/ is
 # excluded - test programs counting as covered code hide the one thing of
