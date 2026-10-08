@@ -130,7 +130,7 @@ jobs:
           bin=build/tests/gcd/gcd
           file "$bin"
 
-          if strings "$bin" | grep -q GLIBC; then
+          if grep -q GLIBC < <(strings "$bin"); then
             echo "::error::GLIBC symbol versions present, this is not musl"
             exit 1
           fi
@@ -430,11 +430,25 @@ jobs:
           # enough to matter, which curl reports as exit 92, and one tarball
           # needs no multiplexing. --retry-all-errors extends the retries to
           # transport failures rather than only to transient response codes.
-          curl -fsSL --http1.1 --retry 5 --retry-delay 5 --retry-all-errors \
-            "$SOURCE" -o linux.tar
+          #
+          # A mainline snapshot from git.kernel.org is generated on the fly
+          # and has arrived corrupt with a 200, which no curl retry sees:
+          # read the whole archive before trusting it, and fetch it anew if
+          # it does not list.
+          for attempt in 1 2 3; do
+            curl -fsSL --http1.1 --retry 5 --retry-delay 5 --retry-all-errors \
+              "$SOURCE" -o linux.tar &&
+              tar -tf linux.tar > linux.list && break
+            if [ "$attempt" = 3 ]; then
+              echo "::error::no usable archive from $SOURCE"
+              exit 1
+            fi
+            echo "::warning::attempt $attempt gave no usable archive, retrying"
+            sleep 30
+          done
 
           tar -xf linux.tar
-          echo "KDIR=$PWD/$(tar -tf linux.tar | head -1 | cut -d/ -f1)" \
+          echo "KDIR=$PWD/$(head -1 linux.list | cut -d/ -f1)" \
             >> "$GITHUB_ENV"
 
       - name: Copy the Jitter RNG tree into the kernel source (README step 1)
@@ -1136,16 +1150,24 @@ jobs:
         env:
           OUT: ${{ steps.build.outputs.out }}
         run: |
+          # Each tool's output is captured before it is searched: in a pipe
+          # into grep a failing or silent strings/file leaves grep with
+          # nothing to match, and "no GLIBC" would pass vacuously.
           nix shell nixpkgs#file nixpkgs#binutils -c sh -c '
             set -e
-            file "$1"
+            info=$(file -E "$1")
+            echo "$info"
+            syms=$(strings "$1")
+            [ -n "$syms" ] || {
+              echo "::error::strings printed nothing for $1"; exit 1
+            }
 
-            if strings "$1" | grep -q GLIBC; then
+            if printf "%s\n" "$syms" | grep -q GLIBC; then
               echo "::error::GLIBC symbol versions present, this is not musl"
               exit 1
             fi
 
-            file "$1" | grep -q "statically linked" || {
+            printf "%s\n" "$info" | grep -q "statically linked" || {
               echo "::error::expected a statically linked binary"; exit 1
             }
           ' sh "$OUT/bin/gcd"
