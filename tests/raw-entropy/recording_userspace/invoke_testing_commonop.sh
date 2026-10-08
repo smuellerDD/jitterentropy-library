@@ -68,7 +68,7 @@ make -s -f Makefile.hashtime clean
 
 ################################################################################
 # Measure with random memory access
-CFLAGS="-DJENT_TESTING_MEMSIZE_NO_BOUNDSCHECK" make -s -f Makefile.hashtime
+make -s -f Makefile.hashtime
 
 size=1
 while [ $size -le 20 ]
