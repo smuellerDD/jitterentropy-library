@@ -201,4 +201,4 @@ jobs:
             binutils
 
       - name: Build and test
-        run: MAKE=make sh .github/scripts/vm-build-and-test.sh
+        run: MAKE="make" bash .github/scripts/vm-build-and-test.sh

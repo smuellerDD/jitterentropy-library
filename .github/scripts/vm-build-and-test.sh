@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Build and test where there is no hosted GitHub runner: the VM and container
 # jobs of .github/workflows/*.yml. Both CMake linkages and the Makefile build
 # run in one boot.
 #
-# Strictly POSIX sh - ash, pdksh, ksh93 and bash are all in play.
+# bash, which those jobs install on the guests that lack it.
 
-set -e
+set -euxo pipefail
 
 os=$(uname -s)
 
@@ -22,8 +22,8 @@ case "$ncpu" in
 ''|*[!0-9]*) ncpu=2 ;;
 esac
 
-# Exported so all three builds agree: the Makefile's "CC ?=" loses to make's
-# built-in default but not to the environment.
+# Exported so all three builds agree: the Makefiles take make's built-in CC
+# unless the environment names one.
 if [ -z "${CC:-}" ]; then
 	for c in cc gcc clang; do
 		if command -v "$c" > /dev/null 2>&1; then CC=$c; break; fi

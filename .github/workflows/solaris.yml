@@ -31,6 +31,6 @@ jobs:
           copyback: false
           prepare: |
             # pkg(1) exits 4 for "nothing to do".
-            pkg install developer/build/cmake developer/build/gnu-make || [ $? -eq 4 ]
+            pkg install shell/bash developer/build/cmake developer/build/gnu-make || [ $? -eq 4 ]
           run: |
-            CC=gcc sh .github/scripts/vm-build-and-test.sh
+            CC=gcc bash .github/scripts/vm-build-and-test.sh
