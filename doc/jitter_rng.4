@@ -279,14 +279,22 @@ or a
 that is not one of the sizes listed there. On the test interface: an open
 with a
 .B testing_osr
-above 20 or that records the memory access loop with
+or
+.B testing_flags
+the load would refuse as
+.B osr
+and
+.B flags
+- the memory size bound aside - or that records the memory access loop with
 .BR JENT_DISABLE_MEMORY_ACCESS ,
 a read of a size that is not a multiple of 8, and a
 .B JENT_IOCLOOPCNT
 above 65536.
 .TP
 .B EIO
-On every interface a read whose intermittent health test failure could not
+On the character device,
+.I /dev/hwrng
+and the crypto API a read whose intermittent health test failure could not
 be recovered from, or was not tried, as by a nonblocking read; a later
 blocking read retries the recovery. On the character device and
 .I /dev/hwrng
