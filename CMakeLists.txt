@@ -761,10 +761,14 @@ endif()
 # script. Linux and macOS, where .github/scripts/check-exports.sh can read the
 # dynamic symbol table; on macOS, with no version script, what it checks is
 # that -fvisibility=hidden alone limits the export set to the same list.
+# Minimal images (SUSE BCI) carry neither awk nor always nm: without them the
+# tests are left out rather than failing for a tool missing.
 if(BUILD_TESTING AND BUILD_SHARED_LIBS AND
    (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE))
     find_program(JENT_BASH bash)
-    if(JENT_BASH)
+    find_program(JENT_AWK awk)
+    find_program(JENT_NM nm)
+    if(JENT_BASH AND JENT_AWK AND JENT_NM)
         set(_jent_check_exports
             "${CMAKE_CURRENT_SOURCE_DIR}/.github/scripts/check-exports.sh")
         add_test(NAME exported-symbols
