@@ -114,6 +114,8 @@ JENT_INTERNAL
 unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 					  uint64_t timestamp);
 JENT_INTERNAL
+unsigned int jent_health_failure_query(const struct rand_data *ec);
+JENT_INTERNAL
 unsigned int jent_health_failure(struct rand_data *ec);
 
 enum jent_health_init_type {

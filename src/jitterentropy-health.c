@@ -849,7 +849,7 @@ unsigned int jent_health_insert_timestamp(struct rand_data *ec,
 }
 
 /**
- * Report any health test failures
+ * Query any health test failures without reporting them
  *
  * The health tests judge the noise source, and they only report in FIPS
  * mode. A failed conditioning self test (jent_selftest()) is deliberately
@@ -870,12 +870,34 @@ unsigned int jent_health_insert_timestamp(struct rand_data *ec,
  *	4<<JENT_PERMANENT_FAILURE_SHIFT Lag predictor test permanent failure
  *	8<<JENT_PERMANENT_FAILURE_SHIFT RCT with memory permanent failure
  */
-unsigned int jent_health_failure(struct rand_data *ec)
+unsigned int jent_health_failure_query(const struct rand_data *ec)
 {
-	jent_fips_failure_cb cb;
-
 	/* Test is only enabled in FIPS mode */
 	if (!ec->is_fips_enabled)
+		return 0;
+
+	return ec->health_failure;
+}
+
+/**
+ * Report any health test failures and run the FIPS failure callback
+ *
+ * The failure bits are sticky, so every call on a failed collector runs the
+ * callback again. Call this once per API invocation at the point the verdict
+ * is handed to the caller; loops that only poll for a failure use
+ * jent_health_failure_query(), so that one jent_read_entropy() call runs the
+ * callback once and not once per poll.
+ *
+ * @param[in] ec Reference to entropy collector
+ *
+ * @return the bitmask of jent_health_failure_query()
+ */
+unsigned int jent_health_failure(struct rand_data *ec)
+{
+	unsigned int health_failure = jent_health_failure_query(ec);
+	jent_fips_failure_cb cb;
+
+	if (!health_failure)
 		return 0;
 
 	/*
@@ -884,11 +906,10 @@ unsigned int jent_health_failure(struct rand_data *ec)
 	 */
 	cb = (jent_fips_failure_cb)jent_atomic_load_fnptr(&fips_cb);
 
-	if (cb && ec->health_failure) {
-		cb(ec, ec->health_failure);
-	}
+	if (cb)
+		cb(ec, health_failure);
 
-	return ec->health_failure;
+	return health_failure;
 }
 
 /**
