@@ -1,0 +1,206 @@
+'\" t
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JENT_READ_ENTROPY 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jent_read_entropy, jent_read_entropy_safe \- generate random numbers with the CPU Jitter RNG
+.SH LIBRARY
+Jitter RNG library
+.RI ( libjitterentropy ", " \-ljitterentropy ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy.h>
+.sp
+.BI "ssize_t jent_read_entropy(struct rand_data *" entropy_collector ",
+.BI "                          char *" data ", size_t " len );
+.sp
+.BI "ssize_t jent_read_entropy_safe(struct rand_data **" entropy_collector ",
+.BI "                               char *" data ", size_t " len );
+.fi
+.SH DESCRIPTION
+.BR jent_read_entropy ()
+generates a random bit stream and returns it to the caller.
+.IR entropy_collector
+is the CPU Jitter entropy collector instance which shall be used
+to obtain random numbers.
+.IR data
+is the destination memory location where the random bit stream
+is written to. The memory must have already been allocated by the
+caller.
+.IR len
+is a length value provided by the caller indicating the number
+of bytes the CPU Jitter Random Number Generator shall generate.
+The caller must ensure that
+.IR data
+is at least as big as
+.IR len
+indicates. The function returns the number of bytes generated
+when the request is successfully completed. In case of an error, one of
+the negative error codes listed under
+.B ERRORS
+is returned. A
+.I len
+of 0 generates nothing and returns 0, or the error an instance out of
+service would return for a longer request.
+.LP
+Health test failures are reported only in FIPS mode - with
+.BR JENT_FORCE_FIPS ,
+.B JENT_NTG1
+or the FIPS mode of the system. Outside it,
+.BR jent_read_entropy ()
+never returns an RCT, APT, lag or RCT-with-memory error; the failures are
+still recorded, see
+.BR jent_entropy_collector_health_failure ()
+in
+.BR jent_status (3).
+.LP
+When a health test failure is reported, the Jitter RNG will not
+have any data provided in
+.IR data :
+what earlier blocks of the same request wrote there is wiped. The entropy
+collector instance will remain in error state. To recover,
+the entropy collector instance
+.B MUST
+be deallocated and a fresh instance must be allocated. It is
+recommended that you increase the
+.IR osr
+value at least by one when newly allocating the Jitter RNG with
+.BR jent_entropy_collector_alloc (3)
+which implies that the health tests are less sensitive due to the
+fact that the assumed entropy rate of the noise source is lower.
+.LP
+.BR jent_read_entropy_safe ()
+is a service function to and therefore operates identically to
+.BR jent_read_entropy ()
+with the exception that it automatically re-allocates the entropy collector
+if an intermittent health test failure is reported, which happens in FIPS
+mode only. Before reallocation, a
+new power-on health test is performed. The allocation of the new entropy
+collector automatically increases the OSR by one, and further where the
+power-on health test does not pass at that OSR. This is done based
+on the idea that a health test failure indicates that the assumed
+entropy rate is too high. The replacement also doubles a memory size derived
+from the caches and the hash loop count, runs the startup of
+.BR jent_entropy_collector_alloc (3),
+and continues from the health test state of the collector it replaces; in
+FIPS mode it stays on the clock that collector used. It keeps the identifier
+and the output counters of the instance, see
+.BR jent_status (3).
+The intermittent failure is not returned when the replacement succeeds; a
+caller that wants to learn of it registers a callback with
+.BR jent_set_fips_failure_callback (3).
+.LP
+Where no replacement can be made - the OSR would exceed
+.BR JENT_MAX_OSR ,
+or the allocation or the startup of the replacement fails - the intermittent
+failure is returned and the collector is left as it was, in its error state;
+a later call tries the reallocation again. If an error is returned by this
+function, the Jitter RNG is not safe to be used on the current system.
+Permanent health test failures,
+.BR JENT_ERR_SELFTEST ,
+.B JENT_ERR_NOTIME
+and
+.B JENT_ERR_EINVAL
+are returned at once, without a reallocation.
+.LP
+Otherwise the function
+.BR jent_read_entropy_safe ()
+has the same error codes as
+.BR jent_read_entropy ().
+.SH RETURN VALUE
+.BR jent_read_entropy ()
+and
+.BR jent_read_entropy_safe ()
+return the number of bytes generated,
+.IR len ,
+on success and a negative error code otherwise. A
+.I len
+above the largest value of
+.I ssize_t
+is reduced to it.
+.SH ERRORS
+.BR jent_read_entropy ()
+and
+.BR jent_read_entropy_safe ()
+return the number of bytes generated on success or one of the following
+negative codes, each with a symbolic definition in
+.IR jitterentropy.h .
+The health test codes are returned in FIPS mode only.
+.TP
+.BR JENT_ERR_EINVAL " (\-1)"
+No entropy collector, or no data buffer for a non-zero length.
+.TP
+.BR JENT_ERR_RCT " (\-2)"
+The SP800-90B repetition count test failed.
+.TP
+.BR JENT_ERR_APT " (\-3)"
+The SP800-90B adaptive proportion test failed.
+.TP
+.BR JENT_ERR_NOTIME " (\-4)"
+The internal timer cannot be initialized: its counting thread could not be
+started.
+.TP
+.BR JENT_ERR_LAG " (\-5)"
+The lag predictor test failed.
+.TP
+.BR JENT_ERR_RCT_PERMANENT " (\-6)"
+The repetition count test failed permanently.
+.TP
+.BR JENT_ERR_APT_PERMANENT " (\-7)"
+The adaptive proportion test failed permanently.
+.TP
+.BR JENT_ERR_LAG_PERMANENT " (\-8)"
+The lag predictor test failed permanently.
+.TP
+.BR JENT_ERR_RCT_MEM " (\-9)"
+The repetition count test with memory failed.
+.TP
+.BR JENT_ERR_RCT_MEM_PERMANENT " (\-10)"
+The repetition count test with memory failed permanently.
+.TP
+.BR JENT_ERR_SELFTEST " (\-11)"
+A
+.BR jent_selftest ()
+run bound to this instance failed, see
+.BR jent_entropy_init (3);
+it lasts until a later bound run passes, and is returned in every mode.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+See
+.B THREAD SAFETY
+in
+.BR jitterentropy (3)
+for the details.
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_read_entropy\fP(), \%\fBjent_read_entropy_safe\fP()
+T}	MT-Safe race:entropy_collector
+.TE
+.ad
+.SH SEE ALSO
+.BR jent_entropy_collector_alloc (3),
+.BR jent_entropy_init (3),
+.BR jent_set_fips_failure_callback (3),
+.BR jent_status (3),
+.BR jitterentropy (3)

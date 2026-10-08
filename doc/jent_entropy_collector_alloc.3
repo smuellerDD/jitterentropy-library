@@ -1,0 +1,347 @@
+'\" t
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JENT_ENTROPY_COLLECTOR_ALLOC 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jent_entropy_collector_alloc, jent_entropy_collector_free \- allocate and free a CPU Jitter RNG entropy collector
+.SH LIBRARY
+Jitter RNG library
+.RI ( libjitterentropy ", " \-ljitterentropy ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy.h>
+.sp
+.BI "struct rand_data *jent_entropy_collector_alloc(unsigned int " osr ",
+.BI "                                               unsigned int " flags );
+.sp
+.BI "void jent_entropy_collector_free(struct rand_data *" entropy_collector );
+.fi
+.SH DESCRIPTION
+.BR jent_entropy_collector_alloc ()
+allocates a CPU Jitter entropy collector instance and returns the handle
+to the caller. If the allocation fails, including memory
+constraints, the call returns
+.IR NULL .
+The function requires two arguments, the oversampling rate
+.IR osr
+and a set of flags with
+.IR flags .
+The
+.IR osr
+value defines the amount of oversampling performed by the entropy
+collector. Usually, a caller wants to provide the value 0 here to
+apply the default oversampling. The call raises any value below
+.B JENT_MIN_OSR
+(3) to it automatically, and so does
+.BR jent_entropy_init_ex ().
+A value above
+.B JENT_MAX_OSR
+(20) is refused with a NULL return instead. Both bounds are defined in
+.IR jitterentropy.h .
+.LP
+Before it returns the collector, the allocation runs its startup: it collects
+entropy until the state of the collector holds the amount the mode of
+operation requires, with the health tests applied. An intermittent health test
+failure during the startup replaces the collector by one with a higher
+oversampling rate, as
+.BR jent_read_entropy_safe ()
+does, see
+.BR jent_read_entropy (3);
+where no replacement can be made, the allocation fails. If no initialization
+has passed in the process yet, the allocation runs
+.BR jent_entropy_init_ex ()
+with its
+.I osr
+and
+.I flags
+first and fails if that does.
+.LP
+.BR jent_entropy_collector_free ()
+zeroizes and frees the given CPU Jitter entropy collector instance. A NULL
+.I entropy_collector
+is ignored.
+.SS Flags
+The
+.IR flags
+value is either zero or one or more of the following flags.
+.TP
+.B JENT_DISABLE_MEMORY_ACCESS
+If the system is constrained with memory, this flag
+disables the allocation of that memory and therefore memory accesses. But
+that also implies that the entropy collection process only relies on the
+complexity of the CPU. Note, if somebody knows all details of that CPU
+complexity, that person may potentially reduce the entropy delivered by the CPU
+complexity. If that person can push the generated entropy below a threshold,
+the CPU Jitter random number generator starts overestimating entropy from the
+noise source. Thus, disabling memory accesses and relying only on the CPU
+complexity should only be done if you really know what you are doing.
+In FIPS mode - with
+.BR JENT_FORCE_FIPS ,
+.B JENT_NTG1
+or the FIPS mode of the system - the flag is refused and the allocation
+returns NULL: the startup of these modes samples the memory access noise
+source on its own.
+.TP
+.B JENT_FORCE_INTERNAL_TIMER
+This flag can be used to force the Jitter RNG to use the internal
+high-resolution timer instead of using the hardware time stamp. Commonly,
+the startup self test performed with
+.BR jent_entropy_init (3)
+uses the hardware timer with precedence if it is identified to be appropriate
+for entropy collection, and falls back to the internal timer otherwise; once
+it has fallen back, or the internal timer has been forced anywhere in the
+process, every later collector of the process uses the internal timer. If the
+internal timer is not compiled, requesting this flag returns an error. The
+counting thread and its state belong to the
+.IR entropy_collector
+it was spawned for, so instances do not interfere with one another; this does
+not make a single instance safe to use from two threads. See
+.B THREAD SAFETY
+in
+.BR jitterentropy (3).
+.TP
+.B JENT_DISABLE_INTERNAL_TIMER
+This flag can be used to ensure that the internal timer is not used.
+If this flag is used together with
+.B JENT_FORCE_INTERNAL_TIMER
+this is treated as an error and the allocation returns NULL. Also,
+in case the startup self test concluded that the internal timer shall be
+used, the allocation returns NULL.
+.TP
+.B JENT_FORCE_FIPS
+Force full FIPS 140 and SP800-90B compliance irrespective of the
+FIPS setting of the underlying operating system.
+.TP
+.B JENT_NTG1
+Enable the BSI AIS 20/31 v3.0 NTG.1 compliant behavior. It implies the FIPS
+mode,
+.B JENT_FORCE_SECURE_MEM
+and
+.BR JENT_DISABLE_INTERNAL_TIMER ;
+together with
+.B JENT_FORCE_INTERNAL_TIMER
+the allocation returns NULL.
+.TP
+.B JENT_CACHE_ALL
+Derive the memory size of the memory access noise source from the summed
+size of all data caches rather than from the L1 data cache alone; see
+.B JENT_MAX_MEMSIZE_*
+below.
+.TP
+.BR JENT_DISABLE_STIR ", " JENT_DISABLE_UNBIAS
+Accepted for compatibility and without effect.
+.TP
+.B JENT_FORCE_SECURE_MEM
+Require the extras of secure memory for the state of the entropy collector.
+Secure memory is memory that is zeroized when it is freed, and every build
+provides it. Locking it into RAM and excluding it from core dumps are extras
+that some platforms add: a memory lock from the operating system, or an
+allocation from the secure memory arena of the crypto library the Jitter RNG
+was built against. The Jitter RNG always asks for them where they are
+offered; this flag decides what happens when that request cannot be granted.
+Without it - the default - the collector is created regardless, at the price
+of a state that may be written to the swap space, but is still wiped on
+release. With the flag the
+allocation fails instead, which is what an environment not permitting
+locking - a CI system or a restricted container with a too small
+.IR RLIMIT_MEMLOCK ,
+say - will run into, as will an application that has not configured the
+secure memory arena of libgcrypt (GCRYCTL_INIT_SECMEM) or OpenSSL
+.RB ( CRYPTO_secure_malloc_init ()),
+each of which is process-wide state the library does not establish
+itself. libgcrypt's arena is only used once the application has initialized
+libgcrypt
+.RB ( gcry_check_version (),
+GCRYCTL_INITIALIZATION_FINISHED), and libgcrypt's FIPS mode is only asked
+once libgcrypt is started; before, the decision libgcrypt will take is taken
+from the same inputs: the environment variable LIBGCRYPT_FORCE_FIPS_MODE, the
+file
+.I /etc/gcrypt/fips_enabled
+and, on Linux,
+.IR /proc/sys/crypto/fips_enabled .
+On a system in FIPS mode, which implies
+.BR JENT_FORCE_SECURE_MEM ,
+a collector allocated before libgcrypt is initialized therefore fails.
+.IP
+The flag is implied by
+.B JENT_NTG1
+and
+.BR JENT_FORCE_FIPS ,
+whose compliance claims cover the protection of the collector state, and by
+the system's FIPS mode, in which a collector runs as with
+.BR JENT_FORCE_FIPS .
+It has no effect in the Linux and FreeBSD kernels, where kernel memory has the
+extras by construction. With libgcrypt and OpenSSL the extras are what their
+secure arena provides, and the library adds no memory lock or core dump
+exclusion of its own: whether the arena is locked is decided by the crypto
+library and the environment it was created in. AWS-LC has no secure arena,
+and a platform without a memory lock offers no extras either, so the flag has
+no effect there: the memory is wiped on release, and nothing more.
+.IP
+The memory access region, whose size
+.B JENT_MAX_MEMSIZE_*
+sets, is not part of that state and never gets the memory lock: it is what
+the memory access noise source is timed on, and its contents are neither
+hashed into the entropy pool nor part of any output. It is zeroed on
+allocation and wiped on release, and excluded from core dumps where the
+platform allows, but it is not locked and not taken from a secure memory
+arena. What a collector locks is therefore a small fixed amount whatever its
+memory size: one page of state, a second with the internal timer, and two
+more for the time delta history while a startup runs. A health test
+reallocation holds the collector in use and its replacement at the same time.
+The small default quotas - the 64 KiB
+.I RLIMIT_MEMLOCK
+of older Linux systems, the minimum working set a Windows process starts
+with, against which
+.BR VirtualLock ()
+is charged - hold several collectors at a time.
+An application allocating more raises the quotas itself, with
+.BR setrlimit (2)
+or
+.BR SetProcessWorkingSetSizeEx ();
+.I tests/jitterentropy-memlock.h
+of the source distribution does this for the tools shipped with the library
+and can be used as it stands. The library does not do it itself: the limits
+are process-wide state, extending them evicts what the host application
+reserved, and they cannot be restored on free.
+.TP
+.B JENT_MAX_MEMSIZE_*
+Set the size of the memory access region, which is then used as given.
+Without one of these flags, the size is derived from the data caches: four
+times the next power of two above the L1 data cache size, or with
+.B JENT_CACHE_ALL
+the next power of two above the sum of all data caches. Where no cache size is discoverable, it is 256 KiB. On 32-bit targets a
+derived size is capped at 64 MiB. A derived size doubles with every
+reallocation after a health test failure; one set by a flag does not.
+The larger the memory, the more entropy is collected, yet the default is safe
+on most CPUs. With memory pressure but a sufficient entropy rate a smaller
+size may be used; with insufficient entropy a larger one.
+The flags are
+.BR JENT_MAX_MEMSIZE_1kB " (1)",
+.BR JENT_MAX_MEMSIZE_2kB " (2)",
+.BR JENT_MAX_MEMSIZE_4kB " (3)",
+.BR JENT_MAX_MEMSIZE_8kB " (4)",
+.BR JENT_MAX_MEMSIZE_16kB " (5)",
+.BR JENT_MAX_MEMSIZE_32kB " (6)",
+.BR JENT_MAX_MEMSIZE_64kB " (7)",
+.BR JENT_MAX_MEMSIZE_128kB " (8)",
+.BR JENT_MAX_MEMSIZE_256kB " (9)",
+.BR JENT_MAX_MEMSIZE_512kB " (10)",
+.BR JENT_MAX_MEMSIZE_1MB " (11)",
+.BR JENT_MAX_MEMSIZE_2MB " (12)",
+.BR JENT_MAX_MEMSIZE_4MB " (13)",
+.BR JENT_MAX_MEMSIZE_8MB " (14)",
+.BR JENT_MAX_MEMSIZE_16MB " (15)",
+.BR JENT_MAX_MEMSIZE_32MB " (16)",
+.BR JENT_MAX_MEMSIZE_64MB " (17)",
+.BR JENT_MAX_MEMSIZE_128MB " (18)",
+.BR JENT_MAX_MEMSIZE_256MB " (19)",
+and
+.BR JENT_MAX_MEMSIZE_512MB " (20)",
+which is also
+.BR JENT_MAX_MEMSIZE_MAX ,
+the index in parentheses. The size is 2 to the power of the index plus
+.B JENT_MAX_MEMSIZE_OFFSET
+(9) bytes.
+.BR JENT_MAX_MEMSIZE_TO_FLAGS ()
+turns an index into its flag and
+.BR JENT_FLAGS_TO_MAX_MEMSIZE ()
+back, shifting by
+.B JENT_FLAGS_TO_MEMSIZE_SHIFT
+(27), and
+.B JENT_MAX_MEMSIZE_MASK
+selects the field in
+.IR flags .
+A field value above
+.B JENT_MAX_MEMSIZE_MAX
+is taken as
+.BR JENT_MAX_MEMSIZE_MAX .
+.TP
+.B JENT_HASHLOOP_*
+Set the number of hash loop iterations per measurement:
+.BR JENT_HASHLOOP_1 " (1)",
+.BR JENT_HASHLOOP_2 " (2)",
+.BR JENT_HASHLOOP_4 " (3)",
+.BR JENT_HASHLOOP_8 " (4)",
+.BR JENT_HASHLOOP_16 " (5)",
+.BR JENT_HASHLOOP_32 " (6)",
+.BR JENT_HASHLOOP_64 " (7)",
+and
+.BR JENT_HASHLOOP_128 " (8)",
+which is also
+.BR JENT_MAX_HASHLOOP ,
+the index in parentheses: index
+.I n
+selects 2^(\fIn\fR\-1) iterations.
+Without one of these flags - index 0 - the built-in default is used, one
+iteration unless the build sets a different one with
+.BR JENT_HASH_LOOP_DEFAULT .
+Every reallocation after a health test failure doubles the count, up to the
+maximum; a built-in default above the maximum stays as it is.
+.BR JENT_HASHLOOP_TO_FLAGS ()
+turns an index into its flag and
+.BR JENT_FLAGS_TO_HASHLOOP ()
+back, shifting by
+.B JENT_FLAGS_TO_HASHLOOP_SHIFT
+(23), and
+.B JENT_MAX_HASHLOOP_MASK
+selects the field in
+.IR flags .
+A field value above
+.B JENT_MAX_HASHLOOP
+is taken as
+.BR JENT_MAX_HASHLOOP .
+.LP
+.BR jent_entropy_collector_flags ()
+of
+.BR jent_status (3)
+reports the flags an instance runs with, with the memory size and hash loop
+fields set to the values in effect.
+.SH RETURN VALUE
+.BR jent_entropy_collector_alloc ()
+returns the new collector, or NULL on failure.
+.BR jent_entropy_collector_free ()
+returns no value.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+See
+.B THREAD SAFETY
+in
+.BR jitterentropy (3)
+for the details.
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_entropy_collector_alloc\fP()
+T}	MT-Safe
+T{
+\%\fBjent_entropy_collector_free\fP()
+T}	MT-Safe race:entropy_collector
+.TE
+.ad
+.SH SEE ALSO
+.BR jent_entropy_init (3),
+.BR jent_read_entropy (3),
+.BR jent_status (3),
+.BR jitterentropy (3),
+.BR mlock (2)

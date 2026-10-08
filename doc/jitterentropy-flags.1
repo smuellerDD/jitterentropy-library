@@ -31,9 +31,9 @@ jitterentropy-flags \- encode and decode the flags of the CPU Jitter RNG
 converts between the
 .B JENT_*
 flags described in
-.BR jitterentropy (3)
+.BR jent_entropy_collector_alloc (3)
 and the number a caller passes, such as
-.B jitterentropy-rngd
+.BR jitterentropy-rngd (1)
 with
 .BR \-\-flags .
 It knows the flags of the
@@ -54,7 +54,7 @@ prefix optional, such as
 or
 .BR max_memsize_1mb ,
 or an option of
-.BR jitterentropy-rng ,
+.BR jitterentropy-rng (1),
 such as
 .B \-\-force\-fips
 or
@@ -100,10 +100,10 @@ standard error.
 .PP
 The combinations are what
 .BR jent_entropy_init_ex ()
-and
-.BR jent_entropy_collector_alloc ()
 of
-.BR jitterentropy (3)
+.BR jent_entropy_init (3)
+and
+.BR jent_entropy_collector_alloc (3)
 refuse. The library of this version does not refuse the first two: it
 makes no use of a reserved bit and clamps a field to its maximum. The
 system's FIPS mode, in which the library refuses
@@ -117,5 +117,8 @@ $ jitterentropy-flags --decode 0x58000040
 .EE
 .SH SEE ALSO
 .BR jitterentropy-hashtime (1),
+.BR jitterentropy-rng (1),
+.BR jitterentropy-rngd (1),
+.BR jent_entropy_collector_alloc (3),
 .BR jitterentropy (3),
 .BR jitterentropy-record (3)

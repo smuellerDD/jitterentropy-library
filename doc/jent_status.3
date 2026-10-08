@@ -1,0 +1,420 @@
+'\" t
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JENT_STATUS 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+.\" Too long to be justified.
+.ad l
+jent_status, jent_entropy_collector_uuid, jent_entropy_collector_osr, jent_entropy_collector_flags, jent_entropy_collector_memsize, jent_entropy_collector_health_failure, jent_entropy_collector_reinitializations, jent_entropy_collector_read_invocations, jent_entropy_collector_bytes_output, jent_entropy_collector_hashloops, jent_secure_memory_supported \- status of a CPU Jitter RNG entropy collector
+.SH LIBRARY
+Jitter RNG library
+.RI ( libjitterentropy ", " \-ljitterentropy ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy.h>
+.sp
+.BI "int jent_status(const struct rand_data *" entropy_collector ",
+.BI "                char *" buf ", size_t " buflen );
+.sp
+.BI "int jent_entropy_collector_uuid(const struct rand_data *" entropy_collector ",
+.BI "                                char *" buf ", size_t " buflen );
+.sp
+.BI "#define JENT_UUID_STRLEN 37"
+.sp
+.BI "unsigned int jent_entropy_collector_osr(const struct rand_data *" entropy_collector );
+.sp
+.BI "unsigned int jent_entropy_collector_flags(const struct rand_data *" entropy_collector );
+.sp
+.BI "size_t jent_entropy_collector_memsize(const struct rand_data *" entropy_collector );
+.sp
+.BI "unsigned int jent_entropy_collector_health_failure(const struct rand_data *" entropy_collector );
+.sp
+.BI "unsigned int jent_entropy_collector_reinitializations(const struct rand_data *" entropy_collector );
+.sp
+.BI "uint64_t jent_entropy_collector_read_invocations(const struct rand_data *" entropy_collector );
+.sp
+.BI "uint64_t jent_entropy_collector_bytes_output(const struct rand_data *" entropy_collector );
+.sp
+.BI "unsigned int jent_entropy_collector_hashloops(const struct rand_data *" entropy_collector );
+.sp
+.BI "int jent_secure_memory_supported(" void ");
+.fi
+.SH DESCRIPTION
+.BR jent_status ()
+writes a JSON document describing an entropy collector into
+.IR buf :
+the library version, the identifier of the instance, its reallocations, what
+it has delivered over its lifetime, the failures of each health test, the
+runtime environment it found and the configuration it is running with. It is
+what the
+.B FIPS 140-3 CONSIDERATIONS
+and
+.B AIS 20/31 NTG.1 CONSIDERATIONS
+sections of
+.BR jitterentropy (3)
+ask to be read for the properties they require. The document
+is a serialization of state the instance holds, not a measurement: it costs
+no entropy and collects nothing.
+.LP
+At most
+.IR buflen
+bytes are written, the terminating NUL included, and the result is always NUL
+terminated. The call returns
+.IR 0
+when the whole document fit and
+.IR \-1
+when it did not - a document cut short is not handed back as if it were
+complete, because a consumer would fail to parse it - as well as for a
+.IR buf
+of
+.IR NULL
+or a
+.IR buflen
+of zero. A buffer of 4096 bytes holds the document; that is the size the
+kernel module's interfaces use for it.
+.LP
+The
+.IR entropy_collector
+may be
+.IR NULL .
+The result is then a complete JSON object carrying the library version alone,
+which is the way to ask for the version without allocating an instance; it is
+not an error and returns
+.IR 0 .
+.SS Status document
+The document is one JSON object with these members:
+.TP
+.I version
+The library version as a string,
+.IR major.minor.patchlevel .
+.TP
+.I uuid
+The identifier of the instance, as
+.BR jent_entropy_collector_uuid ()
+returns it.
+.TP
+.I reinitializations
+As
+.BR jent_entropy_collector_reinitializations ().
+.TP
+.I output
+An object with the successful reads,
+.IR invocations ,
+and the
+.I bytes
+and
+.I bits
+they delivered.
+.TP
+.I healthFailure
+An object with one member per health test:
+.I apt
+(adaptive proportion test),
+.I rct
+(repetition count test),
+.I rctMemory
+(repetition count test with memory) and
+.I lag
+(lag predictor test). Each is an object with the booleans
+.I intermittent
+and
+.IR permanent ,
+the
+.B JENT_*_FAILURE
+bits of
+.BR jent_entropy_collector_health_failure ().
+.TP
+.I runtimeEnvironment
+An object with
+.IR cpuCores ,
+the number of CPUs the library found, and
+.IR cpuCache ,
+an object with
+.I l1Bytes
+and
+.IR allBytes ,
+the next power of two above the size of the L1 data cache and above the sum
+of all data caches, 0 where it is not known.
+.TP
+.I configuration
+An object with the settings the instance runs with:
+.RS
+.TP
+.I osr
+The oversampling rate.
+.TP
+.I memoryBlockSizeBytes
+The size of the memory access region in bytes, as
+.BR jent_entropy_collector_memsize ()
+reports it: 0 with
+.BR JENT_DISABLE_MEMORY_ACCESS ,
+where no region is allocated.
+.TP
+.I hashLoopCount
+An object with
+.IR runtime ,
+the hash loop count per measurement, and
+.IR initialization ,
+the count the startup of the NTG.1 and FIPS modes uses while it samples the
+hash loop on its own, three times the former.
+.TP
+.I memoryLoopCount
+An object with
+.I runtime
+and
+.IR initialization ,
+the same for the memory access loop; both are 0 without memory access.
+.TP
+.I secureMemory
+Whether the state of the collector is in secure memory, memory zeroized when
+it is freed: always
+.IR true ,
+see
+.B Secure memory
+below.
+.TP
+.I secureMemoryBackend
+The backend the state of the collector is allocated from, see
+.B Secure memory
+below.
+.TP
+.I internalTimer
+Whether the instance runs on the internal timer.
+.TP
+.I mockedTimerBuild
+Whether the library was built with its time source replaceable for testing,
+the CMake option
+.BR MOCK_TIMER ;
+such a build produces no entropy of its own. Only in such a build, the
+boolean
+.I mockedTimerActive
+follows it and tells whether a replacement is in use.
+.TP
+.I fipsMode
+Whether the instance runs in FIPS mode, by
+.BR JENT_FORCE_FIPS ,
+.B JENT_NTG1
+or the FIPS mode of the system.
+.TP
+.I ntg1Mode
+Whether the instance runs in NTG.1 mode.
+.TP
+.I flags
+An object with one boolean per flag of the instance, named after it:
+.BR JENT_DISABLE_MEMORY_ACCESS ,
+.BR JENT_FORCE_INTERNAL_TIMER ,
+.BR JENT_DISABLE_INTERNAL_TIMER ,
+.BR JENT_FORCE_FIPS ,
+.BR JENT_NTG1 ,
+.B JENT_CACHE_ALL
+and
+.BR JENT_FORCE_SECURE_MEM ,
+as
+.BR jent_entropy_collector_flags ()
+reports them.
+.RE
+.SS Instance identifier and accessors
+.BR jent_entropy_collector_uuid ()
+copies the identifier of an instance - an RFC 9562 version 4 or 8 UUID in its
+canonical string form - into
+.IR buf ,
+which must hold
+.B JENT_UUID_STRLEN
+bytes, the terminating NUL included. The identifier is assigned once, when
+the allocation has completed its startup, and is stable for the lifetime of
+the instance: it is carried over when
+.BR jent_read_entropy_safe ()
+reallocates the collector on a health test failure, so it names the instance
+rather than the allocation. It is the
+.IR uuid
+member of the status document above.
+.LP
+The call returns
+.IR 0
+on success and
+.IR \-1
+on error, which includes a NULL
+.IR entropy_collector ,
+a NULL
+.I buf
+and a
+.IR buf
+too small for the string. Where the platform offers no cryptographic random
+number generator to draw an identifier from, or its generator is not seeded
+yet or fails, it is a version 8 UUID hashed with SHA3-256 from a process-wide
+counter and the current time.
+.LP
+The other
+.BR jent_entropy_collector_* ()
+accessors read single values of an instance, the numbers the status document
+reports, without its JSON:
+.TP
+.BR jent_entropy_collector_osr ()
+the oversampling rate, at least
+.B JENT_MIN_OSR
+(3), raised by each reallocation after a health test failure;
+.TP
+.BR jent_entropy_collector_flags ()
+the
+.B JENT_*
+flags in effect: those of the allocation, with the memory size and hash loop
+fields set to the values in effect - the memory size field as it was given
+with
+.BR JENT_DISABLE_MEMORY_ACCESS ,
+which leaves it alone -,
+.B JENT_FORCE_SECURE_MEM
+added where a compliance mode or the system's FIPS mode implies it,
+.B JENT_DISABLE_INTERNAL_TIMER
+added under
+.BR JENT_NTG1 ,
+and, after a reallocation in FIPS mode, the timer flag of the clock in use;
+.TP
+.BR jent_entropy_collector_memsize ()
+the size of the memory access region in bytes, 0 without memory access;
+.TP
+.BR jent_entropy_collector_health_failure ()
+the
+.B JENT_*_FAILURE
+bits of the health tests standing, 0 if none. The health tests run and set
+these bits in every mode, but only in FIPS mode, which
+.B JENT_NTG1
+implies, does a failure stop the output: without it, the bits, like the
+.I healthFailure
+member of the status document, are informational and reads succeed;
+.TP
+.BR jent_entropy_collector_reinitializations ()
+the reallocations after an intermittent health test failure, each replacement
+counted: those of
+.BR jent_read_entropy_safe (),
+and those of the startup every allocation and every such reallocation runs,
+so that a collector can report one before its first read;
+.TP
+.BR jent_entropy_collector_read_invocations ()
+the successful reads;
+.TP
+.BR jent_entropy_collector_bytes_output ()
+the bytes those reads delivered;
+.TP
+.BR jent_entropy_collector_hashloops ()
+the hash loop count per measurement.
+.LP
+The values follow the instance through its reallocations after a health test
+failure: each raises the oversampling rate, doubles a memory size derived
+from the caches - one the caller set stays - and doubles the hash loop count,
+whether the caller set it or not, up to 128; a compile-time default above 128
+stays as it is. Like the UUID, the read and byte counters are carried over
+into the replacement.
+.SS Secure memory
+.BR jent_secure_memory_supported ()
+reports whether this build provides secure memory - memory zeroized when it is
+freed. Every build does, so it returns
+.IR 1 ,
+as the
+.IR secureMemory
+member of the status document reports
+.IR true .
+Neither reports the extras - a memory lock or a core dump exclusion - which
+.B JENT_FORCE_SECURE_MEM
+makes a condition where the platform offers them; see
+.BR jent_entropy_collector_alloc (3).
+The
+.IR secureMemoryBackend
+member of the status document names the backend the collector state comes
+from, and with it which extras apply:
+.IR posix-mlock ,
+.IR windows-virtuallock ,
+.IR libgcrypt ,
+.IR openssl ,
+.IR aws-lc ,
+.IR linux-kernel ,
+.IR freebsd-kernel ,
+.I baremetal
+or
+.IR malloc .
+.SH RETURN VALUE
+.BR jent_status ()
+returns 0 on success and \-1 when
+.I buf
+is NULL or too small.
+.BR jent_entropy_collector_uuid ()
+returns 0 on success and \-1 for a NULL
+.IR entropy_collector ,
+a NULL
+.I buf
+or one too small.
+.PP
+The accessors from
+.BR jent_entropy_collector_osr ()
+to
+.BR jent_entropy_collector_hashloops ()
+return the value they read. For a NULL
+.IR entropy_collector
+they return 0, which no instance reports as its oversampling rate, and set
+.I errno
+to
+.BR EINVAL ;
+they leave
+.I errno
+alone otherwise. As a value of 0 can be a valid reading, a caller that needs
+to tell the two apart sets
+.I errno
+to 0 before the call. The Linux and FreeBSD kernel and bare-metal builds have
+no
+.IR errno ;
+there the 0 alone reports it.
+.PP
+.BR jent_secure_memory_supported ()
+returns 1: every build provides secure memory, zeroized on free.
+.SH ERRORS
+The accessors from
+.BR jent_entropy_collector_osr ()
+to
+.BR jent_entropy_collector_hashloops ()
+set
+.I errno
+to:
+.TP
+.B EINVAL
+.I entropy_collector
+is NULL.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+See
+.B THREAD SAFETY
+in
+.BR jitterentropy (3)
+for the details.
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_status\fP(), \%\fBjent_entropy_collector_uuid\fP(), \%\fBjent_entropy_collector_osr\fP() to \%\fBjent_entropy_collector_hashloops\fP()
+T}	MT-Safe race:entropy_collector
+T{
+\%\fBjent_secure_memory_supported\fP()
+T}	MT-Safe
+.TE
+.ad
+.SH SEE ALSO
+.BR jent_entropy_collector_alloc (3),
+.BR jent_read_entropy (3),
+.BR jitterentropy (3)

@@ -1,0 +1,297 @@
+.\" Copyright (c) 2017 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JITTERENTROPY-RNGD 1 2026-09-30 "jitterentropy x.y.z" "User Commands"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jitterentropy-rngd \- CPU Jitter Random Number Generator Daemon
+.SH SYNOPSIS
+.B jitterentropy-rngd
+.RI [ option " ...]"
+.SH DESCRIPTION
+.B jitterentropy-rngd
+collects entropy from CPU execution time jitter with the CPU Jitter Random
+Number Generator of
+.BR jitterentropy (3)
+and injects it into the Linux kernel through the
+.B RNDADDENTROPY
+ioctl of
+.I /dev/random
+described in
+.BR random (4).
+It must be started as root.
+.PP
+Every injection hands 64 bytes of Jitter RNG output to the kernel and claims
+full entropy for them, followed by a request to reseed the kernel's random
+number generator
+.RB ( RNDRESEEDCRNG ).
+The daemon injects:
+.IP \(bu 3
+once at startup, before it detaches. When the invocation returns, the kernel
+has therefore been seeded, unless that injection failed, which the daemon
+reports as a warning (see
+.BR \-\-verbose ).
+The kernel schedules during the injection, so it may still report
+insufficient entropy right after the start;
+.IP \(bu 3
+whenever the kernel reports
+.I /dev/random
+as writable;
+.IP \(bu 3
+when
+.I /proc/sys/kernel/random/entropy_avail
+is below
+.IR /proc/sys/kernel/random/write_wakeup_threshold ,
+which it checks every 5 seconds during the first 10 minutes and every 50
+seconds afterwards;
+.IP \(bu 3
+every 10 minutes regardless of the kernel's entropy estimate.
+.PP
+These are the defaults of
+.B \-\-phase1
+and
+.BR \-\-phase2 .
+.PP
+On a kernel with the LRNG
+.RI ( /proc/lrng_type
+exists) only the first two apply and no reseed is requested: the LRNG reseeds
+by itself.
+.PP
+An injection that fails - on a health test failure the Jitter RNG could not
+recover from, or on an ioctl the kernel refuses - makes the daemon initialize
+the Jitter RNG anew and try again, up to five times, before it waits for the
+next occasion.
+.PP
+The Jitter RNG works in virtual machines as well as on bare metal, provided a
+high-resolution time stamp is available. Where the library has no CPU counter
+to read and uses
+.BR clock_gettime (2),
+the time stamp comes from the kernel's clock source, which
+.I /sys/devices/system/clocksource/clocksource0/current_clocksource
+names and which can be changed by writing one of the names in
+.I available_clocksource
+beside it.
+.SH OPTIONS
+.TP
+.BR \-v ", " \-\-verbose
+Log more. Without it only errors are logged; given once warnings as well,
+twice the wakeups and injections, three times debugging messages. A detached
+daemon has its standard output redirected to
+.IR /dev/null ,
+so
+.B \-\-syslog
+is needed to see any of it.
+.TP
+.BR \-F ", " \-\-foreground
+Stay in the foreground instead of detaching from the invoking terminal.
+.TP
+.BR \-l ", " \-\-syslog
+Send the log messages to
+.BR syslog (3)
+with the
+.B LOG_DAEMON
+facility instead of writing them to standard output.
+.TP
+.BR \-p ", " \-\-pid " \fIfile\fR"
+Write the PID to
+.I file
+and lock it, so that a second instance naming the same file refuses to start
+and exits with 1.
+The file is only written when the daemon detaches, not with
+.BR \-\-foreground ,
+and is removed when the daemon exits.
+.TP
+.BR \-s ", " \-\-sp800\-90b
+Read with
+.BR jent_read_entropy ()
+instead of
+.BR jent_read_entropy_safe ()
+of
+.BR jent_read_entropy (3),
+so that the oversampling rate is not raised after a health test failure: the
+entropy rate assumed for the noise source stays the assessed one, as SP800-90B
+requires. The option does not enable the FIPS mode of the Jitter RNG; that is
+.BR \-\-fips .
+.TP
+.B \-\-fips
+Allocate the Jitter RNG in FIPS mode, with the SP800-90B health tests
+enforced: adds
+.B JENT_FORCE_FIPS
+to
+.BR \-\-flags .
+.TP
+.BR \-n ", " \-\-ntg1
+Allocate the Jitter RNG in AIS 20/31 NTG.1 mode: adds
+.B JENT_NTG1
+to
+.BR \-\-flags .
+.TP
+.BR \-i ", " \-\-force\-internal\-timer
+Use the internal timer of the Jitter RNG, a counting thread, instead of the
+CPU's time stamp: adds
+.B JENT_FORCE_INTERNAL_TIMER
+to
+.BR \-\-flags .
+The Jitter RNG refuses it together with
+.B \-\-ntg1
+or
+.BR \-\-disable\-internal\-timer .
+.TP
+.BR \-I ", " \-\-disable\-internal\-timer
+Never fall back to the internal timer: adds
+.B JENT_DISABLE_INTERNAL_TIMER
+to
+.BR \-\-flags .
+.TP
+.BR \-f ", " \-\-flags " \fIflags\fR"
+The flags the Jitter RNG is allocated with, as a decimal number: the sum of
+the
+.B JENT_*
+values described in
+.BR jent_entropy_collector_alloc (3),
+such as 32 for
+.B JENT_FORCE_FIPS
+or 64 for
+.BR JENT_NTG1 ;
+.BR jitterentropy-flags (1)
+computes and decodes it.
+The default is 0. The options above add their flag to it in whichever order
+they are given.
+.TP
+.BR \-o ", " \-\-osr " \fIosr\fR"
+The oversampling rate the Jitter RNG is allocated with. The default is the
+library's minimum of 3.
+.TP
+.BR \-\-phase1 " \fIperiod\fR:\fIwakeups\fR"
+Check the kernel's entropy estimate every
+.I period
+seconds, and after
+.I wakeups
+checks inject regardless of it and move on to phase 2. The default is 5:120.
+.TP
+.BR \-\-phase2 " \fIperiod\fR:\fIwakeups\fR"
+The same for everything after phase 1, injecting regardless of the estimate
+after every
+.I wakeups
+checks. The default is 50:12. Neither value of either phase may be 0.
+.TP
+.B \-\-status
+Print the status document of
+.BR jent_status (3)
+for a Jitter RNG allocated with the
+.BR \-\-flags ,
+.BR \-\-osr
+and the options adding to
+.B \-\-flags
+given, to standard error, and exit without injecting anything. Give the
+options the daemon runs with.
+.TP
+.B \-\-oneshot
+Seed the kernel once in the foreground and exit, for example from an initramfs
+or a service of
+.IR Type=oneshot .
+A failed injection is retried as described above; no PID file is written.
+.TP
+.B \-\-exit\-on\-error
+Exit on any error instead of trying to recover, so that a supervising
+monitor can act on it.
+.TP
+.B \-\-version
+Print the version of the daemon and of the Jitter RNG library and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the options and exit.
+.SH EXIT STATUS
+0 after
+.BR \-\-version ,
+after
+.B \-\-oneshot
+seeded the kernel, and when the daemon was terminated by
+.BR SIGTERM ,
+.BR SIGINT ,
+.B SIGQUIT
+or
+.BR SIGHUP ,
+on which it shuts down cleanly. 1 for an error: no root privileges, a Jitter
+RNG that cannot be initialized or allocated, a file that cannot be opened, an
+invalid option, a
+.B \-\-oneshot
+whose injections all failed, and also after
+.BR \-\-help .
+.B \-\-status
+exits with a non-zero status after printing the document.
+.PP
+With
+.B \-\-exit\-on\-error
+a failed injection ends the daemon with its
+.IR errno :
+.B EOPNOTSUPP
+for a health test failure of the Jitter RNG, otherwise that of the failing
+ioctl, or of
+.BR pselect (2)
+waiting for the next occasion. Every other failure - opening a device, the PID
+file, the startup of the Jitter RNG - exits with 1, with the option or without.
+.SH ENVIRONMENT
+.TP
+.B NOTIFY_SOCKET
+Where set, as under a systemd service of
+.IR Type=notify ,
+the daemon sends
+.I READY=1
+to it once the kernel accepted an injection for the first time, as
+.BR sd_notify (3)
+describes.
+.TP
+.BR NO_COLOR ", " TERM
+The log on standard output is colored when that is a terminal, unless
+.B NO_COLOR
+is set or
+.B TERM
+is unset or
+.IR dumb .
+.SH FILES
+.TP
+.I /dev/random
+The device the entropy is injected into.
+.TP
+.IR /proc/sys/kernel/random/entropy_avail ", " /proc/sys/kernel/random/write_wakeup_threshold
+The kernel's entropy estimate and the threshold below which the daemon
+injects.
+.TP
+.I /proc/lrng_type
+Its existence marks a kernel with the LRNG.
+.TP
+.I jitterentropy.service
+The systemd unit installed with the daemon. It starts the daemon in the
+foreground before
+.IR sysinit.target ,
+and is active once the daemon has seeded the kernel for the first time.
+.SH NOTES
+Without
+.B \-\-pid
+the daemon writes to no file system object and runs on a file system mounted
+read-only.
+.PP
+The output of the Jitter RNG is considered to hold full entropy, which is why
+the daemon claims it for every byte it injects.
+.SH SEE ALSO
+.BR clock_gettime (2),
+.BR jent_entropy_collector_alloc (3),
+.BR jent_read_entropy (3),
+.BR jent_status (3),
+.BR jitterentropy (3),
+.BR jitterentropy-flags (1),
+.BR random (4)

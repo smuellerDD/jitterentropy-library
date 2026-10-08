@@ -1,0 +1,122 @@
+'\" t
+.\" Copyright (c) 2013 - 2026 by Stephan Mueller (smueller@chronox.de)
+.\"
+.\" Permission is granted to make and distribute verbatim copies of this
+.\" manual provided the copyright notice and this permission notice are
+.\" preserved on all copies.
+.\"
+.\" Permission is granted to copy and distribute modified versions of this
+.\" manual under the conditions for verbatim copying, provided that the
+.\" entire resulting derived work is distributed under the terms of a
+.\" permission notice identical to this one.
+.\"
+.\" Formatted or processed versions of this manual, if unaccompanied by
+.\" the source, must acknowledge the copyright and authors of this work.
+.\" License.
+.TH JENT_SET_FIPS_FAILURE_CALLBACK 3 2026-09-30 "jitterentropy x.y.z" "Library Functions Manual"
+.\" groff re-enables hyphenation per paragraph unless HY is 0.
+.nr HY 0
+.nh
+.SH NAME
+jent_set_fips_failure_callback \- health test failure callback of the CPU Jitter RNG
+.SH LIBRARY
+Jitter RNG library
+.RI ( libjitterentropy ", " \-ljitterentropy ).
+.SH SYNOPSIS
+.nf
+.B #include <jitterentropy.h>
+.sp
+.BI "typedef void (*jent_fips_failure_cb)(struct rand_data *" ec ",
+.BI "                                     unsigned int " health_failure );
+.sp
+.BI "int jent_set_fips_failure_callback(jent_fips_failure_cb " cb ");
+.fi
+.SH DESCRIPTION
+.BR jent_set_fips_failure_callback ()
+allows the caller to set a callback that is invoked by the
+Jitter RNG when a health test failure is detected. The callback
+specified with the parameter
+.BR cb
+to the API function receives the Jitter RNG state with the parameter
+.BR ec
+and the FIPS health test failure with the parameter
+.BR health_failure ,
+a bit mask of
+.B JENT_RCT_FAILURE
+(1),
+.B JENT_APT_FAILURE
+(2),
+.B JENT_LAG_FAILURE
+(4) and
+.B JENT_RCT_MEM_FAILURE
+(8) for an intermittent failure, and the same bits shifted by
+.B JENT_PERMANENT_FAILURE_SHIFT
+(16) for a permanent one:
+.BR JENT_RCT_FAILURE_PERMANENT ,
+.BR JENT_APT_FAILURE_PERMANENT ,
+.B JENT_LAG_FAILURE_PERMANENT
+and
+.BR JENT_RCT_MEM_FAILURE_PERMANENT ,
+formed with
+.BR JENT_PERMANENT_FAILURE ().
+.LP
+The callback is invoked in FIPS mode only - with
+.BR JENT_FORCE_FIPS ,
+.B JENT_NTG1
+or the FIPS mode of the system - every time the health test results of an
+instance are checked while failure bits stand, with every bit then standing.
+As the bits of an instance stay set, it may be invoked more than once for the
+same failure. The results are checked during generation, and also during the
+startup entropy collection that every
+.BR jent_entropy_collector_alloc (3)
+and every recovery of
+.BR jent_read_entropy_safe ()
+runs on the new collector - where an intermittent failure makes the startup
+replace that collector in turn - and during the timer tests of
+.BR jent_entropy_init (3)
+and
+.BR jent_entropy_init_ex (),
+which always run their health tests as in FIPS mode, on a collector of their
+own.
+The
+.I ec
+the callback is handed is valid for the duration of the call only: a failure
+may be followed by a reallocation, which frees it moments later, and during a
+startup or a timer test the collector is not one the caller holds - nor, in
+the startup of a new allocation, one with an identifier yet. Anything
+the callback needs afterwards - the identifier, a status document of
+.BR jent_status (3)
+- has to be copied out while it runs, not kept as a pointer.
+.LP
+This function must be called before
+.BR jent_entropy_init (3)
+as after this call, the change of the callback is denied.
+.SH RETURN VALUE
+.BR jent_set_fips_failure_callback ()
+returns 0 on success and
+.I \-EAGAIN
+once an initialization has run.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+See
+.B THREAD SAFETY
+in
+.BR jitterentropy (3)
+for the details.
+.ad l
+.TS
+allbox;
+lbx lb
+lx l.
+Interface	Thread safety
+T{
+\%\fBjent_set_fips_failure_callback\fP()
+T}	MT-Unsafe init
+.TE
+.ad
+.SH SEE ALSO
+.BR jent_entropy_init (3),
+.BR jent_read_entropy (3),
+.BR jent_status (3),
+.BR jitterentropy (3)
