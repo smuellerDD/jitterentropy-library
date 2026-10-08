@@ -1,0 +1,203 @@
+name: Makefile and linking
+
+# What runs on several platforms at once: the Makefile build and the linking
+# of consumers against the installed library.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+
+  makefile:
+    name: Makefile, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make -j 4
+
+      - name: Build and run the CPU information tool
+        working-directory: tests/raw-entropy/recording_userspace
+        run: |
+          make -f Makefile.cpuinfo
+          ./jitterentropy-cpuinfo
+
+      - name: Link and run against the built library
+        run: |
+          cat > smoke.c <<'EOF'
+          #include <stdio.h>
+          #include "jitterentropy.h"
+
+          static int collect(unsigned int flags, const char *what)
+          {
+                  char buf[64];
+                  struct rand_data *ec = jent_entropy_collector_alloc(0, flags);
+
+                  if (!ec) { printf("alloc failed (%s)\n", what); return 1; }
+                  if (jent_read_entropy(ec, buf, sizeof(buf)) != (ssize_t)sizeof(buf)) {
+                          printf("short read (%s)\n", what);
+                          jent_entropy_collector_free(ec);
+                          return 1;
+                  }
+                  jent_entropy_collector_free(ec);
+                  printf("ok (%s)\n", what);
+                  return 0;
+          }
+
+          int main(void) {
+                  int rc = jent_entropy_init();
+                  if (rc) { printf("jent_entropy_init: %d\n", rc); return 1; }
+                  if (collect(0, "default")) return 1;
+                  /*
+                   * Forced: where the counter read works the automatic
+                   * selection never reaches the thread back-end, the one the
+                   * Makefile's -pthread exists for.
+                   */
+                  if (collect(JENT_FORCE_INTERNAL_TIMER, "internal timer")) return 1;
+                  return 0;
+          }
+          EOF
+          case "${{ runner.os }}" in
+            Linux) LIBS="-pthread -lrt" ;;
+            *)     LIBS="-pthread" ;;
+          esac
+          cc -std=c11 -I. smoke.c libjitterentropy.a $LIBS -o smoke
+          ./smoke
+
+      - name: Link and run against the installed library
+        run: |
+          # Rebuilt rather than installed on top: on macOS PREFIX is baked in
+          # at link time as -install_name.
+          make clean
+          make -j 4 PREFIX="$PWD/prefix"
+          make install install-static PREFIX="$PWD/prefix"
+          ls -l prefix/lib
+          case "${{ runner.os }}" in
+            Linux) LIBS="-pthread -lrt" ;;
+            *)     LIBS="-pthread" ;;
+          esac
+          # The rpath frees the run from the loader variables macOS strips.
+          cc -std=c11 -Iprefix/include \
+            tests/linking/jitterentropy-linktest.c \
+            -Lprefix/lib -ljitterentropy $LIBS \
+            -Wl,-rpath,"$PWD/prefix/lib" -o linktest-shared
+          ./linktest-shared
+          # The archive is named directly: -l would pick the shared object.
+          cc -std=c11 -Iprefix/include \
+            tests/linking/jitterentropy-linktest.c \
+            prefix/lib/libjitterentropy.a $LIBS -o linktest-static
+          ./linktest-static
+
+  linking:
+    name: linking, ${{ matrix.os }}, ${{ matrix.shared == 'ON' && 'shared' || 'static' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest ]
+        shared: [ 'ON', 'OFF' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      # CMAKE_INSTALL_LIBDIR is pinned so the later steps can name the install
+      # tree, and the prefix is a native path for Windows cmake.
+      #
+      # CMAKE_BUILD_TYPE must name the configuration the install asks for:
+      # install(EXPORT) writes IMPORTED_LOCATION per configuration, and the
+      # "noconfig" file a build type-less single-config generator produces is
+      # not what --config Release looks for.
+      - name: Build and install the library
+        run: |
+          prefix="$PWD/prefix"
+          case "${{ runner.os }}" in
+          Windows) prefix=$(cygpath -m "$prefix") ;;
+          esac
+          echo "JENT_PREFIX=$prefix" >> "$GITHUB_ENV"
+          cmake -S . -B build \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$prefix" \
+            -DCMAKE_INSTALL_LIBDIR=lib
+          cmake --build build --config Release --parallel 4
+          cmake --install build --config Release
+
+      - name: Link and run through the CMake package
+        run: |
+          cmake -S tests/linking -B build-cmake -DCMAKE_PREFIX_PATH="$JENT_PREFIX"
+          cmake --build build-cmake --config Release --parallel 4
+          # Multi-config generators put the binary in a per-config directory.
+          case "${{ runner.os }}" in
+          Windows)
+            # The DLL is installed to bin/ and resolved from PATH.
+            export PATH="$PWD/prefix/bin:$PATH"
+            ./build-cmake/Release/jitterentropy-linktest.exe
+            ;;
+          *)
+            export LD_LIBRARY_PATH="$PWD/prefix/lib:$LD_LIBRARY_PATH"
+            export DYLD_LIBRARY_PATH="$PWD/prefix/lib:$DYLD_LIBRARY_PATH"
+            ./build-cmake/jitterentropy-linktest
+            ;;
+          esac
+
+      - name: Check the linkage
+        if: runner.os != 'Windows'
+        run: |
+          bin=./build-cmake/jitterentropy-linktest
+          case "${{ runner.os }}" in
+          macOS) deps=$(otool -L "$bin") ;;
+          *)     deps=$(ldd "$bin") ;;
+          esac
+          echo "$deps"
+          if [ "${{ matrix.shared }}" = ON ]; then
+            if ! grep -q libjitterentropy <<<"$deps"; then
+              echo "::error::shared build has no libjitterentropy dependency"
+              exit 1
+            fi
+          elif grep -q libjitterentropy <<<"$deps"; then
+            echo "::error::static build has a libjitterentropy dependency"
+            exit 1
+          else
+            echo "no libjitterentropy dependency, as expected of a static link"
+          fi
+
+      - name: Link and run through pkg-config
+        if: runner.os != 'Windows'
+        run: |
+          # The macOS images do not always carry pkg-config; the Linux ones do.
+          command -v pkg-config > /dev/null || brew install pkg-config
+          export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig"
+          pkg-config --exists jitterentropy || {
+            echo "::error::no jitterentropy.pc under $PKG_CONFIG_PATH"
+            exit 1
+          }
+          echo "modversion: $(pkg-config --modversion jitterentropy)"
+          # Only --static prints Libs.private.
+          if [ "${{ matrix.shared }}" = ON ]; then
+            libs=$(pkg-config --libs jitterentropy)
+          else
+            libs=$(pkg-config --static --libs jitterentropy)
+          fi
+          cflags=$(pkg-config --cflags jitterentropy)
+          echo "cflags: $cflags"
+          echo "libs:   $libs"
+          # The run needs the directory in the binary too, macOS stripping
+          # DYLD_LIBRARY_PATH under SIP.
+          cc -std=c11 $cflags tests/linking/jitterentropy-linktest.c $libs \
+            -Wl,-rpath,"$PWD/prefix/lib" -o linktest-pc
+          ./linktest-pc

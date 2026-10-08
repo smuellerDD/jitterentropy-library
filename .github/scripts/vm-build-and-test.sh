@@ -1,6 +1,7 @@
 #!/bin/sh
 # Build and test where there is no hosted GitHub runner: the VM and container
-# jobs in ci.yml. Both CMake linkages and the Makefile build run in one boot.
+# jobs of .github/workflows/*.yml. Both CMake linkages and the Makefile build
+# run in one boot.
 #
 # Strictly POSIX sh - ash, pdksh, ksh93 and bash are all in play.
 

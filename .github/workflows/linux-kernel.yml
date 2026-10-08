@@ -1,0 +1,312 @@
+name: Linux kernel
+
+# The Linux kernel module: out of tree, DKMS and in tree against the
+# distribution kernels.
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash everywhere, Windows included, so the steps stay identical.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+
+  linux-kmod:
+    name: module, ${{ matrix.os }}, ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        config: [ default, test-interface, minimal ]
+        include:
+          - config: default
+            flags: ''
+          - config: test-interface
+            flags: CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y
+          - config: minimal
+            flags: >-
+              CONFIG_EXTERNAL_JITTERENTROPY_KCAPI=n
+              CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV=n
+              CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=n
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kernel headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y linux-headers-generic
+
+      - name: Build
+        run: |
+          # Not /lib/modules/$(uname -r)/build: the runner kernel has no
+          # installable headers, and a module only needs a configured tree.
+          KDIR=$(ls -d /usr/src/linux-headers-*-generic | sort -V | tail -n 1)
+          echo "Building against $KDIR"
+          make -C "$KDIR" M="$PWD/linux_kernel" ${{ matrix.flags }} \
+            modules -j "$(nproc)"
+
+      - name: Show the result
+        run: |
+          ls -l linux_kernel/jitter_rng.ko
+          modinfo linux_kernel/jitter_rng.ko
+
+  linux-dkms:
+    name: DKMS, ${{ matrix.os }}, ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        config: [ default, test-interface ]
+        include:
+          - config: default
+            testinterface: 'false'
+          - config: test-interface
+            testinterface: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install DKMS and kernel headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dkms linux-headers-generic
+
+      - name: Check dkms.conf against the library version
+        run: |
+          eval "$(awk '$2 ~ /^JENT_(MAJVERSION|MINVERSION|PATCHLEVEL)$/ \
+                       { print $2 "=" $3 }' jitterentropy.h)"
+          header="$JENT_MAJVERSION.$JENT_MINVERSION.$JENT_PATCHLEVEL"
+          conf=$(. ./dkms.conf >/dev/null; echo "$PACKAGE_VERSION")
+          echo "jitterentropy.h: $header, dkms.conf: $conf"
+          if [ "$header" != "$conf" ]; then
+            echo "::error file=dkms.conf::PACKAGE_VERSION=$conf does not" \
+                 "match the version in jitterentropy.h ($header)"
+            exit 1
+          fi
+          echo "VERSION=$header" >> "$GITHUB_ENV"
+
+      - name: Register the source tree
+        run: |
+          KDIR=$(ls -d /usr/src/linux-headers-*-generic | sort -V | tail -n 1)
+          KVER=${KDIR#/usr/src/linux-headers-}
+          echo "Building for $KVER against $KDIR"
+          if [ ! -e "/lib/modules/$KVER/build" ]; then
+            sudo mkdir -p "/lib/modules/$KVER"
+            sudo ln -sfn "$KDIR" "/lib/modules/$KVER/build"
+          fi
+          echo "KVER=$KVER" >> "$GITHUB_ENV"
+
+          sudo mkdir -p "/usr/src/jitterentropy-$VERSION"
+          sudo cp -a . "/usr/src/jitterentropy-$VERSION/"
+
+          if [ "${{ matrix.testinterface }}" = "true" ]; then
+            config=/usr/src/jitterentropy-$VERSION/linux_kernel/Kbuild.config
+            sudo sed -i \
+              's/^# *\(CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y\)/\1/' \
+              "$config"
+            grep -q '^CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=y' "$config"
+          fi
+
+          sudo dkms add -m jitterentropy -v "$VERSION"
+
+      - name: Build and install
+        run: |
+          sudo dkms build -m jitterentropy -v "$VERSION" -k "$KVER"
+          sudo dkms install -m jitterentropy -v "$VERSION" -k "$KVER"
+          dkms status
+
+      - name: Show and check the installed module
+        run: |
+          mapfile -t kos < <(find /lib/modules/"$KVER" -name 'jitter_rng.ko*' \
+                                  -not -path '*/build/*')
+          echo "installed as: ${kos[*]:-nothing}"
+          test "${#kos[@]}" = 1
+          ko=${kos[0]}
+          ls -l "$ko"
+          modinfo "$ko"
+
+          # testing_osr says whether the edited Kbuild.config reached the
+          # build. Not piped into grep: under pipefail, grep -q exiting early
+          # can SIGPIPE modinfo exactly when the parameter is there.
+          parm=$(modinfo -F parm "$ko")
+          if grep -q '^testing_osr' <<< "$parm"; then
+            found=true
+          else
+            found=false
+          fi
+          echo "test interface built in: $found" \
+               "(expected ${{ matrix.testinterface }})"
+          [ "$found" = "${{ matrix.testinterface }}" ]
+
+      - name: Remove
+        run: |
+          sudo dkms remove -m jitterentropy -v "$VERSION" --all
+          dkms status
+          left=$(find /lib/modules/"$KVER" -name 'jitter_rng.ko*' \
+                      -not -path '*/build/*')
+          echo "left behind: ${left:-nothing}"
+          test -z "$left"
+          test ! -d "/var/lib/dkms/jitterentropy/$VERSION/$KVER"
+
+  linux-in-tree-list:
+    name: in tree, list kernels
+    runs-on: ubuntu-latest
+    outputs:
+      kernels: ${{ steps.list.outputs.kernels }}
+    steps:
+      - name: Read releases.json
+        id: list
+        run: |
+          kernels=$(curl -fsSL --http1.1 \
+              --retry 5 --retry-delay 5 --retry-all-errors \
+              https://www.kernel.org/releases.json |
+            jq -c '[.releases[]
+                    | select(.iseol == false and .source != null)
+                    | {moniker, version, source}]')
+
+          if [ "$(jq 'length' <<<"$kernels")" -eq 0 ]; then
+            echo "::error::no usable releases in releases.json"
+            exit 1
+          fi
+
+          jq -r '.[] | "\(.moniker)\t\(.version)"' <<<"$kernels"
+          echo "kernels=$kernels" >> "$GITHUB_OUTPUT"
+
+  linux-in-tree:
+    name: in tree, ${{ matrix.moniker }} ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    needs: linux-in-tree-list
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.linux-in-tree-list.outputs.kernels) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: jitterentropy-library
+
+      - name: Install the kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libelf-dev libssl-dev
+
+      - name: Fetch the kernel source
+        env:
+          VERSION: ${{ matrix.version }}
+          SOURCE: ${{ matrix.source }}
+        run: |
+          echo "Building Linux $VERSION from $SOURCE"
+
+          # --http1.1: cdn.kernel.org resets HTTP/2 streams mid-transfer often
+          # enough to matter, which curl reports as exit 92, and one tarball
+          # needs no multiplexing. --retry-all-errors extends the retries to
+          # transport failures rather than only to transient response codes.
+          #
+          # A mainline snapshot from git.kernel.org is generated on the fly
+          # and has arrived corrupt with a 200, which no curl retry sees:
+          # read the whole archive before trusting it, and fetch it anew if
+          # it does not list.
+          for attempt in 1 2 3; do
+            curl -fsSL --http1.1 --retry 5 --retry-delay 5 --retry-all-errors \
+              "$SOURCE" -o linux.tar &&
+              tar -tf linux.tar > linux.list && break
+            if [ "$attempt" = 3 ]; then
+              echo "::error::no usable archive from $SOURCE"
+              exit 1
+            fi
+            echo "::warning::attempt $attempt gave no usable archive, retrying"
+            sleep 30
+          done
+
+          tar -xf linux.tar
+          echo "KDIR=$PWD/$(head -1 linux.list | cut -d/ -f1)" \
+            >> "$GITHUB_ENV"
+
+      - name: Copy the Jitter RNG tree into the kernel source (README step 1)
+        run: cp -a jitterentropy-library "$KDIR/crypto/jitterentropy-library"
+
+      - name: Point crypto/Makefile at the copy (README step 2)
+        working-directory: ${{ env.KDIR }}
+        run: |
+          from='obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy_rng.o'
+          to='obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy-library/linux_kernel/'
+          if ! grep -qxF "$from" crypto/Makefile; then
+            echo "::error::crypto/Makefile has no line \"$from\" -" \
+                 "the README's step 2 no longer describes this kernel"
+            exit 1
+          fi
+          awk -v from="$from" -v to="$to" \
+              '$0 == from { print to; next } { print }' \
+              crypto/Makefile > crypto/Makefile.new
+          mv crypto/Makefile.new crypto/Makefile
+          grep -nxF "$to" crypto/Makefile
+
+      - name: Configure a minimal kernel (README step 3)
+        working-directory: ${{ env.KDIR }}
+        run: |
+          make ARCH=x86_64 tinyconfig
+          ./scripts/config --enable CRYPTO \
+                           --enable CRYPTO_JITTERENTROPY \
+                           --enable HW_RANDOM \
+                           --enable PROC_FS
+          make ARCH=x86_64 olddefconfig
+
+          for opt in CONFIG_64BIT CONFIG_CRYPTO_JITTERENTROPY \
+                     CONFIG_HW_RANDOM CONFIG_PROC_FS; do
+            grep -qx "$opt=y" .config || {
+              echo "::error::$opt=y is not in the generated .config"
+              exit 1
+            }
+          done
+          if grep -qx 'CONFIG_MODULES=y' .config; then
+            echo "::error::CONFIG_MODULES is set, this is not a builtin build"
+            exit 1
+          fi
+
+      - name: Select the builtin configuration (README step 4)
+        working-directory: ${{ env.KDIR }}/crypto/jitterentropy-library/linux_kernel
+        run: |
+          sed -i -e 's/^CONFIG_EXTERNAL_JITTERENTROPY=m$/CONFIG_EXTERNAL_JITTERENTROPY=y/' \
+                 -e 's/^# *CONFIG_BUILTIN_JITTERENTROPY=y$/CONFIG_BUILTIN_JITTERENTROPY=y/' \
+                 Kbuild.config
+          for opt in CONFIG_EXTERNAL_JITTERENTROPY=y CONFIG_BUILTIN_JITTERENTROPY=y; do
+            grep -qx "$opt" Kbuild.config || {
+              echo "::error file=linux_kernel/Kbuild.config::$opt was not set -" \
+                   "the README's step 4 no longer describes this file"
+              exit 1
+            }
+          done
+
+      - name: Build the kernel
+        working-directory: ${{ env.KDIR }}
+        run: make ARCH=x86_64 vmlinux -j "$(nproc)"
+
+      - name: Check what ended up in vmlinux
+        working-directory: ${{ env.KDIR }}
+        run: |
+          syms=$(nm vmlinux | grep ' [TtRrDdBb] jent_' || true)
+          echo "$syms"
+
+          grep -q ' jent_entropy_collector_alloc$' <<< "$syms" || {
+            echo "::error::no jent_entropy_collector_alloc in vmlinux"
+            exit 1
+          }
+
+          grep -q ' jent_status$' <<< "$syms" || {
+            echo "::error::no jent_status in vmlinux - the kernel's own Jitter" \
+                 "RNG copy was built instead of this tree"
+            exit 1
+          }
+
+          test ! -e crypto/jitterentropy.o
+          find crypto/jitterentropy-library -name '*.o' | sort
