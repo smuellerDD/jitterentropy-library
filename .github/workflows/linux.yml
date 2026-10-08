@@ -196,7 +196,15 @@ jobs:
           bin=build/tests/gcd/gcd
           file "$bin"
 
-          if grep -q GLIBC < <(strings "$bin"); then
+          # Captured before it is searched, as in nix.yml: a failing or
+          # silent strings would leave grep nothing to match, and "no GLIBC"
+          # would pass vacuously.
+          syms=$(strings "$bin")
+          if [ -z "$syms" ]; then
+            echo "::error::strings printed nothing for $bin"
+            exit 1
+          fi
+          if grep -q GLIBC <<< "$syms"; then
             echo "::error::GLIBC symbol versions present, this is not musl"
             exit 1
           fi

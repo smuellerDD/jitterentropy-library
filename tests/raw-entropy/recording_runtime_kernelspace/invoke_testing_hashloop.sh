@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # This test is intended to analyze the hash lopp entropy rate. It invokes
 # the hash operation with all supported hash loop iterations and measures its

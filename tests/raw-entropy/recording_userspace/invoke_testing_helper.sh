@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # Directory where to store the measurements
 OUTDIR=${OUTDIR:-"../results-measurements"}

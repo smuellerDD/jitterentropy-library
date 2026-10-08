@@ -1,11 +1,11 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # This test is intended to analyze the memory access entropy rate. It invokes
 # the memory access with all supported memory sizes and measures its execution
 # time.
 #
-# The testing disables the maximum memory check to allow analyzing all
-# memory sizes.
+# Each memory size is set explicitly with --max-mem, which the library uses
+# as given, so that all memory sizes can be analyzed.
 #
 # Specifically with the deterministic memory access pattern, the measurement
 # is intended to show the access variations of the "just" the cache that
@@ -30,7 +30,23 @@
 #    will always be L1 data cache-misses for accessing the bytes in the memory.
 #
 
+# The access pattern is chosen when the module is compiled, and the loaded
+# module does not say which one it uses: build it with
+#	make -C linux_kernel KCFLAGS=-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS
+# load it and confirm with JENT_DETERMINISTIC_MODULE=1. Without that build the
+# module measures the random access pattern, which is not what the analysis
+# of this data assumes.
+#
+
 . ./invoke_testing_helper.sh
+
+if [ "$JENT_DETERMINISTIC_MODULE" != "1" ]
+then
+	echo "The loaded jitter_rng module must use the deterministic access pattern:"
+	echo "build it with make -C linux_kernel KCFLAGS=-DJENT_TEST_MEASURE_RAW_MEMORY_ACCESS,"
+	echo "load it and invoke this script with JENT_DETERMINISTIC_MODULE=1"
+	exit 1
+fi
 
 raw_entropy_ntg1_memloop()
 {

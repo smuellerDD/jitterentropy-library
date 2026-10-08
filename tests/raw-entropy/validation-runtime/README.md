@@ -45,7 +45,8 @@ RESULTS_DIR: Location for the interim data bit streams and results.
 
 Both are passed as the first and second argument, e.g.
 `./processdata.sh "" ../results-analysis-runtime-mine` for the default data
-location. Results of a previous run in RESULTS_DIR are removed.
+location, or in the environment, as analyze_options.sh does. An argument takes
+precedence over the environment. Results of a previous run in RESULTS_DIR are removed.
 
 LOGFILE: Name of the log file. The default is $RESULTS_DIR/processdata.log.
 

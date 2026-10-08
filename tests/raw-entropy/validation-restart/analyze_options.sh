@@ -79,8 +79,8 @@ calc_randmem() {
 
 	for bits in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26
 	do
-		local target="$RES_DIR-random_memaccess-${bits}bits-${memsize}bytes"
-		local source="$ENT_DIR-random_memaccess-${bits}bits-${memsize}bytes"
+		local target="$RES_DIR-random_memaccess-${bits}bits"
+		local source="$ENT_DIR-random_memaccess-${bits}bits"
 
 		if [ ! -d "$source" ]
 		then

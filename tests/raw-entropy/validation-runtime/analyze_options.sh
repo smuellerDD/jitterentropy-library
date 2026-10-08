@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 #
 # Tool to validate the test results for various Jitter RNG memory settings
 #
@@ -61,7 +61,7 @@ calc() {
 
 				if [ $crunch -eq 0 ]
 				then
-					ent=$(grep min $target/jent-raw-noise-0001.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
+					ent=$(grep min $target/jent-raw-noise-0001.minentropy_FF_8bits.txt | cut -d ":" -f 2)
 					echo -e "$memsize\t$blocks\t$blocksize\t$ent" >> $RESULT
 				else
 					crunch_numbers $source $target
@@ -93,7 +93,7 @@ calc_randmem() {
 
 		if [ $crunch -eq 0 ]
 		then
-			ent=$(grep min $target/jent-raw-noise-0001.minentropy_FF_8bits.var.txt | cut -d ":" -f 2)
+			ent=$(grep min $target/jent-raw-noise-0001.minentropy_FF_8bits.txt | cut -d ":" -f 2)
 			echo -e "$bits\t$ent" >> $RESULT
 		else
 			crunch_numbers $source $target
