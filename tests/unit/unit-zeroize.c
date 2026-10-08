@@ -80,7 +80,7 @@ static size_t ze_watch_len;
 static unsigned int ze_releases;
 static size_t ze_dirty;
 
-static void ze_arm(const void *ptr, size_t len)
+static JENT_UT_MAYBE_UNUSED void ze_arm(const void *ptr, size_t len)
 {
 	ze_watch = (const unsigned char *)ptr;
 	ze_watch_len = len;
@@ -88,7 +88,7 @@ static void ze_arm(const void *ptr, size_t len)
 	ze_dirty = 0;
 }
 
-static void ze_disarm(void)
+static JENT_UT_MAYBE_UNUSED void ze_disarm(void)
 {
 	ze_watch = NULL;
 	ze_watch_len = 0;
@@ -215,6 +215,21 @@ static JENT_UT_MAYBE_UNUSED void ze_free(void *ptr)
 # define ZE_FOREIGN_ARENA
 #endif
 
+#ifdef ZE_FOREIGN_ARENA
+static void test_zfree_wipes(void)
+{
+	jent_ut_group("jent_zfree wipes before it releases");
+	JENT_UT_SKIP("the wipe on release",
+		     "this build allocates from a foreign secure arena");
+}
+
+static void test_collector_state_wiped(void)
+{
+	jent_ut_group("the collector's state does not survive its free");
+	JENT_UT_SKIP("the collector state",
+		     "this build allocates from a foreign secure arena");
+}
+#else
 /*
  * What every check below asks of one allocation: that it carried something
  * before the release - a wipe of memory that was already zero proves nothing -
@@ -259,11 +274,6 @@ static void test_zfree_wipes(void)
 
 	jent_ut_group("jent_zfree wipes before it releases");
 
-#ifdef ZE_FOREIGN_ARENA
-	JENT_UT_SKIP("the wipe on release",
-		     "this build allocates from a foreign secure arena");
-	return;
-#else
 	for (m = 0; m < sizeof(modes) / sizeof(modes[0]); m++) {
 		const size_t len = 4096;
 		unsigned char *p = jent_zalloc(len, modes[m].flags);
@@ -286,7 +296,6 @@ static void test_zfree_wipes(void)
 		else
 			JENT_UT_EQ(ze_dirty, 0u, modes[m].name);
 	}
-#endif
 }
 
 /*
@@ -312,11 +321,6 @@ static void test_collector_state_wiped(void)
 
 	jent_ut_group("the collector's state does not survive its free");
 
-#ifdef ZE_FOREIGN_ARENA
-	JENT_UT_SKIP("the collector state",
-		     "this build allocates from a foreign secure arena");
-	return;
-#else
 	if (jent_entropy_init()) {
 		JENT_UT_SKIP("the collector state",
 			     "the startup does not pass on this machine");
@@ -387,8 +391,8 @@ static void test_collector_state_wiped(void)
 			}
 		}
 	}
-#endif
 }
+#endif /* ZE_FOREIGN_ARENA */
 
 int main(void)
 {

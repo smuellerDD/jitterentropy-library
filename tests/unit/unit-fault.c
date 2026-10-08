@@ -182,6 +182,20 @@ static JENT_UT_MAYBE_UNUSED int fi_mlock(const void *addr, size_t len)
 #include "jitterentropy-arch-atomic.c"
 
 #include "jitterentropy-arch-memory.c"
+
+/*
+ * Whether the library places its memory itself, through the mapping backends
+ * the interposers above reach. An external crypto library allocates from its
+ * own secure heap instead, which nothing here can make fail.
+ */
+#if !defined(LIBGCRYPT) && !defined(OPENSSL) && !defined(AWSLC)
+# ifdef JENT_ARCH_MEM_POSIX_MLOCK
+#  define FI_MEM_POSIX
+# elif defined(JENT_ARCH_MEM_WINDOWS)
+#  define FI_MEM_WINDOWS
+# endif
+#endif
+
 #ifdef FI_WINDOWS
 # undef VirtualLock
 # undef VirtualProtect
@@ -780,7 +794,7 @@ static void test_still_usable_afterwards(void)
  */
 static void test_secure_memory_failures(void)
 {
-#ifdef JENT_ARCH_MEM_POSIX_MLOCK
+#ifdef FI_MEM_POSIX
 	void *p;
 
 	jent_ut_group("the secure allocator when the kernel refuses");
@@ -843,7 +857,7 @@ static void test_secure_memory_failures(void)
 	p = jent_fi_real_zalloc(4096, JENT_FORCE_SECURE_MEM);
 	JENT_UT_TRUE(p != NULL, "and the allocator works again afterwards");
 	jent_zfree(p, 4096);
-#elif defined(JENT_ARCH_MEM_WINDOWS)
+#elif defined(FI_MEM_WINDOWS)
 	void *p;
 
 	jent_ut_group("the secure allocator when the kernel refuses");
@@ -1121,9 +1135,10 @@ static void test_allocator_bounds(void)
 	 * The page size, which every mapping is rounded to. A system that
 	 * cannot report one has to fall back to a sane value rather than round
 	 * to zero. Only the mapping backends have one - the malloc fallback
-	 * rounds to nothing.
+	 * rounds to nothing, and an external crypto library places its memory
+	 * itself.
 	 */
-#ifdef JENT_ARCH_MEM_POSIX_MLOCK
+#ifdef FI_MEM_POSIX
 	fi_sysconf_mode = FI_SYSCONF_FAIL;
 	JENT_UT_TRUE(jent_pagesize() > 0,
 		     "an unreportable page size falls back to a usable one");
@@ -1131,7 +1146,8 @@ static void test_allocator_bounds(void)
 	JENT_UT_TRUE(jent_pagesize() > 0, "and so does a page size of zero");
 	fi_sysconf_mode = FI_SYSCONF_REAL;
 #else
-	JENT_UT_SKIP("the page size fallback", "not the mmap/mlock backend");
+	JENT_UT_SKIP("the page size fallback",
+		     "not the mmap/mlock backend of the library itself");
 #endif
 
 	/* The capability query, both ways round. */
