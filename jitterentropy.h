@@ -154,14 +154,14 @@ extern "C" {
  * API compatible, ABI may change, functional enhancements only, consumer can be
  * left unchanged if enhancements are not considered.
  */
-#define JENT_MINVERSION 7
+#define JENT_MINVERSION 8
 
 /*
  * API / ABI compatible, no functional changes, no enhancements, bug fixes only.
  * Also, the entropy collection is not changed in any way that would necessitate
  * a re-assessment.
  */
-#define JENT_PATCHLEVEL 1
+#define JENT_PATCHLEVEL 0
 
 #define JENT_VERSION (JENT_MAJVERSION * 1000000 + \
 		      JENT_MINVERSION * 10000 + \
