@@ -49,9 +49,15 @@ jobs:
               echo "::warning::jitterentropy-rng $opt failed on this machine"
           done
 
+  # On arm64 as well: clang in MSVC mode takes neither MSVC's ARM intrinsics
+  # nor its x86 ones, so its branches in arch/ differ from both.
   windows-clang-cl:
-    name: clang-cl
-    runs-on: windows-latest
+    name: clang-cl, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, windows-11-arm ]
     steps:
       - uses: actions/checkout@v5
 

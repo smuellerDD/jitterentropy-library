@@ -18,7 +18,6 @@ defaults:
     shell: bash
 
 jobs:
-
   makefile:
     name: Makefile, ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -29,8 +28,63 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # With the recording library and, on Linux, the daemon, whose Makefile
+      # rules nothing else builds. MAKEVARS goes to every make below, so that
+      # the install covers what was built.
       - name: Build
-        run: make -j 4
+        run: |
+          vars="ENABLE_RECORDING=1"
+          if [ "${{ runner.os }}" = Linux ]; then
+            vars="$vars ENABLE_RNGD=1"
+          fi
+          echo "MAKEVARS=$vars" >> "$GITHUB_ENV"
+          make -j 4 $vars
+
+      # The export set of the shared libraries the Makefile links: version.lds
+      # and record.lds where the linker takes them, visibility alone on macOS.
+      - name: Check the exports of the shared libraries
+        run: |
+          case "${{ runner.os }}" in
+            macOS) lib=$(ls libjitterentropy.*.*.*.dylib)
+                   rec=$(ls libjitterentropy-record.*.*.*.dylib) ;;
+            *)     lib=$(ls libjitterentropy.so.*.*.*)
+                   rec=$(ls libjitterentropy-record.so.*.*.*) ;;
+          esac
+          bash .github/scripts/check-exports.sh "$lib" version.lds
+          bash .github/scripts/check-exports.sh "$rec" \
+            tests/raw-entropy/recording_library/record.lds
+
+      # The raw collector is compiled into the recording library alone, and
+      # its archive defines the recording API of record.lds and nothing else.
+      - name: Check the symbols of the archives
+        run: |
+          syms=$(nm -g libjitterentropy.a)
+          if grep -q 'jent_entropy_collector_alloc_raw' <<<"$syms"; then
+            echo "::error::libjitterentropy.a carries the raw collector"
+            exit 1
+          fi
+          defined=$(nm -g libjitterentropy-record.a |
+            awk 'NF == 3 && $2 != "U" { sub(/^_/, "", $3); print $3 }' | sort)
+          expected=$(printf '%s\n' jent_record_alloc jent_record_free \
+            jent_record_health_names jent_record_prime jent_record_raw \
+            jent_record_report_len jent_record_run jent_record_sample)
+          if [ "$defined" != "$expected" ]; then
+            echo "::error::libjitterentropy-record.a defines: $defined"
+            exit 1
+          fi
+
+      # The unit and gcd tests through their own Makefiles - the fallback for
+      # a tree without CMake, which nothing else here builds - and, on Linux,
+      # the daemon's version check. Not tests/health: its Makefile compiles
+      # the health tests at -O2, which src/jitterentropy-health.c refuses.
+      - name: Run the tests
+        run: |
+          make -C tests/unit check
+          make -C tests/gcd
+          ./tests/gcd/gcd
+          if [ "${{ runner.os }}" = Linux ]; then
+            make check-rngd $MAKEVARS
+          fi
 
       - name: Build and run the CPU information tool
         working-directory: tests/raw-entropy/recording_userspace
@@ -85,9 +139,16 @@ jobs:
           # Rebuilt rather than installed on top: on macOS PREFIX is baked in
           # at link time as -install_name.
           make clean
-          make -j 4 PREFIX="$PWD/prefix"
-          make install install-static PREFIX="$PWD/prefix"
+          make -j 4 PREFIX="$PWD/prefix" $MAKEVARS
+          make install install-static PREFIX="$PWD/prefix" $MAKEVARS
           ls -l prefix/lib
+          if [ "${{ runner.os }}" = Linux ]; then
+            grep -qx "ExecStart=$PWD/prefix/sbin/jitterentropy-rngd -F" \
+              prefix/lib/systemd/system/jitterentropy.service || {
+              echo "::error::the unit does not name the installed daemon"
+              exit 1
+            }
+          fi
           case "${{ runner.os }}" in
             Linux) LIBS="-pthread -lrt" ;;
             *)     LIBS="-pthread" ;;
@@ -104,13 +165,25 @@ jobs:
             prefix/lib/libjitterentropy.a $LIBS -o linktest-static
           ./linktest-static
 
+      # install-man: the library's page and, with ENABLE_RECORDING=1, the
+      # recording library's, compressed.
+      - name: Check the installed man pages
+        run: |
+          man=prefix/share/man/man3
+          for p in jitterentropy jitterentropy-record; do
+            gzip -t "$man/$p.3.gz" || {
+              echo "::error::no $man/$p.3.gz"
+              exit 1
+            }
+          done
+
   linking:
     name: linking, ${{ matrix.os }}, ${{ matrix.shared == 'ON' && 'shared' || 'static' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest ]
+        os: [ ubuntu-latest, ubuntu-26.04, ubuntu-24.04-arm, ubuntu-26.04-arm, macos-latest, windows-latest ]
         shared: [ 'ON', 'OFF' ]
     steps:
       - uses: actions/checkout@v5

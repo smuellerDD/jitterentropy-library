@@ -18,14 +18,13 @@ defaults:
     shell: bash
 
 jobs:
-
   linux-kmod:
     name: module, ${{ matrix.os }}, ${{ matrix.config }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        os: [ ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, ubuntu-22.04-arm, ubuntu-24.04-arm, ubuntu-26.04-arm ]
         config: [ default, test-interface, minimal ]
         include:
           - config: default
@@ -56,8 +55,47 @@ jobs:
 
       - name: Show the result
         run: |
-          ls -l linux_kernel/jitter_rng.ko
-          modinfo linux_kernel/jitter_rng.ko
+          ko=linux_kernel/jitter_rng.ko
+          ls -l "$ko"
+          modinfo "$ko"
+
+          # Captured, not piped into grep -q: grep stopping at the first
+          # match would fail the producer with SIGPIPE under pipefail.
+          parms=$(modinfo -F parm "$ko")
+          undef=$(nm -u "$ko")
+          has_parm() { grep -q "^$1:" <<<"$parms"; }
+          refs() { grep -qE " U $1\$" <<<"$undef"; }
+          regs="crypto_register_rng misc_register hwrng_register"
+
+          case "${{ matrix.config }}" in
+          test-interface)
+            has_parm testing_osr || {
+              echo "::error::the test interface is not built in"
+              exit 1
+            }
+            ;;
+          default)
+            ! has_parm testing_osr || {
+              echo "::error::the test interface is built in by default"
+              exit 1
+            }
+            # What minimal below must not have, so the names are right.
+            for sym in $regs; do
+              refs "$sym" || {
+                echo "::error::the default module does not call $sym"
+                exit 1
+              }
+            done
+            ;;
+          minimal)
+            for sym in $regs; do
+              ! refs "$sym" || {
+                echo "::error::the minimal module still calls $sym"
+                exit 1
+              }
+            done
+            ;;
+          esac
 
   linux-dkms:
     name: DKMS, ${{ matrix.os }}, ${{ matrix.config }}
@@ -65,7 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, ubuntu-24.04-arm ]
+        os: [ ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, ubuntu-22.04-arm, ubuntu-24.04-arm, ubuntu-26.04-arm ]
         config: [ default, test-interface ]
         include:
           - config: default
