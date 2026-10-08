@@ -291,7 +291,8 @@ jobs:
               else
                 install="yum -y install"
               fi
-              $install gcc make
+              # gawk for the exported-symbols tests: SUSE BCI has no awk.
+              $install gcc make gawk
 
               if [ "$CMAKE_SOURCE" = distro ]; then
                 $install cmake
