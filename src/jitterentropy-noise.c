@@ -596,8 +596,11 @@ static void jent_random_data_one(
 	}
 	ec->rct_mem_nosr = (unsigned short)nosr;
 
-	/* Entropy collection loop */
-	while (!jent_health_failure(ec)) {
+	/*
+	 * Entropy collection loop. Polled without the callback: the caller
+	 * reports the failure once, after jent_random_data() returns.
+	 */
+	while (!jent_health_failure_query(ec)) {
 		/* If a stuck measurement is received, repeat measurement */
 		if (measure_jitter(ec, 0, NULL, 1))
 			continue;
