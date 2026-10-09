@@ -17,12 +17,13 @@
         // import ./nix/kernel.nix ctx
         // import ./nix/vm.nix ctx
         // import ./nix/efi.nix ctx
+        // import ./nix/raw-entropy.nix ctx
         // import ./nix/images.nix ctx);
 
       inherit (ctx)
         consumersFor crossTargets cryptoFor efiFor efiVmFor forAllSystems
-        inTreeBuildsFor isosFor modulesFor muslFor muslStaticFor sdImagesFor
-        toolsFor vmTestsFor;
+        inTreeBuildsFor isosFor modulesFor muslFor muslStaticFor rawEntropyFor
+        sdImagesFor toolsFor vmTestsFor;
     in {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
@@ -49,7 +50,10 @@
       # `nix flake check` boots every VM and runs its assertions.
       checks =
         forAllSystems (system:
-          vmTestsFor nixpkgs.legacyPackages.${system}
+          vmTestsFor nixpkgs.legacyPackages.${system} // {
+            # Boots nothing: the scripts in the build sandbox.
+            raw-entropy = rawEntropyFor nixpkgs.legacyPackages.${system};
+          }
           # The EFI application boots no kernel and needs no NixOS, but it is a
           # VM that has to come up and say the right thing, so it belongs here
           # with the rest of them.
@@ -62,8 +66,8 @@
       # then `machine.shell_interact()`.
       apps = forAllSystems (system:
         let
-          # The NixOS tests only: the EFI VM is a plain derivation,
-          # with no driver to open.
+          # The NixOS tests only: the EFI VM and the raw entropy check are
+          # plain derivations, with no driver to open.
           runners = lib.mapAttrs (_name: test: {
             type = "app";
             program = "${test.driverInteractive}/bin/nixos-test-driver";

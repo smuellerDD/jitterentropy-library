@@ -1,7 +1,7 @@
 name: Nix
 
 # The nix flake: kernel VM tests, in-tree kernels, EFI, cross builds,
-# consumers, crypto backends and musl.
+# consumers, crypto backends, musl and the raw entropy scripts.
 
 on:
   push:
@@ -165,6 +165,25 @@ jobs:
         run: |
           nix build --no-link --print-build-logs \
             ".#checks.x86_64-linux.${{ matrix.vm }}"
+
+  # tests/raw-entropy's recording and SP800-90B validation scripts, run
+  # against nixpkgs' build of the NIST tool. No VM: user space only.
+  nix-raw-entropy:
+    name: raw entropy scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Record and validate in user space
+        run: |
+          nix build --no-link --print-build-logs \
+            .#checks.x86_64-linux.raw-entropy
 
   nix-in-tree:
     name: ${{ matrix.attr }}
