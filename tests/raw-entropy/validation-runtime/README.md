@@ -65,8 +65,8 @@ detailed explanation.
 
 MAX_EVENTS: the size of the sample that will be extracted from the sample data.
 It is 1000000, the minimum suggested by SP800-90B and the size of a runtime
-data set recorded by `recording_userspace` (see its README). A data file
-holding fewer samples fails the extraction.
+data set recorded by `recording_userspace` (see its README), or as given in
+the environment. A data file holding fewer samples fails the extraction.
 
 
 ### Extraction method

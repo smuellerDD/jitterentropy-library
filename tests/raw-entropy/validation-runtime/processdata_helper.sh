@@ -46,8 +46,9 @@ MASK_LIST="FF:8"
 # List used for ARM Cortext A9 and A7 processors
 #MASK_LIST="FF:4,8 7F8:4,8"
 
-# Maximum number of entries to be extracted from the original file
-MAX_EVENTS=1000000
+# Maximum number of entries to be extracted from the original file; no more
+# than were recorded, as extractlsb fails on a shorter file
+MAX_EVENTS=${MAX_EVENTS:-1000000}
 
 ############################################################
 # Code only after this line -- do not change               #
