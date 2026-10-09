@@ -62,7 +62,7 @@ disappearing.
 ## What the output means
 
 ```
-jitterentropy-efi: start, library version 3070100
+jitterentropy-efi: start, library version 3080000
 jitterentropy-efi: startup passed
 jitterentropy-efi: default collector allocated
 jitterentropy-efi: default entropy c7d00293f4319cdb936828498734704393f6b4389666c0081c6dc42e4c222cbb

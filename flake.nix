@@ -16,7 +16,7 @@
       toolsFor = pkgs:
         pkgs.stdenv.mkDerivation {
           pname = "jitterentropy-tools";
-          version = "3.7.1";
+          version = "3.8.0";
           src = self;
           nativeBuildInputs = [ pkgs.cmake ];
           enableParallelBuilding = true;
@@ -56,7 +56,7 @@
       crossFor = { cross, timer ? true, shared ? false }:
         cross.stdenv.mkDerivation {
           pname = "jitterentropy-cross";
-          version = "3.7.1";
+          version = "3.8.0";
           src = self;
           nativeBuildInputs = [ nixpkgs.legacyPackages.x86_64-linux.cmake ];
           # BUILD_TESTING explicitly: the nixpkgs cmake hook passes it as OFF,
@@ -120,7 +120,7 @@
           # part of the API.
           libFor = timer:
             pkgs.jitterentropy.overrideAttrs (_: {
-              version = "3.7.1";
+              version = "3.8.0";
               src = self;
               cmakeFlags =
                 [ "-DINTERNAL_TIMER=${if timer then "on" else "off"}" ];
@@ -678,7 +678,7 @@
           target = spec.pkgsFor pkgs;
         in target.stdenv.mkDerivation {
           pname = "jitterentropy-efi-${efiArch}";
-          version = "3.7.1";
+          version = "3.8.0";
           src = self;
           buildInputs = [ target.gnu-efi ];
           enableParallelBuilding = true;

@@ -10,7 +10,7 @@ a private email to <smueller@chronox.de>.
 
 ## 2026-09-25
 
-Fixed in 3.7.1.
+Fixed in 3.8.0.
 
 The measurement that primes `->prev_time` ahead of each block was passed to
 the health tests. Its delta spans the time since the previous block, and as the
