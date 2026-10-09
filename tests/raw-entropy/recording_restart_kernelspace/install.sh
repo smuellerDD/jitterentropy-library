@@ -2,6 +2,8 @@
 
 #	Install the linux kernel and the service running the boottime test
 
+set -euxo pipefail
+
 # Note: restorecon is needed for Fedora
 if [ ! -x /usr/local/sbin/getrawentropy ];
 then
@@ -9,11 +11,14 @@ then
 	exit 1
 fi
 
-cp boottime_test_record.sh /usr/local/sbin/ &&
-chmod u+x /usr/local/sbin/boottime_test_record.sh &&
-cp boottime_test_record.service /etc/systemd/system/ &&
-systemctl enable boottime_test_record &&
-restorecon -v -R /
+cp boottime_test_record.sh /usr/local/sbin/
+chmod u+x /usr/local/sbin/boottime_test_record.sh
+cp boottime_test_record.service /etc/systemd/system/
+systemctl enable boottime_test_record
+if command -v restorecon > /dev/null
+then
+	restorecon -v -R /
+fi
 
 echo "To improve the reboot speed change the timeout in /etc/default/grub as follows"
 echo "GRUB_TIMEOUT=1"

@@ -30,6 +30,8 @@
 #    will always be L1 data cache-misses for accessing the bytes in the memory.
 #
 
+set -euxo pipefail
+
 # --memaccess records the NTG.1 memory access loop, which always uses the
 # deterministic access pattern: the module needs no special build for it.
 # JENT_TEST_MEASURE_RAW_MEMORY_ACCESS only selects the pattern of the common

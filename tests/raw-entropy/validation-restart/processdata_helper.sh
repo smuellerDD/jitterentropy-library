@@ -2,7 +2,11 @@
 #
 # Process the entropy data
 
-if [ -z "$NONIID_DATA" ]
+# The extraction and analysis tools are invoked in pipelines with tee for
+# logging; without pipefail their failures would be masked by tee's exit code.
+set -euxo pipefail
+
+if [ -z "${NONIID_DATA:-}" ]
 then
 	echo "This script cannot be called by itself."
 	exit 1
@@ -47,10 +51,6 @@ MAX_EVENTS=1000
 # Preparation
 #############################
 
-# The extraction and analysis tools are invoked in pipelines with tee for
-# logging; without pipefail their failures would be masked by tee's exit code.
-set -o pipefail
-
 INPUTCONSOLIDATED="$RESULTS_DIR/jent-raw-noise-restart-consolidated.data"
 
 EXTRACT="extractlsb"
@@ -63,8 +63,7 @@ fi
 
 if [ ! -d $RESULTS_DIR ]
 then
-	mkdir $RESULTS_DIR
-	if [ $? -ne 0 ]
+	if ! mkdir $RESULTS_DIR
 	then
 		echo "Directory for results $RESULTS_DIR cannot be created"
 		exit 1
@@ -80,7 +79,6 @@ fi
 
 trap "if [ "$BUILD_EXTRACT" = "yes" ]; then make clean; fi" 0 1 2 3 15
 
-rm -f $EXEC
 if [ "$BUILD_EXTRACT" = "yes" ]
 then
 	echo "Building $EXTRACT ..."
@@ -137,8 +135,7 @@ do
 		mask=${item%:*}
 		bits=${item#*:}
 
-		./$EXTRACT $file $filepath.${mask}bitout.data $((MAX_EVENTS * restarts)) $mask 2>&1 | tee -a $LOGFILE
-		if [ $? -ne 0 ]
+		if ! ./$EXTRACT $file $filepath.${mask}bitout.data $((MAX_EVENTS * restarts)) $mask 2>&1 | tee -a $LOGFILE
 		then
 			echo "ERROR: Extraction of $file (mask $mask) failed" | tee -a $LOGFILE
 			exit 1
@@ -175,8 +172,7 @@ do
 			if [ ! -f $outfile ]
 			then
 				echo "Analyzing entropy for $infile ${bits}-bit single" | tee -a $LOGFILE
-				$EATOOL -n -v $infile ${bits} 0.333 > $outfile
-				if [ $? -ne 0 ]
+				if ! $EATOOL -n -v $infile ${bits} 0.333 > $outfile
 				then
 					echo "ERROR: Entropy analysis of $infile (${bits} bits) failed" | tee -a $LOGFILE
 					# do not leave a partial result behind that

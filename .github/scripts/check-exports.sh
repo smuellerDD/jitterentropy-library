@@ -12,7 +12,7 @@
 #
 # Linux (GNU or LLVM nm) and macOS. Usage: check-exports.sh <library> <script>
 
-set -euo pipefail
+set -euxo pipefail
 
 lib=$1
 lds=$2

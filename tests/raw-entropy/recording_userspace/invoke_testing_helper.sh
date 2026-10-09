@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euxo pipefail
+
 # Directory where to store the measurements
 OUTDIR=${OUTDIR:-"../results-measurements"}
 
@@ -35,8 +37,7 @@ initialization()
 {
 	if [ ! -d $OUTDIR ]
 	then
-		mkdir $OUTDIR
-		if [ $? -ne 0 ]
+		if ! mkdir $OUTDIR
 		then
 			echo "Creation of $OUTDIR failed"
 			exit 1
