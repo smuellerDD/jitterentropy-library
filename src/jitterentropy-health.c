@@ -31,7 +31,7 @@
 #define JENT_CUTOFF_TABLE_CHECK(t)					       \
 	JENT_BUILD_BUG_ON(JENT_ARRAY_SIZE(t) != JENT_MAX_OSR)
 
-static jent_fnptr fips_cb = NULL;
+static jent_fips_failure_cb fips_cb = NULL;
 
 /*
  * Closed once by the initialization and read by every later caller of
@@ -50,7 +50,7 @@ int jent_set_fips_failure_callback_internal(jent_fips_failure_cb cb)
 {
 	if (jent_atomic_load_int(&jent_health_cb_switch_blocked))
 		return -EAGAIN;
-	jent_atomic_store_fnptr(&fips_cb, (jent_fnptr)cb);
+	jent_atomic_store_fips_cb(&fips_cb, cb);
 	return 0;
 }
 
@@ -904,7 +904,7 @@ unsigned int jent_health_failure(struct rand_data *ec)
 	 * Read once, so that the call cannot be made on a pointer that was
 	 * replaced between the test and it.
 	 */
-	cb = (jent_fips_failure_cb)jent_atomic_load_fnptr(&fips_cb);
+	cb = jent_atomic_load_fips_cb(&fips_cb);
 
 	if (cb)
 		cb(ec, health_failure);

@@ -61,8 +61,6 @@
 #ifndef _JITTERENTROPY_ARCH_ATOMIC_H
 #define _JITTERENTROPY_ARCH_ATOMIC_H
 
-typedef void (*jent_fnptr)(void);
-
 JENT_INTERNAL
 int jent_atomic_load_int(const int *ptr);
 JENT_INTERNAL
@@ -79,8 +77,10 @@ JENT_INTERNAL
 void jent_atomic_store_u32(uint32_t *ptr, uint32_t val);
 
 JENT_INTERNAL
-jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr);
+jent_fips_failure_cb
+jent_atomic_load_fips_cb(const jent_fips_failure_cb *ptr);
 JENT_INTERNAL
-void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val);
+void jent_atomic_store_fips_cb(jent_fips_failure_cb *ptr,
+			       jent_fips_failure_cb val);
 
 #endif /* _JITTERENTROPY_ARCH_ATOMIC_H */
