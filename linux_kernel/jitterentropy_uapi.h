@@ -101,7 +101,7 @@ struct jent_output_ioctl {
 /* The stable per-instance identifier, as the "uuid" status field. */
 #define JENT_IOCUUID	_IOR(JENT_IOC_MAGIC, 0x03, struct jent_uuid_ioctl)
 
-/* "version" as jent_version() encodes it: 3.7.1 is 3070100. */
+/* "version" as jent_version() encodes it: 3.8.0 is 3080000. */
 #define JENT_IOCVERSION	_IOR(JENT_IOC_MAGIC, 0x04, __u32)
 
 /* The effective oversampling rate, as "configuration.osr". */
