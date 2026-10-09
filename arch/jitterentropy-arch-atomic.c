@@ -99,12 +99,14 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 	smp_store_release(ptr, val);
 }
 
-jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)
+jent_fips_failure_cb
+jent_atomic_load_fips_cb(const jent_fips_failure_cb *ptr)
 {
 	return smp_load_acquire(ptr);
 }
 
-void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+void jent_atomic_store_fips_cb(jent_fips_failure_cb *ptr,
+			       jent_fips_failure_cb val)
 {
 	smp_store_release(ptr, val);
 }
@@ -167,12 +169,14 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 }
 
 /* The builtins take any scalar, a pointer to a function included. */
-jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)
+jent_fips_failure_cb
+jent_atomic_load_fips_cb(const jent_fips_failure_cb *ptr)
 {
 	return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 }
 
-void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+void jent_atomic_store_fips_cb(jent_fips_failure_cb *ptr,
+			       jent_fips_failure_cb val)
 {
 	__atomic_store_n(ptr, val, __ATOMIC_RELEASE);
 }
@@ -221,13 +225,16 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 	(void)_InterlockedExchange((volatile long *)ptr, (long)val);
 }
 
-jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)
+jent_fips_failure_cb
+jent_atomic_load_fips_cb(const jent_fips_failure_cb *ptr)
 {
-	return (jent_fnptr)(uintptr_t)_InterlockedCompareExchangePointer(
-		(void * volatile *)ptr, NULL, NULL);
+	return (jent_fips_failure_cb)(uintptr_t)
+		_InterlockedCompareExchangePointer((void * volatile *)ptr,
+						   NULL, NULL);
 }
 
-void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+void jent_atomic_store_fips_cb(jent_fips_failure_cb *ptr,
+			       jent_fips_failure_cb val)
 {
 	(void)_InterlockedExchangePointer((void * volatile *)ptr,
 					  (void *)(uintptr_t)val);
@@ -285,15 +292,17 @@ void jent_atomic_store_u32(uint32_t *ptr, uint32_t val)
 			      memory_order_release);
 }
 
-jent_fnptr jent_atomic_load_fnptr(const jent_fnptr *ptr)
+jent_fips_failure_cb
+jent_atomic_load_fips_cb(const jent_fips_failure_cb *ptr)
 {
-	return atomic_load_explicit((_Atomic(jent_fnptr) *)ptr,
+	return atomic_load_explicit((_Atomic(jent_fips_failure_cb) *)ptr,
 				    memory_order_acquire);
 }
 
-void jent_atomic_store_fnptr(jent_fnptr *ptr, jent_fnptr val)
+void jent_atomic_store_fips_cb(jent_fips_failure_cb *ptr,
+			       jent_fips_failure_cb val)
 {
-	atomic_store_explicit((_Atomic(jent_fnptr) *)ptr, val,
+	atomic_store_explicit((_Atomic(jent_fips_failure_cb) *)ptr, val,
 			      memory_order_release);
 }
 
