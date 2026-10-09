@@ -21,7 +21,8 @@ processed with the `validation-runtime` and `validation-restart` logic.
 
 A runtime data set holds 1000000 samples and the restart data sets are
 1000 x 1000 (`NUM_EVENTS`, `NUM_EVENTS_RESTART` and `NUM_RESTART` in
-`invoke_testing_helper.sh`), as SP800-90B requires for an assessment.
+`invoke_testing_helper.sh`, or in the environment), as SP800-90B requires for
+an assessment.
 
 For analyzing different aspects of the Jitter RNG, different flavors of the
 test script are provided as follows which all obtain the raw unconditioned
