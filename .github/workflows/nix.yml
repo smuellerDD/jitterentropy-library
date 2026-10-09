@@ -167,11 +167,13 @@ jobs:
             ".#checks.x86_64-linux.${{ matrix.vm }}"
 
   # tests/raw-entropy's recording and SP800-90B validation scripts, run
-  # against nixpkgs' build of the NIST tool. No VM: user space only.
+  # against nixpkgs' build of the NIST tool: user space in the build sandbox,
+  # kernel space in a NixOS VM.
   nix-raw-entropy:
     name: raw entropy scripts
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The small kernel the VM boots is built here, from source.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
 
@@ -179,11 +181,33 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            # Nix only advertises kvm if /dev/kvm existed at daemon start.
+            system-features = nixos-test benchmark big-parallel kvm
 
       - name: Record and validate in user space
         run: |
           nix build --no-link --print-build-logs \
             .#checks.x86_64-linux.raw-entropy
+
+      # /dev/kvm is root-only on the runners; without this QEMU uses TCG.
+      - name: Enable KVM for the unprivileged builder
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # The kernel alone first, so that its build and the VM test show up as
+      # steps of their own.
+      - name: Build the kernel with the vanilla test interface
+        run: nix build --no-link --print-build-logs .#testinterface-kernel
+
+      # recording_runtime_kernelspace and recording_restart_kernelspace with
+      # the vanilla Jitter RNG and with jitter_rng.ko.
+      - name: Record and validate in kernel space
+        run: |
+          nix build --no-link --print-build-logs \
+            .#checks.x86_64-linux.raw-entropy-kernel
 
   nix-in-tree:
     name: ${{ matrix.attr }}

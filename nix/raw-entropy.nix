@@ -1,7 +1,7 @@
 # The tests/raw-entropy recording and validation scripts.
 ctx:
 let
-  inherit (ctx) self;
+  inherit (ctx) machineFor self testInterfaceKernelFor;
 in
 {
   # The SP800-90B tool chain end to end, as tests/raw-entropy documents
@@ -63,4 +63,65 @@ in
       '';
     };
 
+  # The kernel-space recordings, with the vanilla Jitter RNG through its test
+  # interface and with jitter_rng.ko of this tree: recording_runtime_kernelspace
+  # with the validation of both, and boottime_test_record.sh, which records
+  # early in each boot and reboots the VM - QEMU exits on that, and the test
+  # starts it again. The validation needs no more than a recording that runs,
+  # so the runtime sets are short and the boot series has two runs where the
+  # real test takes 1000.
+  rawEntropyKernelVmFor = pkgs:
+    let
+      restarts = 2;
+      samples = 100000;
+    in pkgs.testers.runNixOSTest {
+      name = "jitterentropy-raw-entropy-kernel";
+
+      nodes.machine = { pkgs, ... }: {
+        imports = [ (machineFor (testInterfaceKernelFor pkgs)) ];
+        boot.kernelParams = [
+          # Buffers the first time stamps of each boot for the recorder.
+          "jitterentropy_testing.boot_raw_hires_test=1"
+          "clocksource=tsc"
+          "tsc=reliable"
+        ];
+        # The kernel builds its drivers in and has no TPM driver.
+        boot.initrd.includeDefaultModules = false;
+        boot.initrd.systemd.tpm2.enable = false;
+        virtualisation.qemu.options = [ "-cpu" "host" ];
+        virtualisation.cores = 2;
+        virtualisation.memorySize = 2048;
+        virtualisation.diskSize = 4096;
+        # The scripts build getrawentropy and extractlsb themselves.
+        environment.systemPackages = with pkgs; [ gcc gnumake ];
+
+        # boottime_test_record.service with the paths NixOS has; DEBUGFS_FILE
+        # and the like come from the EnvironmentFile.
+        systemd.services.boottime_test_record = {
+          description = "Boot time test for Kernel Jitter RNG";
+          unitConfig.DefaultDependencies = false;
+          wants = [ "sys-kernel-debug.mount" ];
+          after = [ "local-fs.target" "sys-kernel-debug.mount"
+                    "systemd-modules-load.service" ];
+          before = [ "sysinit.target" ];
+          wantedBy = [ "basic.target" ];
+          path = with pkgs; [ coreutils gnugrep util-linux systemd pciutils ];
+          environment = {
+            GETRAWENTROPY = "/run/current-system/sw/bin/getrawentropy";
+            KCAPIRNG = "${pkgs.libkcapi}/bin/kcapi-rng";
+            TESTS = toString restarts;
+          };
+          serviceConfig = {
+            EnvironmentFile = "-/etc/default/boottime_test_record";
+            ExecStart = "${pkgs.bash}/bin/bash ${self}/tests/raw-entropy/recording_restart_kernelspace/boottime_test_record.sh";
+          };
+        };
+      };
+
+      testScript = ''
+        src = "${self}"
+        restarts = ${toString restarts}
+        samples = ${toString samples}
+      '' + builtins.readFile ./raw-entropy/kernel-test.py;
+    };
 }

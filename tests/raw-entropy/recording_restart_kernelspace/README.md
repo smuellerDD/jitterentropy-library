@@ -32,7 +32,8 @@ allocates when the script opens it.
 
 These, as well as `OUTDIR`, `TESTS`, `KCAPIRNG` and `GETRAWENTROPY`, are read
 from the environment, e.g. from an `EnvironmentFile=` added to the service;
-the values above are the defaults.
+the values above are the defaults. The flake's `raw-entropy-kernel` check runs
+the script this way for both interfaces with `TESTS=2`.
 
 The result is one file per boot operation,
 `/root/results-measurements/jent-raw-noise-restart.<run>.data`, holding 1,000
