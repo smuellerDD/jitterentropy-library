@@ -23,7 +23,8 @@
       inherit (ctx)
         consumersFor crossTargets cryptoFor efiFor efiVmFor forAllSystems
         inTreeBuildsFor isosFor modulesFor muslFor muslStaticFor rawEntropyFor
-        sdImagesFor toolsFor vmTestsFor;
+        rawEntropyKernelVmFor sdImagesFor testInterfaceKernelFor toolsFor
+        vmTestsFor;
     in {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
@@ -32,6 +33,8 @@
           jitterentropy-tools = toolsFor pkgs;
           musl = muslFor pkgs;
           musl-static = muslStaticFor pkgs;
+          # The kernel of the raw-entropy-kernel check.
+          testinterface-kernel = (testInterfaceKernelFor pkgs).kernel;
         } // cryptoFor pkgs
           // modulesFor pkgs
           // inTreeBuildsFor pkgs
@@ -53,6 +56,8 @@
           vmTestsFor nixpkgs.legacyPackages.${system} // {
             # Boots nothing: the scripts in the build sandbox.
             raw-entropy = rawEntropyFor nixpkgs.legacyPackages.${system};
+            raw-entropy-kernel =
+              rawEntropyKernelVmFor nixpkgs.legacyPackages.${system};
           }
           # The EFI application boots no kernel and needs no NixOS, but it is a
           # VM that has to come up and say the right thing, so it belongs here

@@ -76,6 +76,89 @@ in
         || name == "linux_testing") && r.success && r.value)
       pkgs.linuxKernel.packages;
 
+  # The default kernel's source with the vanilla Jitter RNG test interface,
+  # which no nixpkgs kernel enables: built in, so that its boot time buffer
+  # sees the first time stamps. defconfig and kvm_guest.config with what the
+  # NixOS test VM needs keep it a fraction of a distribution kernel. The
+  # option is offered only under CRYPTO_FIPS, which is not FIPS mode - that
+  # takes fips=1 - and asks for MODULE_SIG, which without MODULE_SIG_FORCE
+  # still loads the unsigned jitter_rng.ko.
+  testInterfaceKernelFor = pkgs:
+    let
+      base = pkgs.linuxPackages.kernel;
+      arch = pkgs.stdenv.hostPlatform.linuxArch;
+
+      enable = [
+        # The vanilla Jitter RNG with its test interface and what that
+        # depends on, and the AF_ALG RNG interface kcapi-rng drives it
+        # through, looked up via netlink.
+        "EXPERT" "CRYPTO_SELFTESTS" "CRYPTO_DRBG_MENU" "CRYPTO_DRBG_HMAC"
+        "CRYPTO_FIPS" "CRYPTO_JITTERENTROPY"
+        "CRYPTO_JITTERENTROPY_TESTINTERFACE" "CRYPTO_USER_API_RNG"
+        "CRYPTO_USER_API_HASH" "CRYPTO_USER"
+        # jitter_rng.ko and its interfaces.
+        "MODULES" "MODULE_SIG" "HW_RANDOM" "HW_RANDOM_VIRTIO" "PROC_FS"
+        "DEBUG_FS"
+        # The NixOS test VM.
+        "VIRTIO_PCI" "VIRTIO_BLK" "VIRTIO_NET" "VIRTIO_CONSOLE"
+        "VIRTIO_BALLOON" "VIRTIO_MMIO" "SCSI_VIRTIO" "NET_9P"
+        "NET_9P_VIRTIO" "9P_FS" "9P_FS_POSIX_ACL" "FUSE_FS" "VIRTIO_FS"
+        "DRM" "DRM_VIRTIO_GPU" "OVERLAY_FS" "EXT4_FS" "EXT4_FS_POSIX_ACL"
+        "BLK_DEV_LOOP"
+        # systemd and NixOS.
+        "DEVTMPFS" "CGROUPS" "CGROUP_BPF" "BPF_SYSCALL" "INOTIFY_USER"
+        "SIGNALFD" "TIMERFD" "EPOLL" "FHANDLE" "AUTOFS_FS" "TMPFS"
+        "TMPFS_POSIX_ACL" "TMPFS_XATTR" "SECCOMP" "DMIID" "BLK_DEV_INITRD"
+        "RD_ZSTD" "BINFMT_ELF" "UNIX" "NET" "INET"
+      ];
+
+      configfile = pkgs.stdenv.mkDerivation {
+        pname = "jitterentropy-testinterface-kernel-config";
+        inherit (base) version src;
+
+        nativeBuildInputs = with pkgs; [ bc bison flex perl ];
+
+        postPatch = "patchShebangs scripts";
+
+        buildPhase = ''
+          runHook preBuild
+
+          make ARCH=${arch} defconfig kvm_guest.config
+          ./scripts/config ${lib.concatMapStringsSep " "
+            (o: "--enable ${o}") enable} \
+            --set-str LOCALVERSION "" \
+            --disable LOCALVERSION_AUTO
+          make ARCH=${arch} olddefconfig
+
+          # olddefconfig drops whatever has unmet dependencies, so check the
+          # outcome rather than the request.
+          for opt in ${lib.concatStringsSep " " enable}; do
+            grep -qx "CONFIG_$opt=y" .config || {
+              echo "CONFIG_$opt=y is missing from the generated .config"
+              exit 1
+            }
+          done
+
+          runHook postBuild
+        '';
+
+        installPhase = ''
+          runHook preInstall
+          cp .config $out
+          runHook postInstall
+        '';
+      };
+
+      kernel = pkgs.linuxManualConfig {
+        inherit (base) src version modDirVersion;
+        inherit configfile;
+        # Stated rather than read back from the generated .config, which
+        # would be import from derivation.
+        config = lib.listToAttrs
+          (map (o: lib.nameValuePair "CONFIG_${o}" "y") enable);
+      };
+    in pkgs.linuxPackagesFor kernel;
+
   # linux_kernel/README.md "Build in Tree": the library copied into the
   # kernel source, crypto/Makefile pointed at it, the result linked into
   # vmlinux. Unlike moduleFor, this compiles with CONFIG_MODULES unset and
