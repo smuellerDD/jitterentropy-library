@@ -62,10 +62,13 @@
       # then `machine.shell_interact()`.
       apps = forAllSystems (system:
         let
+          # The NixOS tests only: the EFI VM is a plain derivation,
+          # with no driver to open.
           runners = lib.mapAttrs (_name: test: {
             type = "app";
             program = "${test.driverInteractive}/bin/nixos-test-driver";
-          }) self.checks.${system};
+          }) (lib.filterAttrs (_name: test: test ? driverInteractive)
+            self.checks.${system});
         in runners // { default = runners.vm; });
     };
 }
