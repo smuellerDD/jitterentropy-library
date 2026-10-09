@@ -23,12 +23,16 @@ halves, and every boot records nonsense deltas without any error.
 
 The script reads `/sys/kernel/debug/jitterentropy_testing/jent_raw_hires` and
 drives the RNG with `kcapi-rng -n "jitterentropy_rng"`. For the out-of-tree
-module of `linux_kernel/`, loaded at boot with its test interface, change them
-to `/sys/kernel/debug/jitter_rng/jent_raw_hires` and `jitter_rng` in the
-script, drop `--timestamps` from its getrawentropy call and build getrawentropy
+module of `linux_kernel/`, loaded at boot with its test interface, set
+`DEBUGFS_FILE=/sys/kernel/debug/jitter_rng/jent_raw_hires`, `KCAPI_NAME=jitter_rng`
+and an empty `RAW_OPTS=` (dropping `--timestamps`), and build getrawentropy
 with `-DRAW_DATATYPE_U64`. That module has no boot time buffer: each boot
 records the first 1,000 time deltas of the raw-noise instance its debugfs file
 allocates when the script opens it.
+
+These, as well as `OUTDIR`, `TESTS`, `KCAPIRNG` and `GETRAWENTROPY`, are read
+from the environment, e.g. from an `EnvironmentFile=` added to the service;
+the values above are the defaults.
 
 The result is one file per boot operation,
 `/root/results-measurements/jent-raw-noise-restart.<run>.data`, holding 1,000

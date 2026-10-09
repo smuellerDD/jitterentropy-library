@@ -3,7 +3,10 @@
 [Unit]
 Description=Boot time test for Kernel Jitter RNG
 DefaultDependencies=no
-After=local-fs.target
+# debugfs for the recording, the module for the out-of-tree module of
+# linux_kernel/
+Wants=sys-kernel-debug.mount
+After=local-fs.target sys-kernel-debug.mount systemd-modules-load.service
 Before=sysinit.target
 
 [Service]
