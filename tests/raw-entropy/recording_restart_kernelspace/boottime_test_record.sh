@@ -29,6 +29,9 @@
 #	interruption, the next reboot will continue collecting data for this
 #	test. The interruption does not affect the test data.
 #
+
+set -euxo pipefail
+
 OUTDIR="/root/results-measurements"
 OUTFILE="$OUTDIR/jent-raw-noise-restart"
 STATE="$OUTDIR/jent_state"
@@ -44,7 +47,12 @@ then
 fi
 
 #testruns=$(ls $OUTFILE* | wc -l | cut -d" " -f1)
-testruns=$(cat $STATE)
+# No state file before the first run.
+testruns=0
+if [ -f "$STATE" ]
+then
+	testruns=$(cat $STATE)
+fi
 echo $((testruns+1)) > $STATE
 
 #add leading zeros
@@ -97,7 +105,7 @@ fi
 #      	-net nic,model=e1000,macaddr=00:50:45:00:34:0F -net user,hostfwd=tcp:127.0.0.1:24-:22
 # 	-drive file=/vm-image-bootlooptests.img,format=raw,cache=writeback -boot c
 #
-mount -t proc proc /proc > /dev/null 2>&1
+mount -t proc proc /proc > /dev/null 2>&1 || true
 if ! grep hypervisor /proc/cpuinfo > /dev/null 2>&1 ; then
   if [ -f /boot/vmlinuz -a -f /boot/initrd ]; then
 	e=$( cat /proc/cmdline)
@@ -110,9 +118,9 @@ fi
 # Note, however, that it may be neccessary to enforce disc scan with outomatic repair on every reboot.
 
 sync ; sync
-mount -o remount,ro /
+mount -o remount,ro / || true
 
 # kexec will only return upon error, like if not set up or fail of set up.
-kexec -e
+kexec -e || true
 
 reboot -f

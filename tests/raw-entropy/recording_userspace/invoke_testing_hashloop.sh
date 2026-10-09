@@ -8,6 +8,8 @@
 # of the iteration count on the entropy rate can be analyzed.
 #
 
+set -euxo pipefail
+
 . ./invoke_testing_helper.sh
 
 raw_entropy_ntg1_hashloop()

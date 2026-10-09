@@ -2,6 +2,8 @@
 #
 # Process the entropy data
 
+set -euxo pipefail
+
 ############################################################
 # Configuration values common                              #
 ############################################################

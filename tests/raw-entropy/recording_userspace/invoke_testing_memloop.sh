@@ -30,6 +30,8 @@
 #    will always be L1 data cache-misses for accessing the bytes in the memory.
 #
 
+set -euxo pipefail
+
 . ./invoke_testing_helper.sh
 
 raw_entropy_ntg1_memloop()

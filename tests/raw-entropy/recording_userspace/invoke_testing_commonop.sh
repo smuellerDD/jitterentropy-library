@@ -8,6 +8,8 @@
 # Each memory size is set explicitly with --max-mem, which the library uses
 # as given, so that all memory sizes can be analyzed.
 
+set -euxo pipefail
+
 . ./invoke_testing_helper.sh
 
 raw_entropy_ntg1_memloop()
