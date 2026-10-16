@@ -844,8 +844,6 @@ static void test_ncpu_windows_fallback(void)
 }
 #endif
 
-/* The CSPRNG read behind the UUID, against files with known behaviour. */
-
 int main(void)
 {
 	test_ncpu();

@@ -48,7 +48,7 @@ provides the imported target
 The
 .I jitterentropy
 library provides a source of good entropy by collecting CPU
-executing time jitter. The entropy in the CPU execution time
+execution time jitter. The entropy in the CPU execution time
 jitter is magnified by the CPU Jitter Random Number Generator.
 The CPU Jitter Random Number Generator uses the CPU execution
 timing jitter to generate a bit stream which complies with
@@ -374,7 +374,7 @@ NTG.1 recording and validation helpers of the test tool set for raw entropy.
 .TP
 .B Resolve insufficient entropy
 If the rate is insufficient, a higher oversampling rate, memory size or hash
-loop count may reach it; the test tool set helps finding them. The resulting
+loop count may reach it; the test tool set helps find them. The resulting
 .IR osr
 and
 .IR flags
@@ -464,7 +464,7 @@ Serialize the two for the same instance, or pass NULL and act on the return
 value.
 .SH NOTES
 .SS Use of the output
-In addition to use the generated random bit stream directly
+In addition to using the generated random bit stream directly
 for cryptographic operations, the output of
 .BR jent_read_entropy (3)
 or

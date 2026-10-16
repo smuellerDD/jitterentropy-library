@@ -252,7 +252,7 @@
  * current clocksource, instead: their random_get_entropy() is not a clock
  * everywhere - MIPS without a usable c0_count mixes the TLB Random index into
  * it, m68k asks a machine hook, on Amiga the video beam position. The
- * function exists since 5.19 and the 5.10.119 and 5.15.44 backports; the
+ * function has existed since 5.19 and the 5.10.119 and 5.15.44 backports; the
  * module does not build for these two on older kernels. On those, other
  * architectures without get_cycles() read 0 from random_get_entropy(), and
  * the startup test rejects that clock.

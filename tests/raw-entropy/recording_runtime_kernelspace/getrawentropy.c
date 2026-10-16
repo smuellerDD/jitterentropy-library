@@ -343,7 +343,7 @@ out:
  * --force-internal-timer Enable flag JENT_FORCE_INTERNAL_TIMER
  * --osr Apply the given OSR value
  * --loopcnt Apply the given loop count value for the operation (i.e. apply it
- *	     to the respecive used noise source(s)) - requires the
+ *	     to the respective used noise source(s)) - requires the
  *	     JENT_IOCLOOPCNT ioctl of the out-of-tree module's test interface
  * --max-mem Set the memory size of the memory block used for the memory access
  *	     loop
@@ -384,7 +384,7 @@ int main(int argc, char * argv[])
 			argc--;
 			argv++;
 			if (argc <= 1) {
-				printf("OSR value missing\n");
+				printf("Sample count value missing\n");
 				return 1;
 			}
 

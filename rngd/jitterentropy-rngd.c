@@ -81,8 +81,8 @@ static int foreground = 0;
 
 /*
  * When set, the daemon will exit on any error it encounters. The goal is that
- * a wrapping monitor will pick up the errors and handle it as it sees fit, such
- * as creating audit logs and possibly restart the daemon.
+ * a wrapping monitor will pick up the errors and handle them as it sees fit,
+ * such as creating audit logs and possibly restarting the daemon.
  *
  * This covers failed reads, injections and the wait, with the status of
  * rngd_exit_status(). Every other failure ends the daemon with RNGD_EXIT_ERROR

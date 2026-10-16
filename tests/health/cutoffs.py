@@ -48,8 +48,8 @@ The cutoffs:
     levels pnorm(-4) and pnorm(-5) the source quotes.
 
     In the common case, margin 1, p >= 1 at every oversampling rate, so both
-    cutoffs are the cap - which is what "these values effectively disables the
-    health test" beside them means.
+    cutoffs are the cap - which is what "the cap, so no failure" beside them
+    means.
 
 alpha is 2^-30 for the RCT and the APT and 2^-22 for the lag predictor, whose
 window is much larger; the permanent cutoffs use its square. The margin is the

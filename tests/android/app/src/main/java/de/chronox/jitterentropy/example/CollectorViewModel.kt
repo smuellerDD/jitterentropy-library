@@ -95,7 +95,7 @@ class CollectorViewModel : ViewModel() {
         val config = JitterEntropy.Config(mode, timerThread, osr, memSize, hashLoop)
 
         // Not through the coroutine, which a cleared model cancels before it
-        // ran; queued ahead of the allocation below all the same.
+        // runs; queued ahead of the allocation below all the same.
         val old = detach()
         worker.executor.execute { old?.close() }
 

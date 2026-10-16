@@ -70,7 +70,7 @@ into this tree at 1.3.3-prerelease. Later changes are in `../CHANGES.md`.
  * Fix incomplete jitterentropy core 2.1.1 import
 
 1.0.7:
- * Inlcude jitterentropy core 2.1.1
+ * Include jitterentropy core 2.1.1
 
 1.0.6:
  * Include jitterentropy core 2.0.1
@@ -78,7 +78,7 @@ into this tree at 1.3.3-prerelease. Later changes are in `../CHANGES.md`.
    of -O0 as suggested by Paul Wouters
  * Change CFLAGS and LDFLAGS from += to ?= to allow smooth integration with
    build environment as suggested by Paul Wouters
- * Version information now can obtained as unprivileged user.
+ * Version information now can be obtained as unprivileged user.
 
 1.0.5:
  * inject 32 bytes of entropy into /dev/random before daemonizing as suggested
@@ -87,7 +87,7 @@ into this tree at 1.3.3-prerelease. Later changes are in `../CHANGES.md`.
  * small changes to systemd unit file suggested by Pascal de Bruijn
 
 1.0.4:
- * inject only 32 bytes of entropy of entropy instead of 256 bytes
+ * inject only 32 bytes of entropy instead of 256 bytes
  * apply oversampling factor -- i.e. obtain OVERSAMPLINGFACTOR bytes more from
    Jitter RNG than required for the 32 bytes of entropic data
  * do not install sig_alarm handler if the LRNG is present
@@ -104,7 +104,7 @@ into this tree at 1.3.3-prerelease. Later changes are in `../CHANGES.md`.
 1.0.1:
  * mark function jentrng_versionstring static (thanks to Kevin Fowler)
  * use errno with strerror (thanks to Kevin Fowler)
- * compile with -pedanic and make appropriate code changes
+ * compile with -pedantic and make appropriate code changes
 
 1.0.0:
  * start new numbering schema

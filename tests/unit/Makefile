@@ -137,7 +137,7 @@ gcov: DBG-all
 $(NAMES): %: %.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
-# The mocked time source is compiled into this one program only.
+# The mocked time source is compiled into these programs only.
 unit-mock: CFLAGS += -DJENT_CONF_ENABLE_MOCK_TIMER
 unit-noise: CFLAGS += -DJENT_CONF_ENABLE_MOCK_TIMER
 

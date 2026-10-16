@@ -65,7 +65,7 @@
  *   - the stamp entry point and the delta entry point stay in step: the same
  *     stamps fed to jent_health_insert_timestamp() and the deltas they form
  *     fed to jent_stuck() leave the same state. The whole worth of replaying a
- *     raw entropy recording - which is what a SP800-90B validation submits -
+ *     raw entropy recording - which is what an SP800-90B validation submits -
  *     rests on the replay reaching the same verdict as the noise source, and
  *     that claim is otherwise untested against anything but recordings that
  *     behave.

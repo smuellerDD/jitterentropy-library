@@ -89,7 +89,7 @@ static int monotonic_nstime(uint64_t *out)
 }
 
 /* We use a linear interpolation to estimate where the value is going to be.
- * The way these variable are named, this is technically the inverse function
+ * The way these variables are named, this is technically the inverse function
  * for the resulting line, as we are trying to get the expected osr for a
  * provided time.
  *
@@ -362,15 +362,15 @@ int main(int argc, char * argv[])
 		maxBound = firstLinearGuess;
 		maxTime = firstLinearTime;
 	} else if(secondLinearTime > timeBound) {
-		/* Here, we have firstLinearTime <= timeBound < secondLinearTime.
+		/* Here, we have firstLinearTime <= timeBound < secondLinearTime,
 		 * so the linear interpolations provide both a minBound and maxBound. */
 		minBound = firstLinearGuess;
 		minTime = firstLinearTime;
 		maxBound = secondLinearGuess;
 		maxTime = secondLinearTime;
 	} else {
-		/* here, we have know that firstLinearTime < secondLinearTime <= timeBound */
-		/* so linear interpolation didn't supply a maxBound, and will have to look for it. */
+		/* here, we know that firstLinearTime < secondLinearTime <= timeBound */
+		/* so linear interpolation didn't supply a maxBound, and we will have to look for it. */
 		minBound = secondLinearGuess;
 		minTime = secondLinearTime;
 	}

@@ -28,9 +28,9 @@ returned `ENOMONOTONIC`. Versions up to 3.7.0 are affected.
 The API call `jent_read_entropy_safe` contains the logic to transparently handle
 intermittent health test errors by reallocating a new Jitter RNG entropy
 collector handle and increasing the OSR as well as the memory usage. During that
-reallocation, the currently observed APT and RCT counter values are copied info
-the new handle. That copy operation contains an failure for the RCT which
+reallocation, the currently observed APT and RCT counter values are copied into
+the new handle. That copy operation contains a failure for the RCT which
 effectively disabled the RCT for all newly allocated entropy collector
-instances - the other health tests as well as the Jitter RNG itself operates
+instances - the other health tests as well as the Jitter RNG itself operate
 still as expected with the newly allocated entropy collector instances. Thanks
 to Joshua Hill for pointing this issue out.

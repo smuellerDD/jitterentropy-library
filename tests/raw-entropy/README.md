@@ -10,7 +10,7 @@ analysis. The tool set consists of the following individual tools:
 - `recording_restart_kernelspace`: This tool is used to gather the raw entropy
   of the Linux kernel space Jitter RNG for the SP800-90B restart data.
 
-- `recording_userspace`: This tools is used to gather the raw entropy of
+- `recording_userspace`: This tool is used to gather the raw entropy of
   the user space Jitter RNG implementation for the SP800-90B runtime and
   restart data. Also, this directory contains tools supporting NTG.1 analysis.
 
@@ -20,7 +20,7 @@ analysis. The tool set consists of the following individual tools:
   where no recording tool can run.
 
 - `validation-runtime`: This tool is used to calculate the minimum entropy
-  values compliant to SP800-90B section 3.1.3. This tool tool is to be used
+  values compliant to SP800-90B section 3.1.3. This tool is to be used
   with the user space and kernel space runtime data obtained from the
   aforementioned `recording_*` tools. Also, tools to perform the analysis
   for the NTG.1 compliance are provided.
@@ -58,7 +58,7 @@ entropy is more than what the Jitter RNG heuristic applies.
 
 ## Restart Tests
 
-The results of the restart tests obtained with `validation-restart` contains
+The results of the restart tests obtained with `validation-restart` contain
 in the file `jent-raw-noise-restart-consolidated.minentropy_FF_8bits.txt`
 at the bottom data like the following:
 
@@ -87,8 +87,8 @@ check still fails in about 1% of the runs, so repeat it with new data first.
 
 Per default, the Jitter RNG heuristic applies 1/3 bit of entropy per
 time delta (common case). This implies that the measurement must show that 1/3
-bit of entropy is present. Unlike with the runtime tests, the restart tests
-results compares the data against the Jitter RNG's H_I value of 1/3 bits.
+bit of entropy is present. Unlike with the runtime tests, the restart test
+results compare the data against the Jitter RNG's H_I value of 1/3 bits.
 Thus, the value must show 1/3 bits to show that sufficient entropy is
 provided. In the example above, the measurement shows that
 1/3 bits of entropy is present which implies that the available amount of
@@ -116,7 +116,7 @@ The Jitter RNG does not need any specific configurations or settings. However,
 in case your entropy assessment shows that insufficient entropy is
 present (e.g. by showing that the measured entropy rate is less than 1/3) or the
 health test flags an error too often, you can perform a search whether different
-configuration values gives better entropy.
+configuration values give better entropy.
 
 ## Basic Requirement For Entropy Rate
 
@@ -127,13 +127,13 @@ refers to the "OSR" value, please consider [Oversampling Rate](#oversampling-rat
   must show an entropy value that is larger than 1/OSR.
   
 - In case of NTG.1 configuration: The runtime and restart entropy rates given by
-  `processdata_ntg1.sh` for the common case, the hash loop and the memory access
-  must show an entropy value that is larger than 8/OSR.
+  `processdata_ntg1.sh` for the common case, the hash loop and the memory
+  access loop must show an entropy value that is larger than 8/OSR.
 
 ## Background - Jitter RNG Configuration Possibilities
 
 The Jitter RNG has the following configuration options that allow altering the
-entropy rate for the hash loop and memory access loop, as well as alter the
+entropy rate for the hash loop and memory access loop, as well as altering the
 heuristically applied entropy rate.
 
 ### Oversampling Rate
@@ -142,7 +142,7 @@ The oversampling rate defines the heuristically applied entropy rate by the
 Jitter RNG. Its value defines how much raw entropy data is collected to obtain
 an output block of 256 bits that is expected to have full entropy.
 
-In addition, Its value implicitly selects the health test cutoff values and thus
+In addition, its value implicitly selects the health test cutoff values and thus
 directly affects the probability that health errors are incurred.
 
 The global heuristic entropy rate is defined as 1/OSR bits of entropy per
@@ -185,7 +185,7 @@ measure CPU instruction timing variations.
 
 Rule of thumb: The larger the iteration count, the higher the entropy rate.
 
-Runtime configuration: Us the `JENT_HASHLOOP_*` flags during initialization.
+Runtime configuration: Use the `JENT_HASHLOOP_*` flags during initialization.
 
 Compile time configuration: Apply `-DJENT_HASH_LOOP_DEFAULT=<VALUE>` during
 compilation.
@@ -204,7 +204,7 @@ Prerequisites:
   must be installed and available pointed to by `EATOOL_NONIID` in
   `validation-runtime/processdata_helper.sh`.
 
-It is possible that the the default setting of the Jitter RNG does not deliver
+It is possible that the default setting of the Jitter RNG does not deliver
 sufficient entropy. It is possible to adjust the memory access part of the
 Jitter RNG which may deliver more entropy.
 
@@ -245,7 +245,7 @@ hash loop iteration count that are appropriate for your environment.
 After you concluded the testing you have a memory buffer size and a hash loop
 iteration count that should be appropriate for you. Note, it is perfectly fine
 if only one, i.e. the hash loop count or the memory buffer size needs adjustment
-to give you the intended entropy rate as the respective other already offer
+to give you the intended entropy rate as the respective other already offers
 sufficient entropy.
 
 Once you found the suitable memory setting, invoke the Jitter RNG with the

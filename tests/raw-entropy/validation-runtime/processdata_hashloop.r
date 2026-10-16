@@ -1,5 +1,5 @@
 #
-# R script for visualizing the entropy rates from the memory access
+# R script for visualizing the entropy rates from the hash loop
 #
 
 # Load the file created by processdata_hashloop.sh

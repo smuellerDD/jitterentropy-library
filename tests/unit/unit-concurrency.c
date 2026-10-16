@@ -39,11 +39,13 @@
  *   - the clock is per collector as well: one built with the internal timer
  *     carries a counting thread and a counter of its own.
  *
- * Three tests, because those are three different races:
+ * Four tests, because those are four different races:
  *
  *   - the whole life cycle at once - jent_entropy_init_ex() through the
  *     allocation, the reads and the free - which is where the one-time startup
  *     state is contended,
+ *   - a first allocation with no initialization before it, where one thread's
+ *     allocation arrives while another's is still measuring the clock,
  *   - the process-wide registrations against the collectors that close them,
  *     where threads that only register race threads that only allocate, and
  *   - the counting thread against the platform clock: several collectors

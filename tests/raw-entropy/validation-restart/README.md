@@ -17,7 +17,7 @@ To execute the testing, you need:
 
 	* Configure processdata.sh with proper parameter values
 
-### Executation
+### Execution
 
 Use one of the following tools:
 

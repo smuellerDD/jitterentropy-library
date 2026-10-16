@@ -65,7 +65,7 @@ initialization()
 
 raw_entropy_restart()
 {
-	echo "Obtaining $NUM_RESTART raw entropy measurement with $NUM_EVENTS_RESTART restarts from Jitter RNG"
+	echo "Obtaining $NUM_RESTART raw entropy measurements with $NUM_EVENTS_RESTART restarts from Jitter RNG"
 
 	local cmdopts="--max-mem $MAX_MEMORY_SIZE -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 	local ctr=0
@@ -85,7 +85,7 @@ raw_entropy_restart()
 
 raw_entropy()
 {
-	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
+	echo "Obtaining $NUM_EVENTS raw entropy measurements from Jitter RNG"
 
 	local cmdopts="--max-mem $MAX_MEMORY_SIZE -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 
@@ -96,7 +96,7 @@ raw_entropy()
 
 raw_entropy_ntg1_hash()
 {
-	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
+	echo "Obtaining $NUM_EVENTS raw entropy measurements from Jitter RNG"
 
 	local cmdopts="--max-mem $MAX_MEMORY_SIZE --hashloop -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 
@@ -107,7 +107,7 @@ raw_entropy_ntg1_hash()
 
 raw_entropy_ntg1_hash_restart()
 {
-	echo "Obtaining $NUM_RESTART raw entropy measurement with $NUM_EVENTS_RESTART restarts from Jitter RNG"
+	echo "Obtaining $NUM_RESTART raw entropy measurements with $NUM_EVENTS_RESTART restarts from Jitter RNG"
 
 	local cmdopts="--max-mem $MAX_MEMORY_SIZE --hashloop -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 	local ctr=0
@@ -127,7 +127,7 @@ raw_entropy_ntg1_hash_restart()
 
 raw_entropy_ntg1_memacc()
 {
-	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
+	echo "Obtaining $NUM_EVENTS raw entropy measurements from Jitter RNG"
 
 	local cmdopts="--max-mem $MAX_MEMORY_SIZE --memaccess -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 
@@ -138,7 +138,7 @@ raw_entropy_ntg1_memacc()
 
 raw_entropy_ntg1_memacc_restart()
 {
-	echo "Obtaining $NUM_RESTART raw entropy measurement with $NUM_EVENTS_RESTART restarts from Jitter RNG"
+	echo "Obtaining $NUM_RESTART raw entropy measurements with $NUM_EVENTS_RESTART restarts from Jitter RNG"
 
 	local cmdopts="--max-mem $MAX_MEMORY_SIZE --memaccess -f $DEBUGFS_DIR --param-dir $PARAM_DIR $@"
 	local ctr=0

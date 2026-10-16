@@ -36,7 +36,7 @@ static inline uint64_t jent_delta(uint64_t prev, uint64_t next)
 {
 	/*
 	 * Return the delta between two values. If the values are monotonic
-	 * increasing counters which can wrap, this caluculation implicitly
+	 * increasing counters which can wrap, this calculation implicitly
 	 * returns the absolute value of the delta all the time.
 	 */
 	return (next - prev);

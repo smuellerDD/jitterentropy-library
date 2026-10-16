@@ -37,7 +37,7 @@
  *
  * | time delta | domain separator | hash loop hash | 0 ... |
  *
- * Note, this buffer is truncted to the current rate size which implies that
+ * Note, this buffer is truncated to the current rate size which implies that
  * data with entropy must be placed at a location to guarantee they are not
  * truncated off.
  */
@@ -48,7 +48,7 @@
 					 JENT_SIZEOF_DOMAINSEPARATOR +         \
 					 JENT_SIZEOF_HASH_BLOCK)
 
-/* Intemediary is as big as the maximum rate it will be read with */
+/* Intermediary is as big as the maximum rate it will be read with */
 #define JENT_SIZEOF_INTERMEDIARY	(JENT_SHA3_256_SIZE_BLOCK)
 
 #define JENT_OFFSET_TIMEDELTA		(0)
@@ -61,7 +61,7 @@
  * Insert a data block into the entropy pool
  *
  * The function inserts the intermediary buffer and the time delta together
- * into the entropy pool. The intermediary buffer is of exact the SHA3-256 rate
+ * into the entropy pool. The intermediary buffer is of exactly the SHA3-256 rate
  * size to ensure that always one Keccak operation is triggered.
  *
  * Note, this function also clears the intermediary buffer immediately after it
@@ -142,7 +142,7 @@ static void jent_hash_loop(struct rand_data *ec,
 	 * considering the terminology from SP800-90A without any entropy.
 	 *
 	 * Note, it does not matter which or how much data you inject, we are
-	 * interested in one Keccack1600 compression operation performed with
+	 * interested in one Keccak1600 compression operation performed with
 	 * the sha3_final.
 	 */
 	for (j = 0; j < hash_loop_cnt; j++) {
@@ -196,7 +196,7 @@ static inline uint32_t xoshiro128starstar(uint32_t *s)
  * @param[in] ec entropy collector struct
  * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
  *		       number of loops to perform the memory access operation
- * @param[in] current_delta If non-NULL, return the execution duration of the
+ * @param[in] current_delta If non-NULL, return the execution duration of
  *			    the memory access operation. This is used during
  *			    the NTG.1 startup process where the memory access
  *			    and hash loop are handled separately.
@@ -293,7 +293,7 @@ static void jent_memaccess_pseudorandom(struct rand_data *ec, uint64_t loop_cnt,
  *		 this noise source is disabled
  * @param[in] loop_cnt if a value not equal to 0 is set, use the given value as
  *		       number of loops to perform the memory access operation
- * @param[in] current_delta If non-NULL, return the execution duration of the
+ * @param[in] current_delta If non-NULL, return the execution duration of
  *			    the memory access operation. This is used during
  *			    the NTG.1 startup process where the memory access
  *			    and hash loop are handled separately.
@@ -355,7 +355,7 @@ static void jent_memaccess_deterministic(struct rand_data *ec,
  * in the time deltas. The jitter is injected into the entropy pool.
  *
  * @param[in] ec Reference to entropy collector
- * @param[in] loop_cnt see jent_hash_time
+ * @param[in] loop_cnt see jent_memaccess_deterministic
  * @param[out] ret_current_delta Test interface: return time delta - may be NULL
  * @param[in] health Run the health tests on the time delta
  *
@@ -371,7 +371,7 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 	unsigned int stuck;
 
 	/*
-	 * Now call the memory noise source with tripple the default iteration
+	 * Now call the memory noise source with triple the default iteration
 	 * count considering this is the only noise source.
 	 *
 	 * The call returns the execution time delta.
@@ -385,7 +385,7 @@ unsigned int jent_measure_jitter_ntg1_memaccess(struct rand_data *ec,
 	 * The deterministic operation has less instructions and less L1
 	 * accesses. Therefore, the deterministic operation only is used here.
 	 *
-	 * Furthermore, the increase of the memory access loop by 3 (the value
+	 * Furthermore, the memory access loop is increased by 3 (the value
 	 * below is added to the original memory access loop) to ensure that
 	 * sufficient variations from L2 are collected to meet the NTG.1
 	 * requirement of at least 240 bits of entropy from the L2/L3/RAM
@@ -445,7 +445,7 @@ unsigned int jent_measure_jitter_ntg1_sha3(struct rand_data *ec,
 	jent_get_nstime_internal(ec, &ec->prev_time);
 
 	/*
-	 * Now call the hash noise source with tripple the default iteration
+	 * Now call the hash noise source with triple the default iteration
 	 * count considering this is the only noise source.
 	 *
 	 * Place the digest at an offset allowing the time stamp and the

@@ -31,7 +31,7 @@ extern "C"
  * Each measurement mixes its time delta into the entropy pool and, with
  * @health, runs the health tests on it. Returns the stuck test result, 0
  * without @health. A call with @health 0 takes a time stamp without a delta
- * that is not one of the measurement reaching the health tests.
+ * that is not one of the measurements reaching the health tests.
  *
  * One measurement of the memory access noise source alone, for the first
  * FIPS / NTG.1 startup stage.

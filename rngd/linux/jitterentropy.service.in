@@ -1,7 +1,7 @@
 # Systemd configuration file
 #
 # The Jitterentropy RNGd does not depend on any other system
-# services. Futhermore, we want to start it as early as possible
+# services. Furthermore, we want to start it as early as possible
 # in the boot cycle so that other services requiring
 # random numbers (like SSHD, TLS-based services) benefit
 # from a properly seeded /dev/?random
