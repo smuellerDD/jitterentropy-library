@@ -215,17 +215,17 @@ build if the two disagree.
 ## Build in Tree
 
 When the use of the Jitter RNG as a kernel module is insufficient, e.g. when its
-services is required during boot time such as for early boot-time entropy, it
+services are required during boot time such as for early boot-time entropy, it
 can be compiled statically into the kernel binary. To do that, the following
 steps have to be taken:
 
-1. copy the entire the Jitter RNG tree into the Linux kernel source tree:
+1. copy the entire Jitter RNG tree into the Linux kernel source tree:
 
 	`cp -av jitterentropy-library-<version> linux-<version>/crypto/jitterentropy-library`
 	
 2. tell the Linux kernel build system to build the just copied code instead of
    the version that ships with the kernel by editing
-   the file `crypto/Makefile` and replace the following:
+   the file `crypto/Makefile` and replacing the following:
    
 	`obj-$(CONFIG_CRYPTO_JITTERENTROPY) += jitterentropy_rng.o`
 
@@ -736,8 +736,8 @@ The test code discussed in the following is not intended for production
 systems. Its functionality does not support production environment as it offers
 additional interfaces to the kernel not needed in production mode.
 
-The Jitter RNG instance discussed before can be tested similar as the user space
-instance. For doing that, the option
+The Jitter RNG instance discussed before can be tested similarly to the user
+space instance. For doing that, the option
 `CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE` found in the `Kbuild.config` must
 be enabled. This enables the test code and the interfaces to utilize the
 testing. Instead of editing `Kbuild.config`, the option can also be set on the

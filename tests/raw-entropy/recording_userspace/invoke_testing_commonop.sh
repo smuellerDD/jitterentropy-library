@@ -20,7 +20,7 @@ raw_entropy_ntg1_memloop()
 	shift
 
 	echo "---"
-	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
+	echo "Obtaining $NUM_EVENTS raw entropy measurements from Jitter RNG"
 
 	local cmdopts="--max-mem ${memsize} $@"
 
@@ -40,7 +40,7 @@ raw_entropy_ntg1_hashloop()
 	shift
 
 	echo "---"
-	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
+	echo "Obtaining $NUM_EVENTS raw entropy measurements from Jitter RNG"
 
 	local cmdopts="--hloopcnt ${hashloop} $@"
 
@@ -69,7 +69,7 @@ done
 make -s -f Makefile.hashtime clean
 
 ################################################################################
-# Measure with random memory access
+# Measure with deterministic memory access
 make -s -f Makefile.hashtime
 
 size=1

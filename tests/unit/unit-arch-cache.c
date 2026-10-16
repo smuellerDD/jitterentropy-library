@@ -304,8 +304,6 @@ static void test_cache_arm64(void)
 		     "a CLIDR naming no cache reports none");
 }
 
-/* The FIPS mode query. Whatever it answers, it must answer a boolean. */
-
 /*
  * The combiner every cache backend feeds. It is pure, and its job - sum the
  * levels the caller asked for, then round up to the next power of two - has to
@@ -1190,8 +1188,6 @@ static void test_cache_cpuinfo(void)
 		     "not the Linux backend on Arm");
 }
 #endif
-
-/* The "online" CPU list, in every shape the kernel writes and some it cannot. */
 
 int main(void)
 {

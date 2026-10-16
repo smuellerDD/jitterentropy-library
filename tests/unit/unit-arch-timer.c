@@ -101,8 +101,6 @@ static void test_timer(void)
 		printf("  note: %u of 10000 reads moved backwards\n", backwards);
 }
 
-/* The CPU count, used to place the timer thread. */
-
 int main(void)
 {
 	test_timer();

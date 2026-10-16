@@ -684,7 +684,7 @@ static void jent_get_cachesize_sysfs_dir(const char *cpudir,
 		for (idx = 0; idx < 16; idx++) {
 			char buf[32];
 			/* the filename buffer is larger than necessary for testing
-			 * with artifical sysfs e.g. under /tmp */
+			 * with artificial sysfs e.g. under /tmp */
 			char file[128];
 			uint64_t *slot, val;
 			long level;

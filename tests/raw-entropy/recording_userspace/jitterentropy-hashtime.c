@@ -120,7 +120,7 @@
  * --force-internal-timer Enable flag JENT_FORCE_INTERNAL_TIMER
  * --osr Apply the given OSR value
  * --loopcnt Apply the given loop count value for the operation (i.e. apply it
- *	     to the respecive used noise source(s))
+ *	     to the respective used noise source(s))
  * --max-mem Set the memory size of the memory block used for the memory access
  *	     loop
  * --hashloop Perform the measurement of the hash loop only

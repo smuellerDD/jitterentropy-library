@@ -33,7 +33,7 @@ endforeach()
 # whenever anything fires and unable to tell the vectors apart.
 #
 # The memory RCT is absent on purpose: at its cutoff it enters a recovery loop
-# generating fresh data, which a replay has none to do. The induced failure mode
+# generating fresh data, which a replay cannot do. The induced failure mode
 # reaches that state directly.
 #
 # The four isolating vectors match the whole report, so they assert nothing else

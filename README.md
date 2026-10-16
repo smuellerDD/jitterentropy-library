@@ -6,7 +6,7 @@ stamp. It is a small-scale, yet fast entropy source that is viable in almost
 all environments and on a lot of CPU architectures.
 
 The implementation of the Jitter RNG is independent of any operating system.
-As such, it can run on baremetal without any operating system: build it with
+As such, it can run on bare metal without any operating system: build it with
 `-ffreestanding` and supply `memcpy`, `memset`, `malloc`, `free`, `strlen` and
 `snprintf`, which is the whole of the porting interface. Every build needs
 lock-free 32-bit and pointer atomics, so a core without them (ARMv6-M, RISC-V
@@ -18,7 +18,7 @@ a counting thread handler registered through
 build, as an EFI application on x86_64 and aarch64, and `nix flake check` boots
 it and reads what it reports.
 
-The design of the RNG is given in the documentation found in at
+The design of the RNG is given in the documentation found at
 [http://www.chronox.de/jent](http://www.chronox.de/jent). This documentation also covers the full
 assessment of the SP800-90B compliance as well as all required test code.
 
@@ -43,7 +43,7 @@ the Makefile applies the list without that check.
 
 # Build Instructions
 
-To generate the shared library `make` followed by `make install`, which
+To generate the shared library, run `make` followed by `make install`, which
 installs the library, its header and the man pages of the library - on Linux
 jitter_rng.4 as well - below `$(PREFIX)/share/man`; `make install-static` adds
 the archive. The pkg-config file and the CMake package for
@@ -59,7 +59,7 @@ This may ease cross compiling or setting build options, like:
 cmake -S . -B build -DINTERNAL_TIMER=off -DEXTERNAL_CRYPTO=OPENSSL
 cmake --build build
 ```
-CMake may also be used on platforms like Windows or MacOS to ease compilation.
+CMake may also be used on platforms like Windows or macOS to ease compilation.
 
 Neither option is needed for BSI's functionality class NTG.1 (see
 [AIS 20/31 NTG.1 Compliance](#ais-2031-ntg1-compliance)): the internal timer is
@@ -134,8 +134,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 The suite has two halves. The deterministic tests - the GCD self test, the unit
-tests for `src/` and `arch/`, and the induced failure tests of the health tests
-- compute over fixed inputs and answer the same everywhere. The entropy
+tests for `src/` and `arch/`, and the induced failure tests of the health
+tests - compute over fixed inputs and answer the same everywhere. The entropy
 generation tests exercise the real noise source and can fail for reasons that
 are properties of the machine rather than defects in the code: a memory lock
 limit lower than the collector needs, or a startup whose health tests do not
@@ -203,15 +203,15 @@ See `tests/README.md` for what the harness drives and asserts.
 
 Please keep the following aspects regarding jitterentropy's usage in mind:
 
-* Use no multithreading on a single instace of `struct rand_data`. If multiple
+* Use no multithreading on a single instance of `struct rand_data`. If multiple
   threads shall be used, allocate multiple per-thread instances via `jent_entropy_collector_alloc()`.
-* Virtual Machine Monitors/Hypervisor may trap and emulate the platforms native timestamping mechanism,
+* Virtual Machine Monitors/Hypervisors may trap and emulate the platform's native timestamping mechanism,
   like `rdtsc`, leading to degraded entropy levels. Please check and disable emulation if possible.
 * Activate the health tests (JENT_FORCE_FIPS or JENT_NTG1) if you are operating in a regulated environment
   and/or have done prior entropy estimation. Failing health tests will block the output of the RNG.
-* Startup tests take a short but noticeable amount of time, you may not create a new jitter RNG instance
+* Startup tests take a short but noticeable amount of time, so do not create a new Jitter RNG instance
   whenever random bytes are needed.
-* While jitterentropy is a rather fast noise source, don't expect multiple MB/s or GB/s. Use it as seed
+* While jitterentropy is a rather fast noise source, don't expect multiple MB/s or GB/s. Use it as a seed
   source for another deterministic RNG if such speeds are needed.
 
 # Supported Platforms
@@ -302,7 +302,7 @@ The following flags are to be considered:
 
 - `JENT_NTG1` may be set (i.e. the SP800-90B configuration and the [AIS 20/31 NTG.1 configuration](#ais-2031-ntg1-compliance) can be jointly enabled).
 
-- Either `JENT_FORCE_FIPS` must be set or base OS is in FIPS mode (i.e. the helper function jent_fips_enabled returns true). Either way `JENT_FORCE_SECURE_MEM` is implied, with what it requires of the memory backend as described for `JENT_NTG1` below: the lock where the built-in allocator offers one, arena memory with the crypto library backends.
+- Either `JENT_FORCE_FIPS` must be set or the base OS is in FIPS mode (i.e. the helper function jent_fips_enabled returns true). Either way `JENT_FORCE_SECURE_MEM` is implied, with what it requires of the memory backend as described for `JENT_NTG1` below: the lock where the built-in allocator offers one, arena memory with the crypto library backends.
 
 - `JENT_FORCE_INTERNAL_TIMER` must not be set.
 
@@ -333,7 +333,7 @@ The following test evidence must be provided to CMVP for proving the compliance 
   information about the working group is given at
   [NIST](https://csrc.nist.gov/presentations/2023/cmuf-entropy-working-group).
 
-- Obtain CAVP certificate for SHAKE-256 conditioner - use
+- Obtain a CAVP certificate for the SHAKE-256 conditioner - use
   [ACVP-Parser](https://github.com/smuellerDD/acvpparser)
 
 ## AIS 20/31 NTG.1 Compliance
@@ -393,7 +393,7 @@ The status returned by the jent_status API must show the following information a
 
 - AIS 20/31 NTG.1 mode enabled
 
-- Memory Block Size equal or larger than four times L1 cache
+- Memory Block Size equal to or larger than four times the L1 cache
 
 - Internal timer disabled
 
@@ -401,7 +401,7 @@ The status returned by the jent_status API must show the following information a
 
 The following test evidence must be provided to the German BSI for proving the compliance to NTG.1:
 
-- Measured entropy rate must show rate 8/OSR or higher (see the file tests/raw-entropy/README.md given in the source code distribution for the test approach as well as the analysis to increase the entropy rate):
+- Measured entropy rate must show a rate of 8/OSR or higher (see the file tests/raw-entropy/README.md given in the source code distribution for the test approach as well as the analysis to increase the entropy rate):
 
 	* Hash loop (SP800-90B restart + runtime tests)
 
@@ -416,8 +416,8 @@ The following test evidence must be provided to the German BSI for proving the c
 The version numbers for this library have the following schema:
 MAJOR.MINOR.PATCHLEVEL
 
-Changes in the major number implies API and ABI incompatible changes, or
-functional changes that require consumer to be updated (as long as this
+Changes in the major number imply API and ABI incompatible changes, or
+functional changes that require consumers to be updated (as long as this
 number is zero, the API is not considered stable and can change without a
 bump of the major version).
 
@@ -427,7 +427,7 @@ unchanged if enhancements are not considered. The consumer only needs to
 be recompiled.
 
 Patchlevel changes are API / ABI compatible. No functional changes, no
-enhancements are made. This release is a bug fixe release only. The
+enhancements are made. This release is a bug fix release only. The
 consumer can be left unchanged and does not need to be recompiled.
 
 # Author

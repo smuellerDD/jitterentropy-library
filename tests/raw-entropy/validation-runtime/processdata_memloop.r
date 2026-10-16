@@ -1,5 +1,5 @@
 #
-# R script for visualizing the entropy rates from the memory access
+# R script for visualizing the entropy rates from the memory access loop
 #
 
 # Data to be modified: provide the cache size here in bytes

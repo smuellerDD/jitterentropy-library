@@ -106,4 +106,4 @@ static inline int jent_notime_forced(void) { return 0; }
 }
 #endif
 
-#endif /* JITTERENTROPY-TIMER_H */
+#endif /* JITTERENTROPY_TIMER_H */

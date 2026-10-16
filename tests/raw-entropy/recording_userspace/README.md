@@ -293,7 +293,7 @@ source used to generate the first 256 bit output block intended to initialize
 a deterministic RNG).
 
 The generated data is intended to be processed with the
-`validation-runtime/processdata_ntg1.sh` tool which delivers the staticial
+`validation-runtime/processdata_ntg1.sh` tool which delivers the statistical
 data individually for the aforementioned data.
 
 ## NTG.1 Raw Noise Sources
@@ -301,7 +301,7 @@ data individually for the aforementioned data.
 BSI is interested in answering the following question: For NTG.1, two separate
 noise sources must be used. The Jitter RNG offers the memory access and the
 hash loop as raw noise sources. The question is how much entropy is delivered by
-each of the noise source individually.
+each of the noise sources individually.
 
 This question is relatively easy to answer for the hash loop, as the measurement
 of the Keccak execution timing hardly requires any memory access (and thus
@@ -314,7 +314,7 @@ data, the analysis script `invoke_testing_hashloop.sh` can be invoked. The
 data is analyzed with `validation-runtime/processdata_hashloop.sh`.
 
 However, for the memory access, only the access to L2 or higher caches or the
-main RAM are considered relevant, because the L1 at least to some degree used by
+main RAM is considered relevant, because the L1 is at least to some degree used by
 the hash loop operation and the remainder of the Jitter RNG logic as well
 (e.g. the initial fetches). To achieve that testing of mainly the L2 cache, the
 script `invoke_testing_memloop.sh` invokes the memory access loop with the
@@ -330,7 +330,7 @@ script `invoke_testing_memloop.sh` invokes the memory access loop with the
   This implies that again, the use of the L1 instruction cache is very
   limited and therefore only the memory access is truly measured. When the
   memory block is larger than the L1 cache, the memory access operation will
-  require at least L2 acesses. 
+  require at least L2 accesses. 
   
 With this testing approach, the L1 cache impact is reduced to become irrelevant
 for the timing variations when selecting a memory block size that is larger than
@@ -341,4 +341,4 @@ The script `invoke_testing_memloop.sh` performs the testing with all commonly
 supported memory sizes. Along with the analysis script 
 `validation-runtime/processdata_memloop.sh` the entropy rate for each memory
 block size is calculated. When now the memory sizes that are larger than the
-tested CPU's L1 data cache are considered, the entropy rate that almost entirelyis derived from L2 is visible.
+tested CPU's L1 data cache are considered, the entropy rate that almost entirely is derived from L2 is visible.

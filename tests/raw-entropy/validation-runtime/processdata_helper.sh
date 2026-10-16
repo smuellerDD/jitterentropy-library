@@ -31,8 +31,8 @@ EATOOL_NONIID=${EATOOL_NONIID:-"../../SP800-90B_EntropyAssessment/cpp/ea_non_iid
 # specify if you want to compile the extractlsb program in this script
 BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
 
-# specify the list of significant bits and length that you want to analize.
-# Indicate first the mask in hexa format and then the number of
+# specify the list of significant bits and length that you want to analyze.
+# Indicate first the mask in hex format and then the number of
 # bits separated by a colon.
 # The tool generates one set of var and single data files, and the EA results
 # for each element.
@@ -43,7 +43,7 @@ BUILD_EXTRACT=${BUILD_EXTRACT:-"yes"}
 MASK_LIST="FF:8"
 #MASK_LIST="0F:4 FF:8"
 
-# List used for ARM Cortext A9 and A7 processors
+# List used for ARM Cortex A9 and A7 processors
 #MASK_LIST="FF:4,8 7F8:4,8"
 
 # Maximum number of entries to be extracted from the original file; no more
@@ -66,7 +66,7 @@ if [ ! -d $RESULTS_DIR ]
 then
 	if ! mkdir $RESULTS_DIR
 	then
-		echo "ERROR: Directory with raw entropy data $RESULTS_DIR could not be created"
+		echo "ERROR: Directory for results $RESULTS_DIR could not be created"
 		exit 1
 	fi
 fi

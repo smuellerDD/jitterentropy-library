@@ -277,7 +277,7 @@ extern "C" {
 #define JENT_MAX_OSR	20
 
 /*
- * JENT_PRIVATE_COMPILE:the sources are compiled as one translation unit into
+ * JENT_PRIVATE_COMPILE: the sources are compiled as one translation unit into
  * a program or library of their own - a private copy - and every function of
  * the library is static there, the API through JENT_PRIVATE_STATIC and the
  * internals one source file calls in another through JENT_INTERNAL. Nothing of
@@ -714,11 +714,11 @@ void jent_notime_fini(void *ctx);
 /* -- BEGIN error codes for init function -- */
 #define ENOTIME  	1 /* Timer service not available */
 #define ECOARSETIME	2 /* Timer too coarse for RNG */
-#define ENOMONOTONIC	3 /* Timer is not monotonic increasing */
+#define ENOMONOTONIC	3 /* Timer is not monotonically increasing */
 #define EMINVARIATION	4 /* UNUSED - Timer variations too small for RNG */
 #define EVARVAR		5 /* UNUSED - Timer does not produce variations of
 			     variations (2nd derivation of time is zero) */
-#define EMINVARVAR	6 /* Timer variations of variations is too small */
+#define EMINVARVAR	6 /* Timer variations of variations are too small */
 #define EPROGERR	7 /* Invalid argument, e.g. an osr above JENT_MAX_OSR */
 #define ESTUCK		8 /* Too many stuck results during init. */
 #define EHEALTH		9 /* Health test failed during initialization */

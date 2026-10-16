@@ -22,14 +22,14 @@ filedata <- filedata %% 256
 # Gather all odd and even entries
 odd_filedata <- filedata[c(TRUE,FALSE)]
 even_filedata <- filedata[c(FALSE,TRUE)]
-# Now calculate the pairs by simply "concatenating" odd with the even data. As R cannot really concatenate, we multiply the odd by 1 mil (an arbitrary value to guarantee be larger than the largest value in file data) and add the even entries
+# Now calculate the pairs by simply "concatenating" odd with the even data. As R cannot really concatenate, we multiply the odd by 1 mil (an arbitrary value guaranteed to be larger than the largest value in file data) and add the even entries
 pair_filedata <- odd_filedata * 1000000 + even_filedata
 
 # Gather all triplets
 first_filedata <- filedata[c(TRUE,FALSE,FALSE)]
 second_filedata <- filedata[c(FALSE,TRUE,FALSE)]
 third_filedata <- filedata[c(FALSE,FALSE,TRUE)]
-# Now calculate the pairs by simply "concatenating" the data. As R cannot really concatenate, we multiply the third by 10,000 * 10,000 and the second by 10,000 (an arbitrary value to guarantee be larger than the largest value in file data) and add the first entries
+# Now calculate the triplets by simply "concatenating" the data. As R cannot really concatenate, we multiply the third by 10,000 * 10,000 and the second by 10,000 (an arbitrary value guaranteed to be larger than the largest value in file data) and add the first entries
 triplet_filedata <- (third_filedata * 10000 * 10000) + (second_filedata * 10000) + first_filedata
 
 round(min.entropy(filedata), 3)

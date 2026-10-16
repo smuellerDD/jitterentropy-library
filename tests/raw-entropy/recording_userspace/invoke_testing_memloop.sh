@@ -8,18 +8,18 @@
 # as given, so that all memory sizes can be analyzed.
 #
 # Specifically with the deterministic memory access pattern, the measurement
-# is intended to show the access variations of the "just" the cache that
+# is intended to show the access variations of "just" the cache that
 # can retain the allocated memory, i.e. if L1 data cache is 128kBytes and
 # the test invocation allocates 32kByte, the L1 data cache variations are
 # measured. Contrary, if 1MByte memory is allocated, only the L2 cache is
 # measured, provided the L2 cache is larger than 1MByte. The reason for this
 # is the following:
 #
-# 1. The deterministic memory access performs very few operation outside the
+# 1. The deterministic memory access performs very few operations outside the
 #    actually measured memory read and write operations: an ADD (for the loop
 #    counter), an ADD and an AND for the update of the memory value and an
 #    ADD and modulo operation to adjust the memory pointer. These operations
-#    are fed from the L1 data and instruction cache, but its impact is assumed
+#    are fed from the L1 data and instruction cache, but their impact is assumed
 #    to not significantly impact the actual memory access variation measurement.
 #
 # 2. The memory access pattern evenly tries to access bytes spaced blocksize
@@ -42,7 +42,7 @@ raw_entropy_ntg1_memloop()
 	shift
 
 	echo "---"
-	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
+	echo "Obtaining $NUM_EVENTS raw entropy measurements from Jitter RNG"
 
 	local cmdopts="--max-mem ${memsize} --memaccess $@"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# This test is intended to analyze the hash lopp entropy rate. It invokes
+# This test is intended to analyze the hash loop entropy rate. It invokes
 # the hash operation with all supported hash loop iterations and measures its
 # execution time.
 #
@@ -18,7 +18,7 @@ raw_entropy_ntg1_hashloop()
 	shift
 
 	echo "---"
-	echo "Obtaining $NUM_EVENTS raw entropy measurement from Jitter RNG"
+	echo "Obtaining $NUM_EVENTS raw entropy measurements from Jitter RNG"
 
 	local cmdopts="--hloopcnt ${hashloop} --hashloop $@"
 

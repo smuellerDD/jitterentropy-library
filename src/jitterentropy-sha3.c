@@ -374,7 +374,7 @@ void jent_sha3_final(struct jent_sha_ctx *ctx, uint8_t *digest)
 	 * * the digest size is always smaller than the rate size r as we do not
 	 *   have a loop around the jent_keccakp_1600 / copy out loop below
 	 *
-	 * * the requested digest size must be multiples of uint64_t
+	 * * the requested digest size must be a multiple of uint64_t
 	 */
 	for (i = 0; i < (unsigned int)ctx->digestsize / 8; i++, digest += 8)
 		le64_to_ptr(digest, ctx->state[i]);

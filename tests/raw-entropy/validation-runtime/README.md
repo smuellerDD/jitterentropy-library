@@ -71,8 +71,8 @@ the environment. A data file holding fewer samples fails the extraction.
 
 ### Extraction method
 
-Although the samples elements collected from the JitterRNG (time deltas) have
-a size 64 bits, the entropy will likely be provided on the high resolution
+Although the sample elements collected from the JitterRNG (time deltas) have
+a size of 64 bits, the entropy will likely be provided on the high resolution
 part, which is usually the least significant bits.
 
 Also, the SP800-90B entropy assessment tool has two limitations:
@@ -95,7 +95,7 @@ as follows:
 
 This parameter value means the following:
 
-	* There will be two extractions methods for each data set.
+	* There will be two extraction methods for each data set.
 
 	* The first method takes the 4 LSB from each sample item, generates
 	  one byte per sample item, and uses a 4-bit alphabet for analyzing
@@ -122,7 +122,7 @@ You can start with the default values, and then refine your extraction methods
 if necessary. You may find that the LSB of the samples do not provide entropy,
 then use a different mask to discard them.
 
-The output of the extractlsb program can be used to detect this scenarios. The
+The output of the extractlsb program can be used to detect these scenarios. The
 program shows a summary of the extraction, indicating the bit positions that
 have not changed in any of the samples. For example, this is the output of
 the extraction program.
@@ -153,11 +153,11 @@ Otherwise it will have relatively less entropy. See `../README.md` for how to
 read the results and for the requirements of NTG.1.
 
 Please note that the minimum collision entropy value for 8 bits may be smaller
-than the 4 bit values due to the inclusion of leading zeros. This, however is
+than the 4 bit values due to the inclusion of leading zeros. This, however, is
 a data processing problem that should be considered when drawing conclusions.
 One can see the effect of these leading zeros by compressing the 4 bit and
-8 bit data streams. Whereas the 4 bit data stream may not be compressable,
-the 8 bit data stream may be compressed
+8 bit data streams. Whereas the 4 bit data stream may not be compressible,
+the 8 bit data stream may be compressed.
 
 This may also occur when the least significant bits in the time delta do not
 change.  You need to refine the extraction method to reach to the right

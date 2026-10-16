@@ -138,8 +138,6 @@ static void test_internal_timer(void)
 #endif /* JENT_CONF_ENABLE_INTERNAL_TIMER */
 }
 
-/* The backend capability query behind JENT_FORCE_SECURE_MEM. */
-
 /*
  * The measurement the whole noise source is built on, driven directly across
  * the shapes its callers use: with and without a delta returned to the caller,

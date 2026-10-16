@@ -45,10 +45,10 @@ static inline int jent_gcd_tested(unsigned int clock)
 	return !!jent_atomic_load_u32(&jent_common_timer_gcd[clock]);
 }
 
-/* A straight forward implementation of the Euclidean algorithm for GCD. */
+/* A straightforward implementation of the Euclidean algorithm for GCD. */
 static inline uint64_t jent_gcd64(uint64_t a, uint64_t b)
 {
-	/* Make a greater a than or equal b. */
+	/* Make a greater than or equal to b. */
 	if (a < b) {
 		uint64_t c = a;
 
@@ -100,7 +100,7 @@ static int jent_gcd_analyze_internal(uint64_t *delta_history, size_t nelem,
 
 		 * Some timers increment by a fixed (non-1) amount each step.
 		 * This code checks for such increments, and allows the library
-		 * to output the number of such changes have occurred.
+		 * to output the number of such changes that have occurred.
 		 */
 		running_gcd = jent_gcd64(delta_history[i], running_gcd);
 	}

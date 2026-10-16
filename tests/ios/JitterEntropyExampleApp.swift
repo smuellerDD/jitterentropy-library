@@ -40,7 +40,7 @@ struct ContentView: View {
     }
 }
 
-/// The version and the state of the current collector, atop both tabs.
+/// The version and the state of the current collector, atop every tab.
 struct Header: View {
     @ObservedObject var collector: Collector
 

@@ -322,7 +322,6 @@ static void test_startup_on_mocked_clocks(void)
 		   "the platform clock passes again");
 }
 
-/* A collector for replaying stamps into: FIPS mode, so the tests report. */
 /*
  * A startup that fails under NTG.1 must not commit the process to the internal
  * timer.
@@ -746,7 +745,7 @@ static void test_realloc_on_read_gives_up(void)
  * The status output of a build carrying the mock, swept across every buffer
  * length. It has two fields the ordinary build does not, so the truncation of
  * every write in it is a different set of cut points than the sweep in
- * unit-base covers - and the property to hold is the same: nothing written
+ * unit-base-api covers - and the property to hold is the same: nothing written
  * past the buffer, and no success reported for a document that did not fit.
  */
 static void test_status_truncation(void)

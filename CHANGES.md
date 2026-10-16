@@ -72,12 +72,12 @@
  * Add secure memory implementation for Linux and {Net,Open,Free}BSD, MacOS and Windows
  * Update supported CMake version to 3.10
  * doc: use Doxygen-style comments
- * NTG.1 compliance: Modify startup such that the memory access and SHA-3 loop are treated as independent noise sources which are sampled to collect at least 240 bits each before first block of random numbers is released
+ * NTG.1 compliance: Modify startup such that the memory access and SHA-3 loop are treated as independent noise sources which are sampled to collect at least 240 bits each before the first block of random numbers is released
  * Remove all code when JENT_CONF_DISABLE_LOOP_SHUFFLE is unset. This code is already discouraged for a long time. Now it is taken out for good.
  * If cache size cannot be detected from base system (e.g. virtualization), use the requested memory size.
  * Change the stuck test to always calculate the absolute values of the 2nd and 3rd discrete derivation of time.
  * Replace SHA3-256 output generation with XDRBG-256
- * Prune the jitterentropy.h header file of internal definitions and delcarations which are moved to src/jitterentropy-internal.h. With that, jitterentropy.h only contains the API. This modification does not alter the Jitter RNG behavior at all.
+ * Prune the jitterentropy.h header file of internal definitions and declarations which are moved to src/jitterentropy-internal.h. With that, jitterentropy.h only contains the API. This modification does not alter the Jitter RNG behavior at all.
  * Update secure storage memory implementation for libgcrypt and OpenSSL
  * Add API jent_status
 
@@ -96,7 +96,7 @@
  * Add support for SunPRO compiler
  * Fix compilation on OpenBSD by replacing sed with tr
  * internal timer: Add support for Apple
- * Various small fixes to compilation to imporve portability
+ * Various small fixes to compilation to improve portability
 
 3.6.0
  * Remove bi-modal behavior of conditioning function
@@ -118,7 +118,7 @@
 3.4.0
  * enhancement: add API call jent_set_fips_failure_callback as requested by Daniel Ojalvo
  * fix: Change the SHA-3 integration: The entropy pool is now a SHA-3 state.
-It is filled with the time delta containing entropy and auxiliary data that does not contain entropy using a SHA update operation. The auxiliary data is calculated by a SHA-3 hashing of some varying state data. The time delta that contains entropy is measured about the SHA-3 hasing of the auxiliary data. This satisfies FIPS 140-3 IG D.K resolutions 4, 6, and 8.
+It is filled with the time delta containing entropy and auxiliary data that does not contain entropy using a SHA update operation. The auxiliary data is calculated by a SHA-3 hashing of some varying state data. The time delta that contains entropy is measured about the SHA-3 hashing of the auxiliary data. This satisfies FIPS 140-3 IG D.K resolutions 4, 6, and 8.
  * enhancement: add CMake support by Andrew Hopkins
 
 3.3.1
@@ -148,7 +148,7 @@ It is filled with the time delta containing entropy and auxiliary data that does
  * Add link call to pthreads library as suggested by Mikhail Novosyolov
  * Add ENTROPY_SAFETY_FACTOR to apply consideration of asymptotically reaching
    full entropy following SP800-90C suggested by Joshua Hill
- * Add test for finiding more entropy by changing the memory buffer size
+ * Add test for finding more entropy by changing the memory buffer size
    used for the memory access loop
  * Increase the memory buffer size to 512 kBytes per default based on
    measurements on systems with low entropy.
@@ -162,7 +162,7 @@ It is filled with the time delta containing entropy and auxiliary data that does
 
 3.0.2
  * Small fixes suggested by Joshua Hill
- * Update the invocation of SHA-3 invocation: each loop iteration defined by the loop shuffle is a self-contained SHA-3 operation. Therefore, the conditioning information is always *one* SHA-3 operation with different time duration.
+ * Update the invocation of SHA-3: each loop iteration defined by the loop shuffle is a self-contained SHA-3 operation. Therefore, the conditioning information is always *one* SHA-3 operation with different time duration.
  * add JENT_CONF_DISABLE_LOOP_SHUFFLE config option allowing disabling of the shuffle operation
  * Use -O0
 
@@ -206,7 +206,7 @@ It is filled with the time delta containing entropy and auxiliary data that does
    during compile time
 
 2.0.1:
- * Invcation of stuck test during initalization
+ * Invocation of stuck test during initialization
 
 2.0.0:
  * Replace the XOR folding of a time delta with an LFSR -- the use of an
@@ -215,11 +215,11 @@ It is filled with the time delta containing entropy and auxiliary data that does
 1.2.0:
  * Use constant time operation of jent_stir_pool to prevent leaking
    timing information about RNG.
- * Make it compile on 32 bit archtectures
+ * Make it compile on 32 bit architectures
 
 1.1.0:
  * start new numbering schema
  * update processing of bit that is deemed holding no entropy by heuristic:
-   XOR it into pool without LSFR and bit rotation (reported and suggested
+   XOR it into pool without LFSR and bit rotation (reported and suggested
    by Kevin Fowler <kevpfowler@gmail.com>)
 

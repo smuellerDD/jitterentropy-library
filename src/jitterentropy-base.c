@@ -73,13 +73,13 @@ static unsigned int ensure_osr_is_at_least_minimal(unsigned int current_osr)
 /**
  * jent_version() - Return machine-usable version number of jent library
  *
- * The function returns a version number that is monotonic increasing
+ * The function returns a version number that is monotonically increasing
  * for newer versions. The version numbers are multiples of 100. For example,
  * version 1.2.3 is converted to 1020300 -- the last two digits are reserved
  * for future use.
  *
  * The result of this function can be used in comparing the version number
- * in a calling program if version-specific calls need to be make.
+ * in a calling program if version-specific calls need to be made.
  *
  * @return Version number of jitterentropy library
  */
@@ -113,12 +113,12 @@ static inline unsigned int jent_log2_simple(uint64_t val)
  *
  * On a lot of systems it is not necessary to need so much memory as the
  * variations coming from the general Jitter RNG execution commonly provide
- * large amount of variations.
+ * a large amount of variations.
  *
  * Thus, the default is:
  * * size provided by the caller, or
  * * cache information * (1 << JENT_CACHE_SHIFT_BITS) where by default
- *   only L1 cache size is uzed or with JENT_CACHE_ALL all caches are used
+ *   only L1 cache size is used or with JENT_CACHE_ALL all caches are used
  *   to determine the memory size, or
  * * 1 << JENT_DEFAULT_MEMORY_BITS
  *
@@ -136,7 +136,7 @@ static inline unsigned int jent_update_memsize(unsigned int flags,
 	if (!max) {
 		/*
 		 * The safe starting value is the cache size increased by the
-		 * multiplicator.
+		 * multiplier.
 		 */
 		max = jent_log2_simple(jent_cache_size_roundup(
 						!!(flags & JENT_CACHE_ALL)));
@@ -148,7 +148,7 @@ static inline unsigned int jent_update_memsize(unsigned int flags,
 			if (!(flags & JENT_CACHE_ALL)) {
 				/*
 				 * We increase the memory size 4-fold. This is
-				 * due to ensure that the memory access
+				 * to ensure that the memory access
 				 * operation mostly is caused by L1 misses and
 				 * L2 hits.
 				 */
@@ -338,7 +338,7 @@ static int jent_health_err(unsigned int health_test_result)
  * @param[out] data pointer to buffer for storing random data -- buffer must
  *	       already exist
  * @param[in] len size of the buffer, specifying also the requested number of random
- *	     in bytes
+ *	     bytes
  *
  * @return number of bytes returned when request is fulfilled or an error
  *
@@ -581,16 +581,16 @@ static int jent_health_failure_reset(struct rand_data **ec, int startup)
  * increases the OSR by one. This is done based on the idea that a health
  * test failure indicates that the assumed entropy rate is too high.
  *
- * Note the function returns with an health test error if the OSR is
+ * Note the function returns with a health test error if the OSR is
  * getting too large. If an error is returned by this function, the Jitter RNG
  * is not safe to be used on the current system.
  *
  * @param[in] ec Reference to entropy collector - this is a double pointer as
- *	    	 The entropy collector may be freed and reallocated.
+ *	    	 the entropy collector may be freed and reallocated.
  * @param[out] data pointer to buffer for storing random data -- buffer must
  *	      	    already exist
  * @param[in] len size of the buffer, specifying also the requested number of
- *		  random in bytes
+ *		  random bytes
  *
  * @return see jent_read_entropy()
  */
@@ -968,8 +968,8 @@ static struct rand_data *jent_entropy_collector_startup(struct rand_data *ec)
 	}
 
 	/*
-	 * Assure, that we always have 512 bits (NTG.1 / FIPS compliance due to
-	 * startup_state is set to 2) or 256 bits (other cases) entropy in
+	 * Ensure that we always have 512 bits (NTG.1 / FIPS compliance due to
+	 * startup_state being set to 2) or 256 bits (other cases) entropy in
 	 * our hash state before outputting a block by adding at least 256 bits
 	 * before first usage. 512 bits are always transferred to the next state
 	 * before the actual generation of random numbers to be returned to the
