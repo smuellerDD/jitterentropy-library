@@ -95,5 +95,12 @@ if(BUILD_TESTING)
                          $<TARGET_FILE:jitterentropy-rngd>
                          ${CMAKE_CURRENT_BINARY_DIR}/rngd-signals)
         set_tests_properties(rngd-signals PROPERTIES TIMEOUT 900)
+        # The PID file, which takes the detached daemon - on Linux root
+        # and the kernel as well.
+        add_test(NAME rngd-pidfile
+                 COMMAND sh ${PROJECT_SOURCE_DIR}/tests/rngd/pidfile.sh
+                         $<TARGET_FILE:jitterentropy-rngd>
+                         ${CMAKE_CURRENT_BINARY_DIR}/rngd-pidfile)
+        set_tests_properties(rngd-pidfile PROPERTIES TIMEOUT 900)
     endif()
 endif()

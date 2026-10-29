@@ -362,6 +362,11 @@ root, as in the BSD CI guests, the daemon switches to `nobody` and enters
 Capsicum or `pledge(2)` as in service. Linux has no `--device`: the nix VM
 tests send its daemon the signals.
 
+On the same systems `rngd-pidfile` (`rngd/pidfile.sh`) has the detached daemon
+write its PID file, a second instance naming it refuse to start and a stale one
+be taken over, and checks that a hard link, a symbolic link or a FIFO in its
+place ends the start with 1 and leaves the file behind it as it was.
+
 ## With no operating system
 
 `tests/efi` builds the library into an EFI application and boots it. It is the

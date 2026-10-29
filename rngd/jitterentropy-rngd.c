@@ -998,21 +998,29 @@ static void generate_bytes(void)
 static void create_pid_file(const char *pid_file)
 {
 	char pid_str[12];	/* max. integer length + '\n' + null */
+	struct stat st;
 	int fd;
 
 	/*
-	 * Deliberately without O_EXCL: a PID file left behind by a daemon that
-	 * was killed must not stop a new instance from starting. The advisory
-	 * lock taken below - not the presence of the file - is what ensures
-	 * that only one copy runs.
-	 *
-	 * O_NOFOLLOW retains the protection that O_EXCL used to provide
-	 * against being redirected through a planted symlink.
+	 * No O_EXCL: a PID file left by a killed daemon must not stop a new
+	 * one, the lock below ensures that only one runs. O_NOFOLLOW and the
+	 * check below keep a planted symlink or hard link from redirecting the
+	 * truncation, O_NONBLOCK keeps a FIFO from blocking the open.
 	 */
-	fd = open(pid_file, O_RDWR|O_CREAT|O_NOFOLLOW, S_IRUSR|S_IWUSR);
+	fd = open(pid_file, O_RDWR|O_CREAT|O_NOFOLLOW|O_NONBLOCK,
+		  S_IRUSR|S_IWUSR);
 	if (fd == -1)
 		dolog(JENT_LOG_ERR, "Cannot open pid file %s: %s", pid_file,
 		      strerror(errno));
+
+	/* Not in Pidfile_fd yet: dealloc() leaves a file refused here alone. */
+	if (fstat(fd, &st))
+		dolog(JENT_LOG_ERR, "Cannot stat pid file %s: %s", pid_file,
+		      strerror(errno));
+	if (!S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
+	    st.st_nlink != 1)
+		dolog(JENT_LOG_ERR, "PID file %s is not a regular file of user %u with a single link",
+		      pid_file, (unsigned int)geteuid());
 
 	if (lockf(fd, F_TLOCK, 0) == -1) {
 		int errsv = errno;

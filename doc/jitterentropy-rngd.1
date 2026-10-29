@@ -182,6 +182,10 @@ Write the PID to
 .I file
 and lock it, so that a second instance naming the same file refuses to start
 and exits with 1.
+An existing
+.I file
+must be a regular file of the daemon's user with no other link, and not a
+symbolic link; anything else ends the start with 1, untouched.
 The file is only written when the daemon detaches, not with
 .BR \-\-foreground ,
 and is removed when the daemon exits - except where it switched to another
