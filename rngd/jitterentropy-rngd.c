@@ -778,7 +778,8 @@ static int alloc_rng(struct kernel_rng *rng)
 		if (ret)
 			return ret;
 
-		fprintf(stderr, "%s\n", buf);
+		/* As it is: jent_status() ends the document with a newline */
+		fputs(buf, stderr);
 		return -EAGAIN;
 	}
 
