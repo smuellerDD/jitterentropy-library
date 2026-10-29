@@ -420,6 +420,17 @@ with
 The daemon reads the signal from a
 .BR signalfd (2);
 one sent while it starts up waits until it runs, rather than ending it.
+.TP
+.B SIGUSR2
+Linux only. Reseed the kernel now: inject 64 bytes of the Jitter RNG and
+request a reseed of the kernel's random number generator
+.RB ( RNDRESEEDCRNG ),
+as the alarm forces one. On a kernel with the LRNG the injection alone: the
+LRNG reseeds by itself, and no reseed is requested of it. The outcome is
+logged at the
+.I notice
+level, and the signal is read as
+.BR SIGUSR1 .
 .SH ENVIRONMENT
 .TP
 .B NOTIFY_SOCKET

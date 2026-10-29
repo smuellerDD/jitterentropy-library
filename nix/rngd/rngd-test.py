@@ -23,6 +23,16 @@ machine.wait_until_succeeds(
     " | grep -q 'Status of the Jitter RNG on SIGUSR1'", timeout=30)
 machine.succeed("systemctl is-active jitterentropy.service")
 
+# SIGUSR2: a reseed now, its outcome in the journal.
+seeded = ("Injected 64 bytes into the LRNG" if lrng
+          else "Reseeded the kernel with 64 bytes")
+machine.succeed("systemctl kill -s USR2 jitterentropy.service")
+machine.wait_until_succeeds(
+    "journalctl -u jitterentropy.service"
+    f" | grep -q '{seeded}, as SIGUSR2 asked'",
+    timeout=60)
+machine.succeed("systemctl is-active jitterentropy.service")
+
 machine.succeed("systemctl stop jitterentropy.service")
 
 
