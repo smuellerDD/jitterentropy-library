@@ -449,7 +449,11 @@ ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
 		 * The LRNG operates fully 90B compliant, no special handling
 		 * is necessary.
 		 */
-		dolog(JENT_LOG_DEBUG, "LRNG: Inject %zu bits of data with %zu bits of entropy into BLAKE2s state",
+		/*
+		 * Not random.c's BLAKE2s: the LRNG has its own hash and credits
+		 * no more than its digest size.
+		 */
+		dolog(JENT_LOG_DEBUG, "LRNG: Inject %zu bits of data with %zu bits of entropy into the auxiliary pool, which credits at most its digest size",
 		      len << 3, entropy_bytes << 3);
 
 		/* Write the entropy, LRNG seeds automatically. */
