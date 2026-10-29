@@ -74,7 +74,12 @@ replaces them with an alarm every so many seconds that injects each time.
 On a kernel with the LRNG
 .RI ( /proc/lrng_type
 exists) only the first two apply and no reseed is requested: the LRNG reseeds
-by itself.
+by itself. There is no schedule to set, and
+.BR \-\-interval ,
+.B \-\-phase1
+and
+.B \-\-phase2
+end the daemon at its start.
 .SS FreeBSD, NetBSD, OpenBSD and macOS
 None of these kernels has an entropy estimate to poll. The daemon writes 64
 bytes of Jitter RNG output to
@@ -255,7 +260,8 @@ checks inject regardless of it and move on to phase 2. The default is 5:120.
 Linux only. The same for everything after phase 1, injecting regardless of the
 estimate after every
 .I wakeups
-checks. The default is 50:12. Neither value of either phase may be 0.
+checks. The default is 50:12. Neither value of either phase may be 0, and on a
+kernel with the LRNG neither phase may be given.
 .TP
 .BR \-t ", " \-\-interval " \fIseconds\fR"
 Seed the kernel every
@@ -268,7 +274,8 @@ estimate, in place of the checks of
 .B \-\-phase1
 and
 .BR \-\-phase2 ,
-neither of which goes with it; without it, those apply.
+neither of which goes with it; without it, those apply. On a kernel with the
+LRNG it is refused.
 .TP
 .BR \-u ", " \-\-user " \fIuser\fR"
 FreeBSD, NetBSD, OpenBSD and macOS only. The user to switch to after the
@@ -363,7 +370,7 @@ or
 on which it shuts down cleanly. 1 for an error: on Linux no root privileges, a
 Jitter RNG that cannot be initialized or allocated, a file that cannot be
 opened, a user that cannot be switched to or whose seeds the kernel refuses, a
-sandbox that cannot be entered,
+sandbox that cannot be entered, a schedule given on a kernel with the LRNG,
 an invalid option, a
 .B \-\-oneshot
 whose injections all failed, a

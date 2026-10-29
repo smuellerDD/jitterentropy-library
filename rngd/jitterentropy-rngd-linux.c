@@ -207,16 +207,18 @@ const struct option rngd_os_options[] = {
 	{0, 0, 0, 0}
 };
 
-/* --interval and --phase1 / --phase2 set the same schedule: not both */
+/*
+ * --interval and --phase1 / --phase2 set the same schedule: not both. Which
+ * of them set it, for rngd_os_start(): the LRNG has no schedule to set.
+ */
 enum { BY_INTERVAL = 1, BY_PHASES };
+static int schedule_set_by = 0;
 
 static void schedule_by(int by_option)
 {
-	static int by = 0;
-
-	if (by && by != by_option)
+	if (schedule_set_by && schedule_set_by != by_option)
 		usage();
-	by = by_option;
+	schedule_set_by = by_option;
 }
 
 /* PERIOD:WAKEUPS of --phase1 / --phase2, zero would stop the alarm */
@@ -702,6 +704,16 @@ void rngd_os_start(void)
 
 	if (geteuid())
 		dolog(JENT_LOG_ERR, "Program must start as root!");
+
+	/*
+	 * The LRNG reseeds by itself and takes data when /dev/random reports
+	 * it wants some: the daemon sets no alarm there, which would leave a
+	 * schedule asked for unkept without a word.
+	 */
+	if (schedule_set_by && lrng_present())
+		dolog(JENT_LOG_ERR, "%s has no effect on a kernel with the LRNG, which reseeds by itself",
+		      BY_INTERVAL == schedule_set_by ?
+		      "--interval" : "--phase1 / --phase2");
 
 	/* Before the startup of the Jitter RNG, which takes its time */
 	status_signals(&usr1);
