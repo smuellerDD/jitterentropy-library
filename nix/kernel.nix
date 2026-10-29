@@ -2,7 +2,7 @@
 ctx:
 let
   inherit (ctx) inTreeBuildsFor inTreeFor kernelSetsFor lib moduleFor
-    modulesFor self;
+    modulesFor self trimmedKernelFor vmKernelOptions;
 in
 {
   # jitter_rng.ko against a given kernel. The with* arguments mirror the
@@ -84,10 +84,9 @@ in
   # takes fips=1 - and asks for MODULE_SIG, which without MODULE_SIG_FORCE
   # still loads the unsigned jitter_rng.ko.
   testInterfaceKernelFor = pkgs:
-    let
+    trimmedKernelFor pkgs {
+      name = "testinterface";
       base = pkgs.linuxPackages.kernel;
-      arch = pkgs.stdenv.hostPlatform.linuxArch;
-
       enable = [
         # The vanilla Jitter RNG with its test interface and what that
         # depends on, and the AF_ALG RNG interface kcapi-rng drives it
@@ -99,21 +98,34 @@ in
         # jitter_rng.ko and its interfaces.
         "MODULES" "MODULE_SIG" "HW_RANDOM" "HW_RANDOM_VIRTIO" "PROC_FS"
         "DEBUG_FS"
-        # The NixOS test VM.
-        "VIRTIO_PCI" "VIRTIO_BLK" "VIRTIO_NET" "VIRTIO_CONSOLE"
-        "VIRTIO_BALLOON" "VIRTIO_MMIO" "SCSI_VIRTIO" "NET_9P"
-        "NET_9P_VIRTIO" "9P_FS" "9P_FS_POSIX_ACL" "FUSE_FS" "VIRTIO_FS"
-        "DRM" "DRM_VIRTIO_GPU" "OVERLAY_FS" "EXT4_FS" "EXT4_FS_POSIX_ACL"
-        "BLK_DEV_LOOP"
-        # systemd and NixOS.
-        "DEVTMPFS" "CGROUPS" "CGROUP_BPF" "BPF_SYSCALL" "INOTIFY_USER"
-        "SIGNALFD" "TIMERFD" "EPOLL" "FHANDLE" "AUTOFS_FS" "TMPFS"
-        "TMPFS_POSIX_ACL" "TMPFS_XATTR" "SECCOMP" "DMIID" "BLK_DEV_INITRD"
-        "RD_ZSTD" "BINFMT_ELF" "UNIX" "NET" "INET"
-      ];
+      ] ++ vmKernelOptions;
+    };
 
-      configfile = pkgs.stdenv.mkDerivation {
-        pname = "jitterentropy-testinterface-kernel-config";
+  # What the NixOS test VM needs of a kernel trimmedKernelFor configures.
+  vmKernelOptions = [
+    # The NixOS test VM.
+    "VIRTIO_PCI" "VIRTIO_BLK" "VIRTIO_NET" "VIRTIO_CONSOLE"
+    "VIRTIO_BALLOON" "VIRTIO_MMIO" "SCSI_VIRTIO" "NET_9P"
+    "NET_9P_VIRTIO" "9P_FS" "9P_FS_POSIX_ACL" "FUSE_FS" "VIRTIO_FS"
+    "DRM" "DRM_VIRTIO_GPU" "OVERLAY_FS" "EXT4_FS" "EXT4_FS_POSIX_ACL"
+    "BLK_DEV_LOOP"
+    # systemd and NixOS.
+    "DEVTMPFS" "CGROUPS" "CGROUP_BPF" "BPF_SYSCALL" "INOTIFY_USER"
+    "SIGNALFD" "TIMERFD" "EPOLL" "FHANDLE" "AUTOFS_FS" "TMPFS"
+    "TMPFS_POSIX_ACL" "TMPFS_XATTR" "SECCOMP" "DMIID" "BLK_DEV_INITRD"
+    "RD_ZSTD" "BINFMT_ELF" "UNIX" "NET" "INET"
+  ];
+
+  # A small kernel of base with kernelPatches, from defconfig and
+  # kvm_guest.config with enable on and disable off. A NixOS test VM needs
+  # vmKernelOptions among enable.
+  trimmedKernelFor = pkgs:
+    { name, base, enable, disable ? [ ], kernelPatches ? [ ] }:
+    let
+      arch = pkgs.stdenv.hostPlatform.linuxArch;
+
+      configfile = pkgs.stdenv.mkDerivation ({
+        pname = "jitterentropy-${name}-kernel-config";
         inherit (base) version src;
 
         nativeBuildInputs = with pkgs; [ bc bison flex perl ];
@@ -125,7 +137,8 @@ in
 
           make ARCH=${arch} defconfig kvm_guest.config
           ./scripts/config ${lib.concatMapStringsSep " "
-            (o: "--enable ${o}") enable} \
+            (o: "--enable ${o}") enable}${lib.concatMapStrings
+            (o: " --disable ${o}") disable} \
             --set-str LOCALVERSION "" \
             --disable LOCALVERSION_AUTO
           make ARCH=${arch} olddefconfig
@@ -137,7 +150,14 @@ in
               echo "CONFIG_$opt=y is missing from the generated .config"
               exit 1
             }
-          done
+          done${lib.optionalString (disable != [ ]) ''
+
+          for opt in ${lib.concatStringsSep " " disable}; do
+            if grep -q "^CONFIG_$opt=" .config; then
+              echo "CONFIG_$opt is still set in the generated .config"
+              exit 1
+            fi
+          done''}
 
           runHook postBuild
         '';
@@ -147,16 +167,20 @@ in
           cp .config $out
           runHook postInstall
         '';
-      };
+      } // lib.optionalAttrs (kernelPatches != [ ]) {
+        patches = map (p: p.patch) kernelPatches;
+      });
 
-      kernel = pkgs.linuxManualConfig {
+      kernel = pkgs.linuxManualConfig ({
         inherit (base) src version modDirVersion;
         inherit configfile;
         # Stated rather than read back from the generated .config, which
         # would be import from derivation.
         config = lib.listToAttrs
           (map (o: lib.nameValuePair "CONFIG_${o}" "y") enable);
-      };
+      } // lib.optionalAttrs (kernelPatches != [ ]) {
+        inherit kernelPatches;
+      });
     in pkgs.linuxPackagesFor kernel;
 
   # linux_kernel/README.md "Build in Tree": the library copied into the
