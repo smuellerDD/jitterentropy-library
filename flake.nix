@@ -23,14 +23,16 @@
       inherit (ctx)
         consumersFor crossTargets cryptoFor efiFor efiVmFor forAllSystems
         inTreeBuildsFor isosFor modulesFor muslFor muslStaticFor rawEntropyFor
-        rawEntropyKernelVmFor sdImagesFor testInterfaceKernelFor toolsFor
-        vmTestsFor;
+        rawEntropyKernelVmFor rngdFor sdImagesFor testInterfaceKernelFor
+        toolsFor vmTestsFor;
     in {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
         in {
           default = toolsFor pkgs;
           jitterentropy-tools = toolsFor pkgs;
+          # The daemon alone, the library linked in.
+          jitterentropy-rngd = rngdFor pkgs;
           musl = muslFor pkgs;
           musl-static = muslStaticFor pkgs;
           # The kernel of the raw-entropy-kernel check.

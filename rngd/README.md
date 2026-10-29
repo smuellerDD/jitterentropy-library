@@ -46,6 +46,17 @@ below the prefix on FreeBSD and to `/etc/rc.d` on NetBSD and OpenBSD, the
 launchd plist `jitterentropy-rngd.plist` to `/Library/LaunchDaemons`;
 `-DJENT_RNGD_SERVICEDIR=<dir>` names another directory.
 
+The daemon alone, with its service file and nothing of the library:
+
+	cmake -S . -B build -DENABLE_RNGD=ON -DENABLE_TOOLS=OFF -DBUILD_SHARED_LIBS=OFF
+	cmake --build build --target jitterentropy-rngd
+	cmake --install build --component rngd
+
+or `make install-rngd`, which builds nothing but the daemon and installs its
+man page as well; the static library leaves it without need of the shared
+one. With nix, `nix build .#jitterentropy-rngd` is that build, and the
+default package has the daemon along with the library and the tools.
+
 ## Systemd unit
 
 	systemctl enable --now jitterentropy

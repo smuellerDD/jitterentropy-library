@@ -206,10 +206,15 @@ RNGD_OBJS := jitterentropy-rngd.o jitterentropy-rngd-linux.o
 SBINDIR := sbin
 JENT_SYSTEMD_UNITDIR ?= lib/systemd/system
 RNGD_UNITDIR := $(if $(filter /%,$(JENT_SYSTEMD_UNITDIR)),,$(PREFIX)/)$(JENT_SYSTEMD_UNITDIR)
-ifeq ($(ENABLE_RNGD),1)
+# Its own targets build the daemon without ENABLE_RNGD=1 - "make install-rngd"
+# installs it alone - and need Linux just the same.
+RNGD_GOALS := $(filter $(RNGD_NAME) install-rngd check-rngd,$(MAKECMDGOALS))
+ifneq ($(filter 1,$(ENABLE_RNGD))$(RNGD_GOALS),)
 ifneq ($(UNAME_S),Linux)
-$(error ENABLE_RNGD needs Linux: the daemon feeds the Linux /dev/random)
+$(error $(RNGD_NAME) needs Linux: the daemon feeds the Linux /dev/random)
 endif
+endif
+ifeq ($(ENABLE_RNGD),1)
 RNGD_ALL := $(RNGD_NAME)
 RNGD_INSTALL := install-rngd
 endif
@@ -273,8 +278,8 @@ install: install-man install-shared install-includes $(RECORD_INSTALL) \
 	$(RNGD_INSTALL)
 
 # The pages install-man installs: the library's, the kernel module's where
-# there is one to load, the recording library's and the daemon's where they
-# are built. Each goes to the man<N> directory of its section.
+# there is one to load and the recording library's where it is built. The
+# daemon's goes with install-rngd.
 MANPAGES := doc/$(NAME).3 $(wildcard doc/jent_*.3)
 ifeq ($(UNAME_S),Linux)
 MANPAGES += doc/jitter_rng.4
@@ -282,17 +287,19 @@ endif
 ifeq ($(ENABLE_RECORDING),1)
 MANPAGES += doc/$(RECORD_NAME).3
 endif
-ifeq ($(ENABLE_RNGD),1)
-MANPAGES += doc/$(RNGD_NAME).1
-endif
 
-install-man:
-	for page in $(MANPAGES); do \
+# The pages $(1), for install-man and install-rngd
+define install_pages
+	for page in $(1); do \
 		man=$(DESTDIR)$(PREFIX)/share/man/man$${page##*.}; \
 		install -d -m 0755 $$man && \
 		install -m 644 $$page $$man/ && \
 		gzip -n -f -9 $$man/$${page##*/} || exit 1; \
 	done
+endef
+
+install-man:
+	$(call install_pages,$(MANPAGES))
 
 install-shared:
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(LIBDIR)
@@ -331,9 +338,10 @@ install-record-static: lib$(RECORD_NAME).a
 	install -m 0644 lib$(RECORD_NAME).a $(DESTDIR)$(PREFIX)/$(LIBDIR)/
 	install -m 0644 $(RECORD_DIR)/jitterentropy-record.h $(DESTDIR)$(PREFIX)/$(INCDIR)/
 
-# jitterentropy-rngd and its unit, with ENABLE_RNGD=1. The unit names the
-# daemon where this install puts it.
+# jitterentropy-rngd, its unit and its man page, part of install with
+# ENABLE_RNGD=1. The unit names the daemon where this install puts it.
 install-rngd: $(RNGD_NAME)
+	$(call install_pages,doc/$(RNGD_NAME).1)
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(SBINDIR) $(DESTDIR)$(RNGD_UNITDIR)
 	$(INSTALL_STRIP) -m 0755 $(RNGD_NAME) $(DESTDIR)$(PREFIX)/$(SBINDIR)/
 	sed -e 's|@PATH@|$(PREFIX)/$(SBINDIR)|' $(RNGD_DIR)/linux/jitterentropy.service.in \

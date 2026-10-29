@@ -5,13 +5,15 @@ let
     toolsFor;
 in
 {
-  # The CMake build: the library plus its tools in bin.
+  # The CMake build: the library plus its tools in bin, and jitterentropy-rngd
+  # in sbin with its systemd unit in lib/systemd/system.
   toolsFor = pkgs:
     pkgs.stdenv.mkDerivation {
       pname = "jitterentropy-tools";
       version = "3.8.0";
       src = self;
       nativeBuildInputs = [ pkgs.cmake ];
+      cmakeFlags = [ "-DENABLE_RNGD=ON" ];
       enableParallelBuilding = true;
       # The entropy core must build at -O0, which _FORTIFY_SOURCE cannot
       # combine with: 17 "requires compiling with optimization" warnings,
@@ -22,6 +24,36 @@ in
       meta = {
         description = "Jitter RNG userspace library and validation tools";
         license = lib.licenses.bsd3;
+      };
+    };
+
+  # jitterentropy-rngd alone: the daemon in sbin and its systemd unit, with
+  # nothing installed of the library it links statically.
+  rngdFor = pkgs:
+    pkgs.stdenv.mkDerivation {
+      pname = "jitterentropy-rngd";
+      version = "3.8.0";
+      src = self;
+      nativeBuildInputs = [ pkgs.cmake ];
+      cmakeFlags = [
+        "-DENABLE_RNGD=ON"
+        "-DENABLE_TOOLS=OFF"
+        "-DBUILD_SHARED_LIBS=OFF"
+      ];
+      buildFlags = [ "jitterentropy-rngd" ];
+      enableParallelBuilding = true;
+      # As in toolsFor.
+      hardeningDisable = [ "fortify" "fortify3" ];
+      installPhase = ''
+        runHook preInstall
+        cmake --install . --component rngd
+        runHook postInstall
+      '';
+      meta = {
+        description = "Jitter RNG daemon seeding the Linux kernel RNG";
+        license = lib.licenses.bsd3;
+        mainProgram = "jitterentropy-rngd";
+        platforms = lib.platforms.linux;
       };
     };
 

@@ -47,8 +47,10 @@ endif()
 add_executable(jitterentropy-rngd jitterentropy-rngd.c ${_jent_rngd_src})
 target_compile_options(jitterentropy-rngd PRIVATE ${JITTER_C_FLAGS})
 target_link_libraries(jitterentropy-rngd PRIVATE ${PROJECT_NAME})
+# The install component rngd is the daemon and its service file alone: linked
+# statically, the daemon needs nothing of the library installed.
 install(TARGETS jitterentropy-rngd
-        RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR})
+        RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR} COMPONENT rngd)
 
 # The prefix is filled in at install time, as for jitterentropy.pc, so that
 # the service file follows "cmake --install --prefix" to where the daemon goes.
@@ -64,15 +66,15 @@ set(_jent_unit_installed
 install(CODE "
   set(_jent_unit_in \"${CMAKE_CURRENT_BINARY_DIR}/${_jent_service}.install\")
   set(_jent_unit_out \"${_jent_unit_installed}\")
-")
+" COMPONENT rngd)
 install(CODE [[
   file(READ "${_jent_unit_in}" _jent_unit)
   string(REPLACE "@JENT_UNIT_PREFIX@" "${CMAKE_INSTALL_PREFIX}" _jent_unit
          "${_jent_unit}")
   file(WRITE "${_jent_unit_out}" "${_jent_unit}")
-]])
+]] COMPONENT rngd)
 install(${_jent_service_kind} ${_jent_unit_installed}
-        DESTINATION ${_jent_service_dir})
+        DESTINATION ${_jent_service_dir} COMPONENT rngd)
 
 # Needs neither root nor the kernel: the daemon links and reports the
 # library's version.

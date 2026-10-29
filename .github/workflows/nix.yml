@@ -1,7 +1,7 @@
 name: Nix
 
 # The nix flake: kernel VM tests, in-tree kernels, EFI, cross builds,
-# consumers, crypto backends, musl and the raw entropy scripts.
+# consumers, crypto backends, musl, rngd and the raw entropy scripts.
 
 on:
   push:
@@ -480,3 +480,64 @@ jobs:
             "$OUT/bin/jitterentropy-rng" 256 $opt > /dev/null ||
               echo "::warning::jitterentropy-rng $opt failed on this machine"
           done
+
+  nix-rngd:
+    name: rngd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build
+        id: build
+        run: |
+          rngd=$(nix build --no-link --print-build-logs --print-out-paths \
+            .#jitterentropy-rngd)
+          tools=$(nix build --no-link --print-build-logs --print-out-paths \
+            .#default)
+          echo "rngd=$rngd" >> "$GITHUB_OUTPUT"
+          echo "tools=$tools" >> "$GITHUB_OUTPUT"
+
+      # The daemon alone: its binary and unit, the library linked in, and the
+      # unit naming the binary of this output.
+      - name: Check the rngd package
+        env:
+          OUT: ${{ steps.build.outputs.rngd }}
+        run: |
+          (cd "$OUT" && find . | sort)
+          # nixpkgs moves sbin to bin and leaves sbin a link to it, so the
+          # daemon is a file in either.
+          extra=$(cd "$OUT" && find . -type f \
+            ! -path ./bin/jitterentropy-rngd \
+            ! -path ./sbin/jitterentropy-rngd \
+            ! -path ./lib/systemd/system/jitterentropy.service)
+          [ -z "$extra" ] && [ -x "$OUT/sbin/jitterentropy-rngd" ] || {
+            echo "::error::the rngd package holds more than the daemon and its unit: $extra"
+            exit 1
+          }
+          if nix shell nixpkgs#binutils -c readelf -d "$OUT/sbin/jitterentropy-rngd" |
+             grep NEEDED | grep -q libjitterentropy; then
+            echo "::error::jitterentropy-rngd links libjitterentropy dynamically"
+            exit 1
+          fi
+          grep -qx "ExecStart=$OUT/sbin/jitterentropy-rngd -F" \
+            "$OUT/lib/systemd/system/jitterentropy.service" || {
+            echo "::error::the unit does not start this package's daemon"
+            exit 1
+          }
+
+      # Needs neither root nor the kernel.
+      - name: Run the daemons
+        env:
+          RNGD: ${{ steps.build.outputs.rngd }}
+          TOOLS: ${{ steps.build.outputs.tools }}
+        run: |
+          for out in "$RNGD" "$TOOLS"; do
+            "$out/sbin/jitterentropy-rngd" --version
+            "$out/sbin/jitterentropy-rngd" --generate 32 --hex
+          done
+          [ -f "$TOOLS/lib/systemd/system/jitterentropy.service" ]
