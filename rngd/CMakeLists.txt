@@ -1,8 +1,12 @@
 # jitterentropy-rngd, with ENABLE_RNGD: the daemon feeding the Jitter RNG into
 # the Linux /dev/random, and its systemd unit. It uses the API of
 # jitterentropy.h alone and links the library as any consumer does.
+#
+# jitterentropy-rngd.c is the daemon, jitterentropy-rngd-linux.c how the
+# Linux kernel takes the data; linux/ holds the systemd unit.
 
-add_executable(jitterentropy-rngd jitterentropy-rngd.c)
+add_executable(jitterentropy-rngd jitterentropy-rngd.c
+               jitterentropy-rngd-linux.c)
 target_compile_options(jitterentropy-rngd PRIVATE ${JITTER_C_FLAGS})
 target_link_libraries(jitterentropy-rngd PRIVATE ${PROJECT_NAME})
 install(TARGETS jitterentropy-rngd
@@ -19,7 +23,7 @@ if(IS_ABSOLUTE "${CMAKE_INSTALL_SBINDIR}")
 else()
     set(PATH "@JENT_UNIT_PREFIX@/${CMAKE_INSTALL_SBINDIR}")
 endif()
-configure_file(jitterentropy.service.in
+configure_file(linux/jitterentropy.service.in
                ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.service.install @ONLY)
 set(_jent_unit_installed
     ${CMAKE_CURRENT_BINARY_DIR}/install/jitterentropy.service)

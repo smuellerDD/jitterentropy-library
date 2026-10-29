@@ -1,5 +1,5 @@
 # The build context is the root of the source tree:
-#	docker build -f rngd/Dockerfile .
+#	docker build -f rngd/linux/Dockerfile .
 FROM alpine
 
 RUN apk add --no-cache cmake gcc libc-dev linux-headers make

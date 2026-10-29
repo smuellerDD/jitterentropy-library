@@ -39,12 +39,12 @@ reports readiness once the kernel took its first injection.
 
 From the root of the source tree:
 
-	docker build -f rngd/Dockerfile -t jitterentropy-rngd .
+	docker build -f rngd/linux/Dockerfile -t jitterentropy-rngd .
 	docker run -d --name=rngd --restart=always \
 	    --cap-add=SYS_ADMIN --cap-drop=ALL \
 	    --network=none jitterentropy-rngd
 
-or `docker compose -f rngd/docker-compose.yaml up -d`.
+or `docker compose -f rngd/linux/docker-compose.yaml up -d`.
 
 Both restart the container whenever the daemon ends, which has to be
 considered for a permanent health test failure of the Jitter RNG: the daemon

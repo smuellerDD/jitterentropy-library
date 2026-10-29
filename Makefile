@@ -202,7 +202,7 @@ endif
 ENABLE_RNGD ?= 0
 RNGD_NAME := $(NAME)-rngd
 RNGD_DIR := rngd
-RNGD_OBJS := jitterentropy-rngd.o
+RNGD_OBJS := jitterentropy-rngd.o jitterentropy-rngd-linux.o
 SBINDIR := sbin
 JENT_SYSTEMD_UNITDIR ?= lib/systemd/system
 RNGD_UNITDIR := $(if $(filter /%,$(JENT_SYSTEMD_UNITDIR)),,$(PREFIX)/)$(JENT_SYSTEMD_UNITDIR)
@@ -336,10 +336,10 @@ install-record-static: lib$(RECORD_NAME).a
 install-rngd: $(RNGD_NAME)
 	install -d -m 0755 $(DESTDIR)$(PREFIX)/$(SBINDIR) $(DESTDIR)$(RNGD_UNITDIR)
 	$(INSTALL_STRIP) -m 0755 $(RNGD_NAME) $(DESTDIR)$(PREFIX)/$(SBINDIR)/
-	sed -e 's|@PATH@|$(PREFIX)/$(SBINDIR)|' $(RNGD_DIR)/jitterentropy.service.in \
+	sed -e 's|@PATH@|$(PREFIX)/$(SBINDIR)|' $(RNGD_DIR)/linux/jitterentropy.service.in \
 		> $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service
 	if grep -q '@[A-Z_]*@' $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service; then \
-		echo "$(RNGD_DIR)/jitterentropy.service.in has a placeholder the Makefile does not fill" >&2; \
+		echo "$(RNGD_DIR)/linux/jitterentropy.service.in has a placeholder the Makefile does not fill" >&2; \
 		$(RM) $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service; exit 1; \
 	fi
 	chmod 0644 $(DESTDIR)$(RNGD_UNITDIR)/jitterentropy.service

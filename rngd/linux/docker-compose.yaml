@@ -3,8 +3,8 @@ name: jitterentropy
 services:
     rngd:
         build:
-            context: ..
-            dockerfile: rngd/Dockerfile
+            context: ../..
+            dockerfile: rngd/linux/Dockerfile
         cap_add:
             - SYS_ADMIN
         cap_drop:
