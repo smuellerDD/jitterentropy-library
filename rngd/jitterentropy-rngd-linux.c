@@ -47,9 +47,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/timerfd.h>
 #include <sys/un.h>
 #include <sys/utsname.h>
 #include <sys/stat.h>
@@ -92,8 +94,6 @@ static struct rand_pool_info *rpi = NULL;
 
 static int Entropy_avail_fd = -1;
 static int Entropy_thresh_fd = -1;
-
-static void install_alarm(unsigned int secs);
 
 static unsigned long kern_maj = ULONG_MAX, kern_minor, kern_patchlevel;
 
@@ -517,71 +517,90 @@ static int read_entropy_value(int fd)
 }
 
 /*******************************************************************
- * Signal handling functions
+ * the alarm and the wait
  *******************************************************************/
 
-/* See the comment above Term_pending in jitterentropy-rngd.c. */
-static volatile sig_atomic_t Alarm_pending = 0;
+/*
+ * The alarm: a timerfd that select_fd() waits for along with /dev/random,
+ * rather than alarm(2) and SIGALRM - no signal handler, and the expiries the
+ * daemon was too busy to see are counted rather than lost. -1 with the LRNG,
+ * which reseeds by itself.
+ */
+static int Alarm_fd = -1;
 
-static void sig_entropy_avail(int sig)
+/* Let the alarm go off every @secs seconds from now on. */
+static void set_alarm(unsigned int secs)
 {
-	(void)sig;
-	Alarm_pending = 1;
+	struct itimerspec its;
+
+	if (-1 == Alarm_fd)
+		return;
+
+	memset(&its, 0, sizeof(its));
+	its.it_value.tv_sec = (time_t)secs;
+	its.it_interval.tv_sec = (time_t)secs;
+	if (timerfd_settime(Alarm_fd, 0, &its, NULL))
+		dolog(JENT_LOG_ERR, "Cannot set the alarm: %s", strerror(errno));
 }
 
 /*
  * Wakeup and check entropy_avail -- this covers the drain of entropy
- * from the nonblocking_pool via get_random_bytes
+ * from the nonblocking_pool via get_random_bytes. @expiries is the number of
+ * periods since the last wakeup: they all count toward the forced reseed.
  */
-static void process_alarm(void)
+static void process_alarm(uint64_t expiries)
 {
 	int entropy = 0, thresh = 0;
 	ssize_t written = 0;
 	static unsigned int phase = 0;
 	static unsigned int wakeups = 0;
+	unsigned int due = force_reseed_wakeups[phase] - wakeups;
 
 	dolog(JENT_LOG_VERBOSE, "Wakeup call for alarm on %s", ENTROPYAVAIL);
 
-	if (++wakeups >= force_reseed_wakeups[phase]) {
+	if (expiries >= due) {
 		wakeups = 0;
-		phase = 1;
+		/* Phase 2 from the first forced reseed on, at its own period */
+		if (!phase) {
+			phase = 1;
+			set_alarm(alarm_period[phase]);
+		}
 		dolog(JENT_LOG_DEBUG, "Force reseed");
 		written = gather_entropy_retry(&Random);
 		dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
-		goto out;
+		return;
 	}
+	wakeups += (unsigned int)expiries;
 
 	entropy = read_entropy_value(Entropy_avail_fd);
 	thresh = read_entropy_value(Entropy_thresh_fd);
 
 	/* An empty pool is the case to act on, not an error. */
 	if (0 > entropy || 0 >= thresh)
-		goto out;
+		return;
 	if (entropy >= thresh) {
 		dolog(JENT_LOG_DEBUG, "Sufficient entropy %d available", entropy);
-		goto out;
+		return;
 	}
 	dolog(JENT_LOG_DEBUG, "Insufficient entropy %d available (threshold %d)",
 	      entropy, thresh);
 	written = gather_entropy_retry(&Random);
 	dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
-out:
-	install_alarm(alarm_period[phase]);
-	return;
 }
 
 /*
- * Wakeup on insufficient entropy on /dev/random
+ * Wait for the alarm, for /dev/random to want more entropy - only that
+ * implements polling, and current kernels never report it writable - and for
+ * a termination signal.
  */
 static void select_fd(void)
 {
-	fd_set fds;
-	int ret = 0;
+	fd_set rfds, wfds;
+	int ret = 0, nfds;
 	ssize_t written = 0;
 	sigset_t blocked, unblocked;
 
 	sigemptyset(&blocked);
-	sigaddset(&blocked, SIGALRM);
 	sigaddset(&blocked, SIGHUP);
 	sigaddset(&blocked, SIGINT);
 	sigaddset(&blocked, SIGQUIT);
@@ -589,21 +608,9 @@ static void select_fd(void)
 
 	while (1) {
 		/*
-		 * Block the signals that drive the daemon for the duration of
-		 * the flag test and the wait, and hand the previous - i.e.
-		 * unblocked - mask to pselect(2). pselect restores that mask
-		 * for as long as it waits and re-blocks before returning, so
-		 * the test below and going to sleep are one atomic operation.
-		 *
-		 * Without this, a signal arriving between the test and the
-		 * wait would set its flag, be gone by the time we sleep, and
-		 * leave the daemon blocked until the next unrelated wakeup -
-		 * on current kernels /dev/random never becomes writable, so a
-		 * missed alarm would stall the daemon indefinitely.
-		 *
-		 * The window is kept narrow on purpose: the signals stay
-		 * unblocked while entropy is gathered below, so a termination
-		 * request is recorded the moment it arrives.
+		 * pselect(2) unblocks the termination signals only while it
+		 * waits, so the flag test and going to sleep are atomic: a
+		 * signal in between would wait for the next wakeup.
 		 */
 		sigprocmask(SIG_BLOCK, &blocked, &unblocked);
 
@@ -613,23 +620,23 @@ static void select_fd(void)
 			/* NOTREACHED */
 		}
 
-		if (Alarm_pending) {
-			Alarm_pending = 0;
-			sigprocmask(SIG_SETMASK, &unblocked, NULL);
-			process_alarm();
-			continue;
+		FD_ZERO(&rfds);
+		FD_ZERO(&wfds);
+		FD_SET(Random.fd, &wfds);
+		nfds = Random.fd + 1;
+		if (-1 != Alarm_fd) {
+			FD_SET(Alarm_fd, &rfds);
+			if (Alarm_fd >= nfds)
+				nfds = Alarm_fd + 1;
 		}
-
-		FD_ZERO(&fds);
 		dolog(JENT_LOG_DEBUG, "Polling /dev/random");
-		FD_SET(Random.fd, &fds);
-		/* only /dev/random implements polling */
-		ret = pselect((Random.fd + 1), NULL, &fds, NULL, NULL,
-			      &unblocked);
+		ret = pselect(nfds, &rfds, &wfds, NULL, NULL, &unblocked);
 
 		sigprocmask(SIG_SETMASK, &unblocked, NULL);
 
-		if (-1 == ret && EINTR != errno) {
+		if (-1 == ret) {
+			if (EINTR == errno)
+				continue;
 			if (exit_on_error) {
 				int errsv = errno;
 
@@ -638,24 +645,22 @@ static void select_fd(void)
 			}
 			dolog(JENT_LOG_ERR, "Select returned with error %s", strerror(errno));
 		}
-		if (0 <= ret) {
+
+		if (-1 != Alarm_fd && FD_ISSET(Alarm_fd, &rfds)) {
+			uint64_t expiries = 0;
+
+			/* Non-blocking: a wakeup without an expiry reads none */
+			if (sizeof(expiries) ==
+			    read(Alarm_fd, &expiries, sizeof(expiries)))
+				process_alarm(expiries);
+		}
+		if (FD_ISSET(Random.fd, &wfds)) {
 			dolog(JENT_LOG_VERBOSE, "Wakeup call for select on /dev/random");
 			written = gather_entropy_retry(&Random);
 			dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random",
 			      written);
 		}
 	}
-}
-
-static void install_alarm(unsigned int secs)
-{
-	if (lrng_present())
-		return;
-	dolog(JENT_LOG_DEBUG, "Install alarm signal handler");
-	if (install_handler(SIGALRM, sig_entropy_avail, 0))
-		dolog(JENT_LOG_ERR, "Cannot install alarm handler: %s",
-		      strerror(errno));
-	alarm(secs);
 }
 
 /*******************************************************************
@@ -701,10 +706,18 @@ void rngd_os_run(struct kernel_rng *rng)
 {
 	(void)rng;
 
-	dolog(JENT_LOG_DEBUG, "Alarm every %u s, forced reseed after %u wakeups; after the first every %u s and %u wakeups",
-	      alarm_period[0], force_reseed_wakeups[0], alarm_period[1],
-	      force_reseed_wakeups[1]);
-	install_alarm(alarm_period[0]);
+	/* After daemonize(), so that the timer is the detached daemon's own */
+	if (!lrng_present()) {
+		Alarm_fd = timerfd_create(CLOCK_MONOTONIC,
+					  TFD_CLOEXEC | TFD_NONBLOCK);
+		if (-1 == Alarm_fd)
+			dolog(JENT_LOG_ERR, "Cannot create the alarm: %s",
+			      strerror(errno));
+		dolog(JENT_LOG_DEBUG, "Alarm every %u s, forced reseed after %u wakeups; after the first every %u s and %u wakeups",
+		      alarm_period[0], force_reseed_wakeups[0],
+		      alarm_period[1], force_reseed_wakeups[1]);
+		set_alarm(alarm_period[0]);
+	}
 	select_fd();
 	/* NOTREACHED */
 	exit(1);
@@ -726,5 +739,9 @@ void rngd_os_dealloc(struct kernel_rng *rng)
 	if (-1 != Entropy_thresh_fd) {
 		close(Entropy_thresh_fd);
 		Entropy_thresh_fd = -1;
+	}
+	if (-1 != Alarm_fd) {
+		close(Alarm_fd);
+		Alarm_fd = -1;
 	}
 }

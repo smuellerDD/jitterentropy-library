@@ -556,16 +556,9 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 
 static ssize_t gather_entropy(struct kernel_rng *rng)
 {
-	sigset_t blocking_set, previous_set;
 	char buf[INJECT_BYTES];
 	const size_t buflen = sizeof(buf);
 	ssize_t ret = 0;
-
-	sigemptyset(&previous_set);
-	sigemptyset(&blocking_set);
-	sigaddset(&blocking_set, SIGALRM);
-
-	sigprocmask(SIG_BLOCK, &blocking_set, &previous_set);
 
 	ret = read_jent(rng, buf, buflen);
 	if (ret < 0)
@@ -588,8 +581,6 @@ out:
 		dealloc();
 		exit((int)-ret);
 	}
-
-	sigprocmask(SIG_SETMASK, &previous_set, NULL);
 
 	/*
 	 * A full injection means the kernel has been seeded. Announcing
@@ -700,10 +691,6 @@ static void sig_term(int sig)
 void process_term(void)
 {
 	dolog(JENT_LOG_DEBUG, "Shutting down cleanly");
-
-	/* Prevent the alarm from interfering with the shutdown */
-	alarm(0);
-	signal(SIGALRM, SIG_IGN);
 
 	dealloc();
 
