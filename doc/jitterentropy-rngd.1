@@ -138,6 +138,13 @@ the time stamp comes from the kernel's clock source; on Linux,
 names it, and it can be changed by writing one of the names in
 .I available_clocksource
 beside it.
+.PP
+With
+.B \-\-generate
+it writes bytes of the Jitter RNG to standard output or a file instead and
+exits: nothing goes to the kernel, and neither root nor
+.I /dev/random
+is needed.
 .SH OPTIONS
 .TP
 .BR \-v ", " \-\-verbose
@@ -285,6 +292,37 @@ or a service of
 .IR Type=oneshot .
 A failed injection is retried as described above; no PID file is written.
 .TP
+.BR \-g ", " \-\-generate " \fIbytes\fR"
+Write
+.I bytes
+bytes of the Jitter RNG to standard output, or to the file of
+.BR \-\-output ,
+and exit without seeding the kernel; the log goes to standard error. The
+Jitter RNG is allocated as for seeding, with
+.BR \-\-flags ,
+.BR \-\-osr ,
+.B \-\-sp800\-90b
+and the options adding to
+.BR \-\-flags .
+A failed read ends the run instead of initializing the Jitter RNG anew, and
+what was written by then stays. 0 is refused, and so are
+.B \-\-oneshot
+and
+.B \-\-status
+with it.
+.TP
+.BR \-\-output " \fIfile\fR"
+The file
+.B \-\-generate
+writes to: created, or truncated when it is a regular file of the user's own
+with no other link, and set to mode 0600 either way. A symbolic link, a hard
+link, a file of another user, a FIFO or a device is refused.
+.TP
+.B \-\-hex
+Have
+.B \-\-generate
+write two lowercase hex digits per byte, with no newline at the end.
+.TP
 .B \-\-exit\-on\-error
 Exit on any error instead of trying to recover, so that a supervising
 monitor can act on it.
@@ -299,7 +337,9 @@ Print the options and exit.
 .BR \-\-version ,
 after
 .B \-\-oneshot
-seeded the kernel, and when the daemon was terminated by
+seeded the kernel, after
+.B \-\-generate
+wrote all its bytes, and when the daemon was terminated by
 .BR SIGTERM ,
 .BR SIGINT ,
 .B SIGQUIT
@@ -311,7 +351,9 @@ opened, a user that cannot be switched to or whose seeds the kernel refuses, a
 sandbox that cannot be entered,
 an invalid option, a
 .B \-\-oneshot
-whose injections all failed, and also after
+whose injections all failed, a
+.B \-\-generate
+whose read or write failed, and also after
 .BR \-\-help .
 .B \-\-status
 exits with a non-zero status after printing the document.
@@ -321,6 +363,8 @@ with
 .B \-\-exit\-on\-error
 or without, under
 .B \-\-oneshot
+and
+.B \-\-generate
 as well.
 .PP
 With
@@ -347,7 +391,9 @@ to it once the kernel accepted an injection for the first time, as
 describes.
 .TP
 .BR NO_COLOR ", " TERM
-The log on standard output is colored when that is a terminal, unless
+The log on standard output - on standard error with
+.B \-\-generate
+- is colored when that is a terminal, unless
 .B NO_COLOR
 is set or
 .B TERM
@@ -393,6 +439,8 @@ from boot.
 .SH NOTES
 Without
 .B \-\-pid
+and
+.B \-\-output
 the daemon writes to no file system object and runs on a file system mounted
 read-only.
 .PP

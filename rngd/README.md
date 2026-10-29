@@ -80,3 +80,12 @@ demands that a Jitter RNG which reported such a failure is not used any
 more - on a host in FIPS mode as well, whose mode the container shares - drop
 the restart policy, as no Docker policy tells this exit from others, or have
 a supervising monitor act on the exit status.
+
+## Random bytes
+
+	jitterentropy-rngd --generate 32 --hex
+	jitterentropy-rngd --generate 4096 --output seed.bin
+
+write bytes of the Jitter RNG to standard output or to a file, as hex digits
+with `--hex`, and exit without seeding the kernel - neither root nor
+`/dev/random` is needed, and the log goes to standard error.

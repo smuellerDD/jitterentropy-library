@@ -80,4 +80,10 @@ if(BUILD_TESTING)
     add_test(NAME rngd-version COMMAND jitterentropy-rngd --version)
     set_tests_properties(rngd-version PROPERTIES
         PASS_REGULAR_EXPRESSION "jitterentropy-rngd ${PROJECT_VERSION}")
+    # Nor does --generate, which writes the bytes out instead of seeding.
+    add_test(NAME rngd-generate
+             COMMAND ${CMAKE_COMMAND}
+                     -DRNGD=$<TARGET_FILE:jitterentropy-rngd>
+                     -DDIR=${CMAKE_CURRENT_BINARY_DIR}
+                     -P ${PROJECT_SOURCE_DIR}/tests/rngd/generate.cmake)
 endif()

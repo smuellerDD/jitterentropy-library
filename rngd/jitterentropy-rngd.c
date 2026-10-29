@@ -66,10 +66,8 @@ static unsigned int jent_flags_add = 0;
 static int status = 0;
 
 /*
- * When set, log messages are handed to syslog(3) instead of being printed to
- * stdout. This is what makes logging useful for a backgrounded daemon at all:
- * daemonize() redirects stdout and stderr to /dev/null, so without syslog
- * every message is discarded once the daemon detaches.
+ * When set, log messages go to syslog(3) instead of log_stream(). A detached
+ * daemon's stdout and stderr are /dev/null, which would discard them.
  */
 static int use_syslog = 0;
 
@@ -104,6 +102,13 @@ static int oneshot = 0;
 
 /* Set once the kernel accepted a full injection */
 static int seeded = 0;
+
+/* --generate: write this many bytes of the Jitter RNG out and exit */
+static unsigned int generate = 0;
+/* --output: the file --generate writes to, stdout without it */
+static const char *output = NULL;
+/* --hex: --generate writes two hex digits per byte */
+static int hex = 0;
 
 struct kernel_rng Random = {
 	/*.fd = */ -1,
@@ -155,6 +160,10 @@ void usage(void)
 	fprintf(stderr, "\t           \tsame flags as used for runtime\n");
 	fprintf(stderr, "\t   --exit-on-error\tCause the daemon to exit on errors\n");
 	fprintf(stderr, "\t   --oneshot\tSeed the kernel once and exit\n");
+	fprintf(stderr, "\t-g --generate\tWrite this many random bytes and exit,\n");
+	fprintf(stderr, "\t\t\tseeding nothing\n");
+	fprintf(stderr, "\t   --output\tFile --generate writes to (default stdout)\n");
+	fprintf(stderr, "\t   --hex\t--generate writes hex digits\n");
 	rngd_os_usage();
 	exit(1);
 }
@@ -196,6 +205,8 @@ enum {
 	OPT_EXIT_ON_ERROR,
 	OPT_FIPS,
 	OPT_ONESHOT,
+	OPT_OUTPUT,
+	OPT_HEX,
 };
 
 static const struct option rngd_options[] = {
@@ -215,6 +226,9 @@ static const struct option rngd_options[] = {
 	{"disable-internal-timer", 0, 0, 'I'},
 	{"fips", 0, 0, OPT_FIPS},
 	{"oneshot", 0, 0, OPT_ONESHOT},
+	{"generate", 1, 0, 'g'},
+	{"output", 1, 0, OPT_OUTPUT},
+	{"hex", 0, 0, OPT_HEX},
 };
 
 /* Room for the daemon's options and the operating system's */
@@ -238,7 +252,7 @@ static void parse_opts(int argc, char *argv[])
 		opts[n++] = rngd_os_options[i];
 	}
 	memset(&opts[n], 0, sizeof(opts[n]));
-	snprintf(optstring, sizeof(optstring), "svp:hf:o:lFniI%s",
+	snprintf(optstring, sizeof(optstring), "svp:hf:o:lFniIg:%s",
 		 rngd_os_optstring);
 
 	while (1) {
@@ -297,6 +311,17 @@ static void parse_opts(int argc, char *argv[])
 		case OPT_ONESHOT:
 			oneshot = 1;
 			break;
+		case 'g':
+			generate = parse_uint(optarg);
+			if (!generate)
+				usage();
+			break;
+		case OPT_OUTPUT:
+			output = optarg;
+			break;
+		case OPT_HEX:
+			hex = 1;
+			break;
 		case '?':
 			usage();
 			break;
@@ -304,6 +329,12 @@ static void parse_opts(int argc, char *argv[])
 			rngd_os_parse(c, optarg);
 		}
 	}
+
+	/* --generate is a run of its own, which --output and --hex shape */
+	if ((output || hex) && !generate)
+		usage();
+	if (generate && (oneshot || status))
+		usage();
 
 	jent_flags |= jent_flags_add;
 }
@@ -317,15 +348,15 @@ static void parse_opts(int argc, char *argv[])
 
 static int use_color = 0;
 
+/* The log unless --syslog: stdout, or stderr if --generate's bytes take it */
+static FILE *log_stream(void)
+{
+	return generate ? stderr : stdout;
+}
+
 /*
- * Determine whether the log may carry ANSI escape sequences.
- *
- * Colors are only emitted when stdout is a terminal that is expected to
- * interpret them. Writing escape sequences into a file or a pipe would corrupt
- * the log for anything that later reads it, which is why this is detected
- * rather than enabled unconditionally.
- *
- * This is re-evaluated after daemonize() redirects stdout to /dev/null.
+ * Colors only on a terminal expected to interpret them: escape sequences would
+ * corrupt a file or a pipe for anything that later reads it.
  */
 static void detect_color(void)
 {
@@ -334,7 +365,7 @@ static void detect_color(void)
 	use_color = 0;
 
 	/* Escape sequences are meaningless unless a terminal reads them */
-	if (!isatty(STDOUT_FILENO))
+	if (!isatty(fileno(log_stream())))
 		return;
 
 	/* Honour the NO_COLOR convention, see https://no-color.org/ */
@@ -433,12 +464,14 @@ static void vdolog(int severity, const char *fmt, va_list args)
 			logtime(now, sizeof(now));
 
 			if (use_color) {
-				printf("[%s%s%s - jitterentropy-rngd - %s%s%s] %s\n",
-				       COL_DIM, now, COL_RESET,
-				       col, sev, COL_RESET, msg);
+				fprintf(log_stream(),
+					"[%s%s%s - jitterentropy-rngd - %s%s%s] %s\n",
+					COL_DIM, now, COL_RESET,
+					col, sev, COL_RESET, msg);
 			} else {
-				printf("[%s - jitterentropy-rngd - %s] %s\n",
-				       now, sev, msg);
+				fprintf(log_stream(),
+					"[%s - jitterentropy-rngd - %s] %s\n",
+					now, sev, msg);
 			}
 		}
 	}
@@ -809,6 +842,122 @@ static int alloc(void)
 	return 0;
 }
 
+/*******************************************************************
+ * --generate
+ *******************************************************************/
+
+/* Bytes of the Jitter RNG --generate reads at a time */
+#define GENERATE_CHUNK	1024
+
+/* All @len bytes of @buf to @fd: 0 or a -errno */
+static int write_all(int fd, const char *buf, size_t len)
+{
+	while (len) {
+		ssize_t ret = write(fd, buf, len);
+
+		if (ret < 0 && errno == EINTR)
+			continue;
+		if (ret < 0)
+			return -errno;
+		if (ret == 0)
+			return -EIO;
+		buf += ret;
+		len -= (size_t)ret;
+	}
+
+	return 0;
+}
+
+/*
+ * --generate: random bytes to stdout or --output, raw or as hex digits. A
+ * failed read ends the run rather than re-initializing: what was written
+ * stays, and the exit status tells.
+ */
+static void generate_bytes(void)
+{
+	static const char digits[] = "0123456789abcdef";
+	char buf[GENERATE_CHUNK], hexbuf[2 * GENERATE_CHUNK];
+	const char *name = output ? output : "stdout";
+	unsigned int left = generate;
+	int fd = STDOUT_FILENO, ret;
+
+	ret = jent_entropy_init_ex(jent_osr, jent_flags);
+	if (ret)
+		dolog(JENT_LOG_ERR, "The initialization of CPU Jitter RNG failed with error code %d",
+		      ret);
+
+	/* In Random, so that dealloc() frees it on every exit */
+	Random.ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
+	if (!Random.ec)
+		dolog(JENT_LOG_ERR, "Allocation of entropy collector failed");
+
+	if (output) {
+		struct stat st;
+
+		/*
+		 * Nothing planted to read the bytes or to clobber a file:
+		 * O_TRUNC waits for the check, and O_NONBLOCK keeps a FIFO
+		 * without a reader from blocking the open.
+		 */
+		fd = open(output, O_WRONLY|O_CREAT|O_NOFOLLOW|O_NONBLOCK,
+			  S_IRUSR|S_IWUSR);
+		if (-1 == fd)
+			dolog(JENT_LOG_ERR, "Cannot open %s: %s", output,
+			      strerror(errno));
+		if (fstat(fd, &st))
+			dolog(JENT_LOG_ERR, "Cannot stat %s: %s", output,
+			      strerror(errno));
+		if (!S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
+		    st.st_nlink != 1)
+			dolog(JENT_LOG_ERR, "%s is not a regular file of user %u with a single link",
+			      output, (unsigned int)geteuid());
+		if (fchmod(fd, S_IRUSR|S_IWUSR) || ftruncate(fd, 0) ||
+		    -1 == fcntl(fd, F_SETFL, 0))
+			dolog(JENT_LOG_ERR, "Cannot prepare %s: %s", output,
+			      strerror(errno));
+	}
+
+	while (left) {
+		size_t len = left < sizeof(buf) ? left : sizeof(buf), i;
+		const char *data = buf;
+		size_t datalen = len;
+		ssize_t got = read_jent(&Random, buf, len);
+
+		if (got < 0 || (size_t)got != len)
+			break;
+
+		if (hex) {
+			for (i = 0; i < len; i++) {
+				unsigned char c = (unsigned char)buf[i];
+
+				hexbuf[2 * i] = digits[c >> 4];
+				hexbuf[2 * i + 1] = digits[c & 0xf];
+			}
+			data = hexbuf;
+			datalen = 2 * len;
+		}
+
+		ret = write_all(fd, data, datalen);
+		if (ret)
+			break;
+		left -= (unsigned int)len;
+	}
+
+	memset_secure(buf, 0, sizeof(buf));
+	memset_secure(hexbuf, 0, sizeof(hexbuf));
+
+	if (left && !ret)
+		dolog(JENT_LOG_ERR, "Reading the Jitter RNG failed after %u of %u bytes",
+		      generate - left, generate);
+	if (!ret && output && close(fd))
+		ret = -errno;
+	if (ret)
+		dolog(JENT_LOG_ERR, "Cannot write to %s: %s", name,
+		      strerror(-ret));
+
+	dolog(JENT_LOG_VERBOSE, "%u bytes to %s", generate, name);
+}
+
 static void create_pid_file(const char *pid_file)
 {
 	char pid_str[12];	/* max. integer length + '\n' + null */
@@ -937,9 +1086,10 @@ int main(int argc, char *argv[])
 {
 	int ret;
 
-	detect_color();
-
 	parse_opts(argc, argv);
+
+	/* After the options: --generate moves the log to stderr */
+	detect_color();
 
 	/*
 	 * Establish the syslog connection before anything can log, and before
@@ -949,6 +1099,13 @@ int main(int argc, char *argv[])
 	 */
 	if (use_syslog)
 		openlog("jitterentropy-rngd", LOG_PID | LOG_NDELAY, LOG_DAEMON);
+
+	/* Before the operating system's part: the kernel takes nothing here */
+	if (generate) {
+		generate_bytes();
+		dealloc();
+		return 0;
+	}
 
 	rngd_os_start();
 

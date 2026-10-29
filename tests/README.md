@@ -346,7 +346,11 @@ permanent cutoff already has.
 ## The daemon
 
 With `-DENABLE_RNGD=ON`, `rngd-version` runs `jitterentropy-rngd --version`,
-which needs neither root nor the kernel.
+and `rngd-generate` (`rngd/generate.cmake`) has `--generate` write raw bytes
+and hex digits to a file and to stdout, checks their count and that the log
+stays out of them, that the options it does not go with and `0` are refused,
+and that `--output` refuses a symbolic link, a hard link and a FIFO and
+overwrites a file of the caller's own. Neither needs root or the kernel.
 
 ## With no operating system
 
