@@ -343,6 +343,7 @@ static void parse_opts(int argc, char *argv[])
 #define COL_RESET	"\033[0m"
 #define COL_DIM		"\033[2m"
 #define COL_CYAN	"\033[36m"
+#define COL_GREEN	"\033[32m"
 #define COL_YELLOW	"\033[33m"
 #define COL_RED		"\033[1;31m"
 
@@ -445,6 +446,11 @@ static void vdolog(int severity, const char *fmt, va_list args)
 			col = COL_RED;
 			prio = LOG_ERR;
 			break;
+		case JENT_LOG_NOTICE:
+			sev = "Notice";
+			col = COL_GREEN;
+			prio = LOG_NOTICE;
+			break;
 		default:
 			sev = "Unknown";
 			col = COL_RESET;
@@ -473,6 +479,8 @@ static void vdolog(int severity, const char *fmt, va_list args)
 					"[%s - jitterentropy-rngd - %s] %s\n",
 					now, sev, msg);
 			}
+			/* Fully buffered on a pipe, such as the journal's */
+			fflush(log_stream());
 		}
 	}
 }
@@ -514,16 +522,12 @@ static inline void memset_secure(void *s, int c, size_t n)
  * entropy handler functions
  *******************************************************************/
 
-/*
- * The status document of the Jitter RNG @ec at verbose level, @when it was
- * initialized: a line of the log per line of the document, which a single
- * message would not hold.
- */
-static void log_status(struct rand_data *ec, const char *when)
+/* The status of @ec, taken @when, by line: it exceeds a single message */
+static void log_status(struct rand_data *ec, const char *when, int severity)
 {
 	char buf[4096], *line, *saveptr = NULL;
 
-	if (Verbosity < JENT_LOG_VERBOSE)
+	if (severity > Verbosity)
 		return;
 
 	if (jent_status(ec, buf, sizeof(buf))) {
@@ -531,10 +535,20 @@ static void log_status(struct rand_data *ec, const char *when)
 		return;
 	}
 
-	dolog(JENT_LOG_VERBOSE, "Status of the Jitter RNG %s:", when);
+	dolog(severity, "Status of the Jitter RNG %s:", when);
 	for (line = strtok_r(buf, "\n", &saveptr); line;
 	     line = strtok_r(NULL, "\n", &saveptr))
-		dolog(JENT_LOG_VERBOSE, "%s", line);
+		dolog(severity, "%s", line);
+}
+
+/* SIGUSR1: the status of the Jitter RNG, whatever the verbosity */
+void process_status(void)
+{
+	if (!Random.ec) {
+		dolog(JENT_LOG_NOTICE, "No Jitter RNG to report the status of: its re-initialization failed");
+		return;
+	}
+	log_status(Random.ec, "on SIGUSR1", JENT_LOG_NOTICE);
 }
 
 static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
@@ -555,7 +569,8 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 	/* jent_read_entropy_safe() replaces the collector to recover */
 	if (rng->ec &&
 	    jent_entropy_collector_reinitializations(rng->ec) != reinits)
-		log_status(rng->ec, "after it re-initialized itself");
+		log_status(rng->ec, "after it re-initialized itself",
+			   JENT_LOG_VERBOSE);
 
 	if (ret >= 0)
 		return ret;
@@ -663,7 +678,7 @@ static int realloc_jent(struct kernel_rng *rng)
 		dolog(JENT_LOG_WARN, "Allocation of entropy collector failed");
 		return -EAGAIN;
 	}
-	log_status(rng->ec, "after its re-initialization");
+	log_status(rng->ec, "after its re-initialization", JENT_LOG_VERBOSE);
 
 	return 0;
 }
@@ -814,7 +829,7 @@ static int alloc_rng(struct kernel_rng *rng)
 		return -EAGAIN;
 	}
 
-	log_status(rng->ec, "after its initialization");
+	log_status(rng->ec, "after its initialization", JENT_LOG_VERBOSE);
 
 	rng->fd = open(rng->dev, O_WRONLY);
 	if (-1 == rng->fd) {
@@ -911,7 +926,7 @@ static void generate_bytes(void)
 	Random.ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
 	if (!Random.ec)
 		dolog(JENT_LOG_ERR, "Allocation of entropy collector failed");
-	log_status(Random.ec, "after its initialization");
+	log_status(Random.ec, "after its initialization", JENT_LOG_VERBOSE);
 
 	if (output) {
 		struct stat st;

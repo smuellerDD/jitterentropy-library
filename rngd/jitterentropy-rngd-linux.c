@@ -50,6 +50,7 @@
 #include <stdint.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
 #include <sys/un.h>
@@ -528,6 +529,14 @@ static int read_entropy_value(int fd)
  */
 static int Alarm_fd = -1;
 
+/*
+ * SIGUSR1, which logs the status of the Jitter RNG: blocked from
+ * rngd_os_start() on and read from this signalfd, which select_fd() waits for
+ * as well. A signal arriving before is kept pending rather than ending the
+ * daemon, as SIGUSR1 does by default.
+ */
+static int Status_fd = -1;
+
 /* Let the alarm go off every @secs seconds from now on. */
 static void set_alarm(unsigned int secs)
 {
@@ -629,6 +638,9 @@ static void select_fd(void)
 			if (Alarm_fd >= nfds)
 				nfds = Alarm_fd + 1;
 		}
+		FD_SET(Status_fd, &rfds);
+		if (Status_fd >= nfds)
+			nfds = Status_fd + 1;
 		dolog(JENT_LOG_DEBUG, "Polling /dev/random");
 		ret = pselect(nfds, &rfds, &wfds, NULL, NULL, &unblocked);
 
@@ -654,6 +666,16 @@ static void select_fd(void)
 			    read(Alarm_fd, &expiries, sizeof(expiries)))
 				process_alarm(expiries);
 		}
+		if (FD_ISSET(Status_fd, &rfds)) {
+			struct signalfd_siginfo si;
+			int asked = 0;
+
+			/* Signals sent meanwhile asked for the same */
+			while (sizeof(si) == read(Status_fd, &si, sizeof(si)))
+				asked = 1;
+			if (asked)
+				process_status();
+		}
 		if (FD_ISSET(Random.fd, &wfds)) {
 			dolog(JENT_LOG_VERBOSE, "Wakeup call for select on /dev/random");
 			written = gather_entropy_retry(&Random);
@@ -667,10 +689,23 @@ static void select_fd(void)
  * the daemon's hooks
  *******************************************************************/
 
+/* SIGUSR1 alone, for Status_fd */
+static void status_signals(sigset_t *set)
+{
+	sigemptyset(set);
+	sigaddset(set, SIGUSR1);
+}
+
 void rngd_os_start(void)
 {
+	sigset_t usr1;
+
 	if (geteuid())
 		dolog(JENT_LOG_ERR, "Program must start as root!");
+
+	/* Before the startup of the Jitter RNG, which takes its time */
+	status_signals(&usr1);
+	sigprocmask(SIG_BLOCK, &usr1, NULL);
 }
 
 int rngd_os_alloc(struct kernel_rng *rng)
@@ -704,7 +739,16 @@ int rngd_os_alloc(struct kernel_rng *rng)
 
 void rngd_os_run(struct kernel_rng *rng)
 {
+	sigset_t usr1;
+
 	(void)rng;
+
+	/* After daemonize(), as the alarm below */
+	status_signals(&usr1);
+	Status_fd = signalfd(-1, &usr1, SFD_CLOEXEC | SFD_NONBLOCK);
+	if (-1 == Status_fd)
+		dolog(JENT_LOG_ERR, "Cannot create the signalfd for SIGUSR1: %s",
+		      strerror(errno));
 
 	/* After daemonize(), so that the timer is the detached daemon's own */
 	if (!lrng_present()) {
@@ -743,5 +787,9 @@ void rngd_os_dealloc(struct kernel_rng *rng)
 	if (-1 != Alarm_fd) {
 		close(Alarm_fd);
 		Alarm_fd = -1;
+	}
+	if (-1 != Status_fd) {
+		close(Status_fd);
+		Status_fd = -1;
 	}
 }

@@ -57,6 +57,8 @@
 #define JENT_LOG_VERBOSE	2
 #define JENT_LOG_WARN	1
 #define JENT_LOG_ERR		0
+/* Logged at any verbosity: what was asked for, as by SIGUSR1 */
+#define JENT_LOG_NOTICE	(-1)
 
 /* Not errnos, which differ per system and reach into a shell's 128+n */
 #define RNGD_EXIT_PERMANENT	2	/* permanent health test failure */
@@ -90,6 +92,7 @@ int install_handler(int sig, void (*handler)(int), int flags);
 void dealloc(void);
 ssize_t gather_entropy_retry(struct kernel_rng *rng);
 void process_term(void) __attribute__((noreturn));
+void process_status(void);
 
 /*
  * The operating system's part. Its options extend the daemon's: short ones in

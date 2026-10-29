@@ -394,6 +394,25 @@ or of
 .BR pselect (2)
 waiting for the next occasion. Every other failure - opening a device, the PID
 file, the startup of the Jitter RNG - exits with 1, with the option or without.
+.SH SIGNALS
+.TP
+.BR SIGTERM ", " SIGINT ", " SIGQUIT ", " SIGHUP
+Shut the daemon down cleanly, with exit status 0.
+.TP
+.B SIGUSR1
+Linux only. Log the status document of
+.BR jent_status (3)
+for the Jitter RNG in use, whatever
+.B \-\-verbose
+says, at the
+.I notice
+level of
+.BR syslog (3)
+with
+.BR \-\-syslog .
+The daemon reads the signal from a
+.BR signalfd (2);
+one sent while it starts up waits until it runs, rather than ending it.
 .SH ENVIRONMENT
 .TP
 .B NOTIFY_SOCKET
