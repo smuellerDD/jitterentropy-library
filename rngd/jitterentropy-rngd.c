@@ -1082,9 +1082,35 @@ static void daemonize(void)
 }
 
 
+/*
+ * Open /dev/null on each closed standard descriptor: /dev/random opened as 1
+ * would give way to the /dev/null of daemonize(), and the syslog socket as 1
+ * would receive the bytes of --generate. Returns the mask of those closed.
+ */
+static unsigned int open_std_fds(void)
+{
+	unsigned int closed = 0;
+	int fd;
+
+	for (fd = STDIN_FILENO; fd <= STDERR_FILENO; fd++) {
+		if (-1 != fcntl(fd, F_GETFD) || EBADF != errno)
+			continue;
+		/* The lowest free number, which is fd */
+		if (open("/dev/null", O_RDWR) != fd)
+			exit(1);
+		closed |= 1U << fd;
+	}
+
+	return closed;
+}
+
 int main(int argc, char *argv[])
 {
+	unsigned int closed_fds;
 	int ret;
+
+	/* Before anything opens a file */
+	closed_fds = open_std_fds();
 
 	parse_opts(argc, argv);
 
@@ -1102,6 +1128,9 @@ int main(int argc, char *argv[])
 
 	/* Before the operating system's part: the kernel takes nothing here */
 	if (generate) {
+		/* Not into the /dev/null standing in for a closed stdout */
+		if (!output && (closed_fds & (1U << STDOUT_FILENO)))
+			dolog(JENT_LOG_ERR, "Standard output is closed");
 		generate_bytes();
 		dealloc();
 		return 0;

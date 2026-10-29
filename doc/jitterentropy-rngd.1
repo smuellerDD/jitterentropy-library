@@ -309,7 +309,8 @@ what was written by then stays. 0 is refused, and so are
 .B \-\-oneshot
 and
 .B \-\-status
-with it.
+with it, and a closed standard output without
+.BR \-\-output .
 .TP
 .BR \-\-output " \fIfile\fR"
 The file
@@ -443,6 +444,15 @@ and
 .B \-\-output
 the daemon writes to no file system object and runs on a file system mounted
 read-only.
+.PP
+Standard input, output and error that are closed when the daemon starts are
+opened on
+.IR /dev/null ,
+so that neither
+.I /dev/random
+nor the
+.BR syslog (3)
+socket takes their numbers.
 .PP
 The output of the Jitter RNG is considered to hold full entropy, which is why
 the daemon claims it for every byte it injects where the kernel takes a claim:
