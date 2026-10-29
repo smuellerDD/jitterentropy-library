@@ -42,6 +42,10 @@
  * NetBSD, where it stays root for them. There is nothing to wait for in
  * between.
  *
+ * SIGUSR1 logs the status of the Jitter RNG and SIGUSR2 writes a seed now. No
+ * signalfd here: both stay blocked but while the daemon waits, so that their
+ * handler, which notes them, runs in pselect(2) alone.
+ *
  * It detaches as on Linux unless --foreground, forking after the first seed.
  * A forked child does not inherit the memory locks of its parent, which FIPS
  * and NTG.1 mode take, so the rc.d scripts of FreeBSD and OpenBSD and the
@@ -81,6 +85,13 @@ static const char *user = DEFAULT_USER;
 
 /* Set once drop_privileges() switched to user, for good */
 static int dropped = 0;
+
+/*
+ * SIGUSR1 and SIGUSR2, noted by sig_user(): unblocked only while rngd_os_run()
+ * waits, so that one arriving before does not end the daemon, as by default.
+ */
+static volatile sig_atomic_t Status_pending = 0;
+static volatile sig_atomic_t Reseed_pending = 0;
 
 /*******************************************************************
  * options
@@ -234,11 +245,81 @@ static void sandbox(int fd)
 }
 
 /*******************************************************************
+ * the signals and the wait
+ *******************************************************************/
+
+static void sig_user(int sig)
+{
+	if (SIGUSR1 == sig)
+		Status_pending = 1;
+	else
+		Reseed_pending = 1;
+}
+
+/* SIGUSR1 and SIGUSR2 */
+static void user_signals(sigset_t *set)
+{
+	sigemptyset(set);
+	sigaddset(set, SIGUSR1);
+	sigaddset(set, SIGUSR2);
+}
+
+/*
+ * SIGUSR2: a seed now, as each interval writes one - which leaves the
+ * interval as it runs. The outcome is logged whatever the verbosity, as
+ * asked for.
+ */
+static void process_reseed(struct kernel_rng *rng)
+{
+	ssize_t written = gather_entropy_retry(rng);
+
+	if (written > 0)
+		dolog(JENT_LOG_NOTICE, "Seeded %s with %zd bytes, as SIGUSR2 asked",
+		      rng->dev, written);
+	else
+		dolog(JENT_LOG_NOTICE, "The seed SIGUSR2 asked for failed: %zd",
+		      written);
+}
+
+/* The interval from now on: when the next seed is due */
+static void set_due(struct timespec *due)
+{
+	clock_gettime(CLOCK_MONOTONIC, due);
+	due->tv_sec += (time_t)interval;
+}
+
+/*
+ * What is left until @due, none once it passed: a full interval after each
+ * signal would put the seed off for as long as the signals keep coming.
+ */
+static void time_left(const struct timespec *due, struct timespec *left)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	left->tv_sec = due->tv_sec - now.tv_sec;
+	left->tv_nsec = due->tv_nsec - now.tv_nsec;
+	if (left->tv_nsec < 0) {
+		left->tv_sec--;
+		left->tv_nsec += 1000000000L;
+	}
+	if (left->tv_sec < 0) {
+		left->tv_sec = 0;
+		left->tv_nsec = 0;
+	}
+}
+
+/*******************************************************************
  * the daemon's hooks
  *******************************************************************/
 
 void rngd_os_start(void)
 {
+	sigset_t usr;
+
+	/* Before the startup of the Jitter RNG, which takes its time */
+	user_signals(&usr);
+	sigprocmask(SIG_BLOCK, &usr, NULL);
 }
 
 int rngd_os_alloc(struct kernel_rng *rng)
@@ -254,7 +335,13 @@ void rngd_os_seeded(void)
 
 void rngd_os_run(struct kernel_rng *rng)
 {
-	sigset_t blocked, unblocked;
+	sigset_t blocked, unblocked, waiting;
+	struct timespec due;
+
+	if (install_handler(SIGUSR1, sig_user, 0) ||
+	    install_handler(SIGUSR2, sig_user, 0))
+		dolog(JENT_LOG_ERR, "Cannot install the handler of SIGUSR1 and SIGUSR2: %s",
+		      strerror(errno));
 
 	/* The zone file is a file: read it while there still is a file system. */
 	tzset();
@@ -267,6 +354,8 @@ void rngd_os_run(struct kernel_rng *rng)
 	sigaddset(&blocked, SIGINT);
 	sigaddset(&blocked, SIGQUIT);
 	sigaddset(&blocked, SIGTERM);
+
+	set_due(&due);
 
 	while (1) {
 		struct timespec ts;
@@ -282,9 +371,13 @@ void rngd_os_run(struct kernel_rng *rng)
 			/* NOTREACHED */
 		}
 
-		ts.tv_sec = (time_t)interval;
-		ts.tv_nsec = 0;
-		ret = pselect(0, NULL, NULL, NULL, &ts, &unblocked);
+		/* The user signals as well, blocked everywhere else */
+		waiting = unblocked;
+		sigdelset(&waiting, SIGUSR1);
+		sigdelset(&waiting, SIGUSR2);
+
+		time_left(&due, &ts);
+		ret = pselect(0, NULL, NULL, NULL, &ts, &waiting);
 
 		sigprocmask(SIG_SETMASK, &unblocked, NULL);
 
@@ -298,10 +391,21 @@ void rngd_os_run(struct kernel_rng *rng)
 			dolog(JENT_LOG_ERR, "pselect returned with error %s",
 			      strerror(errno));
 		}
+
+		/* Signals sent meanwhile asked for the same */
+		if (Status_pending) {
+			Status_pending = 0;
+			process_status();
+		}
+		if (Reseed_pending) {
+			Reseed_pending = 0;
+			process_reseed(rng);
+		}
 		if (0 == ret) {
 			written = gather_entropy_retry(rng);
 			dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s",
 			      written, rng->dev);
+			set_due(&due);
 		}
 	}
 }

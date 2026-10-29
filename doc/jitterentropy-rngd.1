@@ -407,7 +407,7 @@ file, the startup of the Jitter RNG - exits with 1, with the option or without.
 Shut the daemon down cleanly, with exit status 0.
 .TP
 .B SIGUSR1
-Linux only. Log the status document of
+Log the status document of
 .BR jent_status (3)
 for the Jitter RNG in use, whatever
 .B \-\-verbose
@@ -417,19 +417,25 @@ level of
 .BR syslog (3)
 with
 .BR \-\-syslog .
-The daemon reads the signal from a
+One sent while the daemon starts up waits until it runs, rather than ending
+it. On Linux the daemon reads the signal from a
 .BR signalfd (2);
-one sent while it starts up waits until it runs, rather than ending it.
+on FreeBSD, NetBSD, OpenBSD and macOS it keeps it blocked except while it
+waits for the next seed, which the signal does not put off.
 .TP
 .B SIGUSR2
-Linux only. Reseed the kernel now: inject 64 bytes of the Jitter RNG and
+Seed the kernel now. On Linux: inject 64 bytes of the Jitter RNG and
 request a reseed of the kernel's random number generator
 .RB ( RNDRESEEDCRNG ),
 as the alarm forces one. On a kernel with the LRNG the injection alone: the
-LRNG reseeds by itself, and no reseed is requested of it. The outcome is
-logged at the
+LRNG reseeds by itself, and no reseed is requested of it. On FreeBSD, NetBSD,
+OpenBSD and macOS: write 64 bytes to
+.IR /dev/random ,
+as each
+.B \-\-interval
+does. The schedule stays as it was, the outcome is logged at the
 .I notice
-level, and the signal is read as
+level, and the signal is handled as
 .BR SIGUSR1 .
 .SH ENVIRONMENT
 .TP
