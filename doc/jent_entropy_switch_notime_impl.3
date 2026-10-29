@@ -162,8 +162,32 @@ T{
 T}	MT-Safe race:ctx
 .TE
 .ad
+.SH NOTES
+The counting thread needs a CPU of its own: its count measures the work
+between two time stamps only while it runs alongside the thread taking them.
+The library's own thread handler checks for a second CPU when the timer-less
+mode is set up - in
+.BR jent_entropy_init (3)
+and
+.BR jent_entropy_collector_alloc (3),
+counting the CPUs the calling thread may run on - and not again when a read
+starts the counting thread. A reader left with a single CPU by then can have
+the counting thread on that same CPU: when the process is confined after the
+allocation, by an affinity change, a cpuset or a job object, and on Linux,
+where the counting thread inherits the affinity of the thread starting it,
+also when the reading thread alone is pinned to one CPU. Every time stamp
+then waits for the scheduler to switch between the two threads, and measures
+that switch rather than the work. The read still succeeds, only far more
+slowly - in one measurement on Windows after almost six minutes instead of
+10 ms, with no health test failure recorded. Outside Linux and Windows the
+CPU count is the number of online CPUs that
+.BR sysconf (3)
+reports, which need not reflect a cpuset confining the process, so there the
+check can pass at the allocation already. A caller of the timer-less mode has
+to read from a thread that may run on at least two CPUs.
 .SH SEE ALSO
 .BR jent_entropy_collector_alloc (3),
 .BR jent_entropy_init (3),
 .BR jitterentropy (3),
-.BR pthread_create (3)
+.BR pthread_create (3),
+.BR sysconf (3)
