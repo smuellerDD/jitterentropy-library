@@ -97,7 +97,9 @@ static int foreground = 0;
  * * Errors of pselect(2) waiting for the next occasion
  *
  * Every other failure - open(2), the PID file, fork(2), the startup of the
- * Jitter RNG - ends the daemon with 1, with or without this option.
+ * Jitter RNG - ends the daemon with 1, with or without this option. A
+ * permanent health test failure ends it with RNGD_EXIT_PERMANENT, with or
+ * without this option as well, see read_jent().
  */
 static int exit_on_error = 0;
 
@@ -181,12 +183,17 @@ static unsigned int force_reseed_wakeups[2] = {
 #define JENT_LOG_WARN	1
 #define JENT_LOG_ERR		0
 
+/* Not errnos, which differ per system and reach into a shell's 128+n */
+#define RNGD_EXIT_PERMANENT	2	/* permanent health test failure */
+
 static void install_alarm(unsigned int secs);
 static void dealloc(void);
 static int alloc(void);
 static void dealloc_rng(struct kernel_rng *rng);
 static void dolog(int severity, const char *fmt, ...)
 	__attribute__((format(printf, 2, 3)));
+static void dolog_exit(int status, const char *fmt, ...)
+	__attribute__((format(printf, 2, 3), noreturn));
 
 static unsigned long kern_maj = ULONG_MAX, kern_minor, kern_patchlevel;
 
@@ -616,9 +623,8 @@ unknown:
 	snprintf(buf, buflen, "<no timestamp>");
 }
 
-static void dolog(int severity, const char *fmt, ...)
+static void vdolog(int severity, const char *fmt, va_list args)
 {
-	va_list args;
 	char msg[1024];
 	const char *sev, *col;
 	char now[32];
@@ -626,9 +632,7 @@ static void dolog(int severity, const char *fmt, ...)
 	if (severity <= Verbosity) {
 		int prio;
 
-		va_start(args, fmt);
 		vsnprintf(msg, sizeof(msg), fmt, args);
-		va_end(args);
 
 		switch (severity) {
 		case JENT_LOG_DEBUG:
@@ -679,11 +683,33 @@ static void dolog(int severity, const char *fmt, ...)
 			}
 		}
 	}
+}
+
+static void dolog(int severity, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	vdolog(severity, fmt, args);
+	va_end(args);
 
 	if (JENT_LOG_ERR == severity) {
 		dealloc();
 		exit(1);
 	}
+}
+
+/* An error that ends the daemon with a status other than dolog()'s 1 */
+static void dolog_exit(int status, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	vdolog(JENT_LOG_ERR, fmt, args);
+	va_end(args);
+
+	dealloc();
+	exit(status);
 }
 
 static inline void memset_secure(void *s, int c, size_t n)
@@ -869,6 +895,25 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 	if (ret >= 0)
 		return ret;
 
+	switch (ret) {
+	/*
+	 * A permanent health test failure: the noise source must not be used
+	 * any more. gather_entropy_retry() would re-initialize the Jitter RNG
+	 * as for any other failure, and the new instance, its health tests
+	 * starting afresh, would carry on past the failure. So the daemon
+	 * ends here, with or without --exit-on-error.
+	 */
+	case JENT_ERR_RCT_PERMANENT:
+	case JENT_ERR_APT_PERMANENT:
+	case JENT_ERR_LAG_PERMANENT:
+	case JENT_ERR_RCT_MEM_PERMANENT:
+		dolog_exit(RNGD_EXIT_PERMANENT,
+			   "Permanent health test failure of the Jitter RNG (error code %zd): it must not be used any more",
+			   ret);
+	default:
+		break;
+	}
+
 	dolog(JENT_LOG_WARN, "Cannot read entropy");
 
 	return -EOPNOTSUPP;
@@ -990,6 +1035,7 @@ out:
  * stay. A failure is a warning, not dolog(JENT_LOG_ERR), which would end the
  * daemon: the caller retries or waits for the next occasion, and
  * gather_entropy() reports the missing collector as a failed read until then.
+ * A permanent health test failure never gets here: read_jent() ends the daemon.
  */
 static int realloc_jent(struct kernel_rng *rng)
 {

@@ -45,3 +45,12 @@ From the root of the source tree:
 	    --network=none jitterentropy-rngd
 
 or `docker compose -f rngd/docker-compose.yaml up -d`.
+
+Both restart the container whenever the daemon ends, which has to be
+considered for a permanent health test failure of the Jitter RNG: the daemon
+ends on one with exit status 2, and the restarted daemon injects from a
+new instance whose health tests start afresh. Where FIPS or NTG.1 mode
+demands that a Jitter RNG which reported such a failure is not used any
+more - on a host in FIPS mode as well, whose mode the container shares - drop
+the restart policy, as no Docker policy tells this exit from others, or have
+a supervising monitor act on the exit status.

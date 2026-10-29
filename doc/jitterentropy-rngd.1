@@ -70,10 +70,18 @@ On a kernel with the LRNG
 exists) only the first two apply and no reseed is requested: the LRNG reseeds
 by itself.
 .PP
-An injection that fails - on a health test failure the Jitter RNG could not
-recover from, or on an ioctl the kernel refuses - makes the daemon initialize
-the Jitter RNG anew and try again, up to five times, before it waits for the
-next occasion.
+An injection that fails - on an intermittent health test failure the Jitter
+RNG could not recover from, or on an ioctl the kernel refuses - makes the
+daemon initialize the Jitter RNG anew and try again, up to five times, before
+it waits for the next occasion. A permanent health test failure ends the
+daemon instead (see
+.BR "EXIT STATUS" ):
+a Jitter RNG that reported one must not be used any more, and a new instance
+would only start its health tests afresh. The health tests report failures in
+FIPS and NTG.1 mode only -
+.BR \-\-fips ,
+.BR \-\-ntg1 ,
+or a system in FIPS mode.
 .PP
 The Jitter RNG works in virtual machines as well as on bare metal, provided a
 high-resolution time stamp is available. Where the library has no CPU counter
@@ -233,6 +241,13 @@ whose injections all failed, and also after
 .BR \-\-help .
 .B \-\-status
 exits with a non-zero status after printing the document.
+.PP
+A permanent health test failure of the Jitter RNG ends the daemon with 2,
+with
+.B \-\-exit\-on\-error
+or without, under
+.B \-\-oneshot
+as well.
 .PP
 With
 .B \-\-exit\-on\-error
