@@ -57,7 +57,7 @@ lfsroutput()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	./jitterentropy-rng $NUM_EVENTS $cmdopts > $OUTDIR/$IID_DATA
@@ -75,7 +75,7 @@ raw_entropy_restart()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_RESTART_DATA $cmdopts
@@ -93,7 +93,7 @@ raw_entropy()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/$NONIID_DATA $cmdopts
@@ -112,7 +112,7 @@ raw_entropy_ntg1_hash()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/$NONIID_HASH_DATA $cmdopts
@@ -130,7 +130,7 @@ raw_entropy_ntg1_hash_restart()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_HASH_RESTART_DATA $cmdopts
@@ -148,7 +148,7 @@ raw_entropy_ntg1_memacc()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/$NONIID_MEMLOOP_DATA $cmdopts
@@ -166,7 +166,7 @@ raw_entropy_ntg1_memacc_restart()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS_RESTART $NUM_RESTART $OUTDIR/$NONIID_MEMLOOP_RESTART_DATA $cmdopts

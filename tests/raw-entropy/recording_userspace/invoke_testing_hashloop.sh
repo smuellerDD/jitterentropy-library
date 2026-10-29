@@ -24,7 +24,7 @@ raw_entropy_ntg1_hashloop()
 
 	if [ -n "$FORCE_NOTIME_NOISE_SOURCE" ]
 	then
-		cmdopts="$cmdopts --disable-internal-timer"
+		cmdopts="$cmdopts --force-internal-timer"
 	fi
 
 	$JENT_HASHTIME $NUM_EVENTS 1 $OUTDIR/${NONIID_HASH_DATA}_${hashloop} $cmdopts

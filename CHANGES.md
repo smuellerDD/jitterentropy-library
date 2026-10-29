@@ -42,6 +42,7 @@
  * Tests: libjitterentropy-record, the raw noise recording as a library for recording where no tool can run - jent_record_raw into a file, jent_record_run as jitterentropy-hashtime's command line describes it, and jent_record_alloc and its siblings one delta at a time. It carries a private copy of the library, exports nothing else and links beside libjitterentropy; built with ENABLE_RECORDING, not for production
  * Tests: add the tools jitterentropy-cpuinfo and jitterentropy-flags, which encodes and decodes the flags word from the JENT_* macros; jitterentropy-hashtime, jitterentropy-osr and jitterentropy-rng share their option parsing, a repeated --max-mem or --hloopcnt replacing the field instead of or-ing into it
  * Tests: improved test support - unit tests for src/ and arch/ (make check without CMake), induced failure tests of the health tests, fuzzing, NixOS VM tests of the kernel module, and CI on more platforms, including an EFI application without an operating system
+ * Tests: FORCE_NOTIME_NOISE_SOURCE of the user space recording scripts forces the internal timer, as its comment says; it passed --disable-internal-timer, so its recordings held the deltas of the hardware timer
  * Jitter RNG core: apply LLM code review -> add sanity checks
  * Jitter RNG core: add UUID generation and update status printing
  * Jitter RNG core: try to pin the timer thread to one CPU
