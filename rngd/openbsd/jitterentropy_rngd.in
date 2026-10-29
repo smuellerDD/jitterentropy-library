@@ -1,0 +1,20 @@
+#!/bin/ksh
+#
+# Seeds the kernel RNG from the Jitter RNG at boot and every ten minutes
+# after. Enable with
+#
+#   rcctl enable jitterentropy_rngd
+#   rcctl set jitterentropy_rngd flags ...	# further options
+#
+# rc_bg detaches it: the daemon itself stays in the foreground, where it
+# keeps the memory locks of FIPS and NTG.1 mode.
+
+daemon="@PATH@/jitterentropy-rngd"
+daemon_flags="-F --syslog"
+
+. /etc/rc.d/rc.subr
+
+rc_bg=YES
+rc_reload=NO
+
+rc_cmd $1

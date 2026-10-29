@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Seeds the kernel RNG from the Jitter RNG at boot and every ten minutes
+  after. Install to /Library/LaunchDaemons and load with
+
+    sudo launchctl bootstrap system /Library/LaunchDaemons/jitterentropy-rngd.plist
+
+  /dev/random is 0666 on macOS, so the daemon runs unprivileged throughout.
+  No KeepAlive: a daemon ended by a health test failure is not to come back.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>jitterentropy-rngd</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>@PATH@/jitterentropy-rngd</string>
+		<string>-F</string>
+		<string>--syslog</string>
+	</array>
+	<key>UserName</key>
+	<string>nobody</string>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>

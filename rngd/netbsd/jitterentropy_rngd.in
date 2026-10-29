@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# PROVIDE: jitterentropy_rngd
+# REQUIRE: mountall random_seed
+# BEFORE: DAEMON
+# KEYWORD: shutdown
+#
+# Seeds the kernel RNG from the Jitter RNG at boot and every ten minutes
+# after. The daemon stays root: from NetBSD 10 on, the kernel takes a write
+# to /dev/random from root alone, and counts it toward its entropy
+# estimate. Enable in /etc/rc.conf:
+#
+#   jitterentropy_rngd=YES
+#   jitterentropy_rngd_flags=""	# further jitterentropy-rngd options
+#
+# This rc.subr does not detach a daemon, so it detaches itself and keeps
+# its PID file.
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="jitterentropy_rngd"
+rcvar=$name
+command="@PATH@/jitterentropy-rngd"
+pidfile="/var/run/${name}.pid"
+command_args="--syslog -p ${pidfile}"
+
+load_rc_config $name
+run_rc_command "$1"

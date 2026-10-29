@@ -32,7 +32,7 @@ option(MOCK_TIMER "Allow the time source to be replaced by a caller-supplied cal
 option(ENABLE_RECORDING "Also build and install libjitterentropy-record: the library with the raw noise recording API of jitterentropy-record.h added, for recording where no tool can run; not for production" OFF)
 option(ENABLE_KERNEL_LIB "Also build and install libjitterentropy-kernel and the jitter_rng tool: user space access to the jitter_rng Linux kernel module (Linux only)" OFF)
 option(ENABLE_TOOLS "Build and install the recording and validation tools (jitterentropy-rng, getrawentropy, extractlsb, ...), which live under tests/" ON)
-option(ENABLE_RNGD "Also build and install jitterentropy-rngd, the daemon feeding the Jitter RNG into the Linux /dev/random, and its systemd unit (Linux only)" OFF)
+option(ENABLE_RNGD "Also build and install jitterentropy-rngd, the daemon feeding the Jitter RNG into the kernel's /dev/random, and its systemd unit, rc.d script or launchd plist (Linux, FreeBSD, NetBSD, OpenBSD, macOS)" OFF)
 option(BUILD_TESTING "Build the test programs and register the CTest suite" ON)
 
 # CMake sets MSVC itself; do the same for the others.
@@ -715,11 +715,11 @@ if(ENABLE_KERNEL_LIB)
     add_subdirectory(linux_kernel/userspace)
 endif()
 
-# jitterentropy-rngd and its systemd unit; see rngd/CMakeLists.txt.
+# jitterentropy-rngd and its service file; see rngd/CMakeLists.txt.
 if(ENABLE_RNGD)
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|FreeBSD|NetBSD|OpenBSD|Darwin)$")
         message(FATAL_ERROR
-            "ENABLE_RNGD needs Linux: the daemon feeds the Linux /dev/random")
+            "ENABLE_RNGD needs Linux, FreeBSD, NetBSD, OpenBSD or macOS: the daemon feeds their /dev/random")
     endif()
     add_subdirectory(rngd)
 endif()

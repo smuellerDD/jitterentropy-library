@@ -96,7 +96,7 @@ generation into the linker.
 | `MOCK_TIMER` | `OFF` | Let the test programs that compile the library sources in replace the time source with a callback (`jent_set_mock_timer()`, declared in the internal `arch/jitterentropy-arch-timer.h` and not exported). An installed library offers a consumer nothing to call; `jent_status()` reports the build. Testing only - such a build produces no entropy of its own |
 | `ENABLE_TOOLS` | `ON` | Build and install the recording and validation tools, which live under `tests/` |
 | `ENABLE_RECORDING` | `OFF` | Also build and install `libjitterentropy-record`, shared or static as the library: the raw noise recording of `jitterentropy-record.h`, for recording where no tool can run (see `tests/raw-entropy/recording_library/README.md`). It exports nothing else and links beside `libjitterentropy`; not for production |
-| `ENABLE_RNGD` | `OFF` | Also build and install `jitterentropy-rngd`, the daemon feeding the Jitter RNG into the Linux `/dev/random`, with its systemd unit (Linux only, see `rngd/README.md`) |
+| `ENABLE_RNGD` | `OFF` | Also build and install `jitterentropy-rngd`, the daemon feeding the Jitter RNG into the kernel's `/dev/random`, with its systemd unit, rc.d script or launchd plist (Linux, FreeBSD, NetBSD, OpenBSD, macOS; see `rngd/README.md`) |
 | `BUILD_TESTING` | `ON` | Build the test programs and register the CTest suite |
 
 The two are independent. `ENABLE_TOOLS` decides what is installed for a user

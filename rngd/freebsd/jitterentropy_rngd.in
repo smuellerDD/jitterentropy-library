@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# PROVIDE: jitterentropy_rngd
+# REQUIRE: FILESYSTEMS random
+# BEFORE: LOGIN
+# KEYWORD: shutdown
+#
+# Seeds the kernel RNG from the Jitter RNG at boot and every ten minutes
+# after. Enable in /etc/rc.conf:
+#
+#   jitterentropy_rngd_enable="YES"
+#   jitterentropy_rngd_args=""	# further jitterentropy-rngd options
+#
+# daemon(8) detaches it and keeps the PID file: the daemon itself stays in
+# the foreground, where it keeps the memory locks of FIPS and NTG.1 mode.
+
+. /etc/rc.subr
+
+name="jitterentropy_rngd"
+rcvar="jitterentropy_rngd_enable"
+
+load_rc_config $name
+
+: ${jitterentropy_rngd_enable:="NO"}
+: ${jitterentropy_rngd_args:=""}
+
+pidfile="/var/run/${name}.pid"
+procname="@PATH@/jitterentropy-rngd"
+command="/usr/sbin/daemon"
+command_args="-f -p ${pidfile} ${procname} -F --syslog ${jitterentropy_rngd_args}"
+
+run_rc_command "$1"

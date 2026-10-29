@@ -39,6 +39,13 @@ echo "==> $(uname -a)"
 echo "==> cc: $($CC --version 2>&1 | head -n 1)"
 echo "==> using CC=$CC MAKE=$MAKE ncpu=$ncpu"
 
+# jitterentropy-rngd where it has a /dev/random to feed, so that its rngd-version
+# test runs there too.
+case "$os" in
+FreeBSD|NetBSD|OpenBSD) rngd=-DENABLE_RNGD=ON ;;
+*)                      rngd= ;;
+esac
+
 # ---------------------------------------------------------------------------
 # CMake, static and shared
 # ---------------------------------------------------------------------------
@@ -47,7 +54,8 @@ for shared in OFF ON; do
 	echo "==> CMake build (BUILD_SHARED_LIBS=$shared)"
 
 	rm -rf "$build"
-	cmake -S . -B "$build" -DBUILD_SHARED_LIBS="$shared"
+	# Unquoted on purpose: the empty case must expand to no argument.
+	cmake -S . -B "$build" -DBUILD_SHARED_LIBS="$shared" $rngd
 	cmake --build "$build" -j "$ncpu"
 
 	# Not on the guests' default search path.

@@ -1,34 +1,68 @@
 # jitterentropy-rngd, with ENABLE_RNGD: the daemon feeding the Jitter RNG into
-# the Linux /dev/random, and its systemd unit. It uses the API of
-# jitterentropy.h alone and links the library as any consumer does.
+# the kernel's /dev/random, and the service file of the system it is built
+# for. It links the library as any consumer does.
 #
-# jitterentropy-rngd.c is the daemon, jitterentropy-rngd-linux.c how the
-# Linux kernel takes the data; linux/ holds the systemd unit.
+# The second source is how that system's kernel takes the data. Each system's
+# service file is in the directory of its name.
 
-add_executable(jitterentropy-rngd jitterentropy-rngd.c
-               jitterentropy-rngd-linux.c)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_jent_rngd_src jitterentropy-rngd-linux.c)
+    # The unit names the installed daemon. Below the prefix by default, as
+    # everything else is; a distribution names the directory systemd reads.
+    set(JENT_SYSTEMD_UNITDIR "lib/systemd/system" CACHE STRING
+        "Where the systemd unit of jitterentropy-rngd is installed, relative to the prefix unless absolute")
+    set(_jent_service_in linux/jitterentropy.service.in)
+    set(_jent_service jitterentropy.service)
+    set(_jent_service_dir ${JENT_SYSTEMD_UNITDIR})
+    set(_jent_service_kind FILES)
+else()
+    set(_jent_rngd_src jitterentropy-rngd-bsd.c)
+    # Each where its system looks. The rc.d scripts are executables.
+    if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+        set(_jent_service_in freebsd/jitterentropy_rngd.in)
+        set(_jent_service jitterentropy_rngd)
+        set(_jent_service_default "etc/rc.d")
+        set(_jent_service_kind PROGRAMS)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "NetBSD")
+        set(_jent_service_in netbsd/jitterentropy_rngd.in)
+        set(_jent_service jitterentropy_rngd)
+        set(_jent_service_default "/etc/rc.d")
+        set(_jent_service_kind PROGRAMS)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
+        set(_jent_service_in openbsd/jitterentropy_rngd.in)
+        set(_jent_service jitterentropy_rngd)
+        set(_jent_service_default "/etc/rc.d")
+        set(_jent_service_kind PROGRAMS)
+    else()
+        set(_jent_service_in macos/jitterentropy-rngd.plist.in)
+        set(_jent_service jitterentropy-rngd.plist)
+        set(_jent_service_default "/Library/LaunchDaemons")
+        set(_jent_service_kind FILES)
+    endif()
+    set(JENT_RNGD_SERVICEDIR "${_jent_service_default}" CACHE STRING
+        "Where the rc.d script or launchd plist of jitterentropy-rngd is installed, relative to the prefix unless absolute")
+    set(_jent_service_dir ${JENT_RNGD_SERVICEDIR})
+endif()
+
+add_executable(jitterentropy-rngd jitterentropy-rngd.c ${_jent_rngd_src})
 target_compile_options(jitterentropy-rngd PRIVATE ${JITTER_C_FLAGS})
 target_link_libraries(jitterentropy-rngd PRIVATE ${PROJECT_NAME})
 install(TARGETS jitterentropy-rngd
         RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR})
 
-# The unit names the installed daemon. Below the prefix by default, as
-# everything else is; a distribution names the directory systemd reads.
-set(JENT_SYSTEMD_UNITDIR "lib/systemd/system" CACHE STRING
-    "Where the systemd unit of jitterentropy-rngd is installed, relative to the prefix unless absolute")
 # The prefix is filled in at install time, as for jitterentropy.pc, so that
-# the unit follows "cmake --install --prefix" to where the daemon goes.
+# the service file follows "cmake --install --prefix" to where the daemon goes.
 if(IS_ABSOLUTE "${CMAKE_INSTALL_SBINDIR}")
     set(PATH "${CMAKE_INSTALL_SBINDIR}")
 else()
     set(PATH "@JENT_UNIT_PREFIX@/${CMAKE_INSTALL_SBINDIR}")
 endif()
-configure_file(linux/jitterentropy.service.in
-               ${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.service.install @ONLY)
+configure_file(${_jent_service_in}
+               ${CMAKE_CURRENT_BINARY_DIR}/${_jent_service}.install @ONLY)
 set(_jent_unit_installed
-    ${CMAKE_CURRENT_BINARY_DIR}/install/jitterentropy.service)
+    ${CMAKE_CURRENT_BINARY_DIR}/install/${_jent_service})
 install(CODE "
-  set(_jent_unit_in \"${CMAKE_CURRENT_BINARY_DIR}/jitterentropy.service.install\")
+  set(_jent_unit_in \"${CMAKE_CURRENT_BINARY_DIR}/${_jent_service}.install\")
   set(_jent_unit_out \"${_jent_unit_installed}\")
 ")
 install(CODE [[
@@ -37,7 +71,8 @@ install(CODE [[
          "${_jent_unit}")
   file(WRITE "${_jent_unit_out}" "${_jent_unit}")
 ]])
-install(FILES ${_jent_unit_installed} DESTINATION ${JENT_SYSTEMD_UNITDIR})
+install(${_jent_service_kind} ${_jent_unit_installed}
+        DESTINATION ${_jent_service_dir})
 
 # Needs neither root nor the kernel: the daemon links and reports the
 # library's version.

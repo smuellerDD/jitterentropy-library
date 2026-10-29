@@ -1,0 +1,312 @@
+/*
+ * jitterentropy-rngd on FreeBSD, NetBSD, OpenBSD and macOS: seeding the kernel
+ * RNG through writes to /dev/random
+ *
+ * Copyright (C) 2026, Markus Theil <theil.markus@gmail.com>
+ *
+ * License: see LICENSE file in root directory
+ *
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, ALL OF
+ * WHICH ARE HEREBY DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+ * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+ * USE OF THIS SOFTWARE, EVEN IF NOT ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
+ */
+
+/*
+ * None of these kernels has the Linux RNDADDENTROPY, and none has an entropy
+ * count to poll. What each takes is a write to /dev/random, straight into its
+ * generator:
+ *
+ *  - FreeBSD hashes every write and hands it to Fortuna as RANDOM_RANDOMDEV
+ *    events, past the harvest mask. Only root may open the node for writing.
+ *  - NetBSD mixes it into the pool and consolidates. Since NetBSD 10 it takes
+ *    a write from root alone: random_write() checks KAUTH_DEVICE_RND_ADDDATA
+ *    at every write against the writer's credential, not the opener's, and
+ *    refuses anyone else's with EPERM. Root's counts toward the entropy
+ *    estimate at one bit per bit.
+ *  - OpenBSD mixes it into its pool and rekeys its ChaCha20 state at once.
+ *    Only root may open the node for writing.
+ *  - macOS hashes it with SHA-512 and reseeds the kernel PRNG at once. The
+ *    node is 0666, so the daemon needs no privilege at all there.
+ *
+ * So the daemon writes one seed when it starts, still with the privileges it
+ * was started with, and one each interval after, with none - except on
+ * NetBSD, where it stays root for them. There is nothing to wait for in
+ * between.
+ *
+ * It detaches as on Linux unless --foreground, forking after the first seed.
+ * A forked child does not inherit the memory locks of its parent, which FIPS
+ * and NTG.1 mode take, so the rc.d scripts of FreeBSD and OpenBSD and the
+ * launchd plist keep it in the foreground and let daemon(8), rc_bg and launchd
+ * detach it. NetBSD's rc.subr does neither.
+ */
+
+#include <sys/types.h>
+#if defined(__FreeBSD__)
+# include <sys/capsicum.h>
+#endif
+#include <sys/select.h>
+#include <errno.h>
+#include <grp.h>
+#include <pwd.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "jitterentropy-rngd.h"
+
+/* The Linux daemon forces a reseed this often, in either phase. */
+#define DEFAULT_INTERVAL	600
+
+/* The user after the first seed: NetBSD refuses the writes of all but root */
+#if defined(__NetBSD__)
+#define DEFAULT_USER	""
+#else
+#define DEFAULT_USER	"nobody"
+#endif
+
+static unsigned int interval = DEFAULT_INTERVAL;
+static const char *user = DEFAULT_USER;
+
+/* Set once drop_privileges() switched to user, for good */
+static int dropped = 0;
+
+/*******************************************************************
+ * options
+ *******************************************************************/
+
+const char rngd_os_description[] =
+	"jitterentropy rngd seeding the kernel RNG through /dev/random";
+
+const char rngd_os_optstring[] = "t:u:d:";
+
+const struct option rngd_os_options[] = {
+	{"interval", 1, 0, 't'},
+	{"user", 1, 0, 'u'},
+	{"device", 1, 0, 'd'},
+	{0, 0, 0, 0}
+};
+
+void rngd_os_parse(int c, const char *arg)
+{
+	switch (c) {
+	case 't':
+		interval = parse_uint(arg);
+		if (!interval)
+			usage();
+		break;
+	case 'u':
+		user = arg;
+		break;
+	case 'd':
+		Random.dev = arg;
+		break;
+	default:
+		usage();
+	}
+}
+
+void rngd_os_usage(void)
+{
+	fprintf(stderr, "\t-t --interval\tSeconds between seeds (default %u)\n",
+		DEFAULT_INTERVAL);
+	fprintf(stderr, "\t-u --user\tUser to switch to after the first seed when\n");
+#if defined(__NetBSD__)
+	fprintf(stderr, "\t\t\tstarted as root (default \"\", staying root)\n");
+#else
+	fprintf(stderr, "\t\t\tstarted as root (default nobody, \"\" stays root)\n");
+#endif
+	fprintf(stderr, "\t-d --device\tNode to write to (default /dev/random)\n");
+}
+
+/*******************************************************************
+ * entropy handler functions
+ *******************************************************************/
+
+/* No count: NetBSD credits a write by the writer, the others credit none */
+ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
+		       size_t entropy_bytes)
+{
+	size_t done = 0;
+
+	(void)entropy_bytes;
+
+	while (done < len) {
+		ssize_t ret = write(rng->fd, buf + done, len - done);
+
+		if (ret < 0 && errno == EINTR)
+			continue;
+		if (ret < 0) {
+			int errsv = errno;
+
+			/*
+			 * Refused for good, on NetBSD with a --user: the
+			 * retries would only warn while the daemon seeded
+			 * nothing any more.
+			 */
+			if (dropped && (EPERM == errsv || EACCES == errsv))
+				dolog(JENT_LOG_ERR, "%s refuses the writes of user %s: %s",
+				      rng->dev, user, strerror(errsv));
+			dolog(JENT_LOG_WARN, "Error writing to %s: %s",
+			      rng->dev, strerror(errsv));
+			return -errsv;
+		}
+		if (ret == 0) {
+			dolog(JENT_LOG_WARN, "%s took no data", rng->dev);
+			return -EIO;
+		}
+		done += (size_t)ret;
+	}
+
+	dolog(JENT_LOG_DEBUG, "Wrote %zu bytes to %s", done, rng->dev);
+
+	return (ssize_t)done;
+}
+
+/* Root only: on macOS the daemon is started unprivileged in the first place. */
+static void drop_privileges(void)
+{
+	struct passwd *pw;
+	gid_t gid;
+
+	if (geteuid() != 0 || !*user)
+		return;
+
+	pw = getpwnam(user);
+	if (!pw)
+		dolog_exit(1, "Unknown user %s", user);
+	gid = pw->pw_gid;
+
+	if (setgroups(1, &gid) || setgid(gid) || setuid(pw->pw_uid))
+		dolog(JENT_LOG_ERR, "Cannot switch to user %s: %s", user,
+		      strerror(errno));
+	if (setuid(0) != -1)
+		dolog(JENT_LOG_ERR, "Could switch back to root after dropping it");
+
+	dropped = 1;
+	dolog(JENT_LOG_VERBOSE, "Running as user %s", user);
+}
+
+/*
+ * Confine the daemon to writing @fd and computing - and to re-initializing
+ * the Jitter RNG, by the library's own health test reset or by
+ * gather_entropy_retry().
+ *
+ * Capability mode permits all a re-initialization calls: mmap(), mlock(),
+ * cpuset_getaffinity(), hw.ncpu, thr_new(), getrandom(). No pledge promise
+ * grants mlock(); "error" has it fail with ENOSYS instead of killing the
+ * daemon, which the library tolerates as any refused lock - unless FIPS or
+ * NTG.1 mode demands the lock, so those stay unpledged. The unlink() of the PID
+ * file at exit fails the same way in both, leaving a stale file the next start
+ * takes over. NetBSD and macOS have no sandbox a program enters by itself.
+ */
+static void sandbox(int fd)
+{
+#if defined(__OpenBSD__)
+	(void)fd;
+	if (jent_flags & (JENT_FORCE_FIPS | JENT_NTG1)) {
+		dolog(JENT_LOG_VERBOSE,
+		      "No pledge: in FIPS or NTG.1 mode a re-initialization must lock its memory");
+		return;
+	}
+	if (pledge("stdio error", NULL))
+		dolog(JENT_LOG_ERR, "pledge: %s", strerror(errno));
+#elif defined(__FreeBSD__)
+	cap_rights_t rights;
+
+	cap_rights_init(&rights, CAP_WRITE);
+	if (cap_rights_limit(fd, &rights) || cap_enter())
+		dolog(JENT_LOG_ERR, "Capsicum: %s", strerror(errno));
+#else
+	(void)fd;
+#endif
+}
+
+/*******************************************************************
+ * the daemon's hooks
+ *******************************************************************/
+
+void rngd_os_start(void)
+{
+}
+
+int rngd_os_alloc(struct kernel_rng *rng)
+{
+	(void)rng;
+
+	return 0;
+}
+
+void rngd_os_seeded(void)
+{
+}
+
+void rngd_os_run(struct kernel_rng *rng)
+{
+	sigset_t blocked, unblocked;
+
+	/* The zone file is a file: read it while there still is a file system. */
+	tzset();
+
+	drop_privileges();
+	sandbox(rng->fd);
+
+	sigemptyset(&blocked);
+	sigaddset(&blocked, SIGHUP);
+	sigaddset(&blocked, SIGINT);
+	sigaddset(&blocked, SIGQUIT);
+	sigaddset(&blocked, SIGTERM);
+
+	while (1) {
+		struct timespec ts;
+		ssize_t written;
+		int ret;
+
+		/* As in the Linux select_fd(): test and wait are one. */
+		sigprocmask(SIG_BLOCK, &blocked, &unblocked);
+
+		if (Term_pending) {
+			sigprocmask(SIG_SETMASK, &unblocked, NULL);
+			process_term();
+			/* NOTREACHED */
+		}
+
+		ts.tv_sec = (time_t)interval;
+		ts.tv_nsec = 0;
+		ret = pselect(0, NULL, NULL, NULL, &ts, &unblocked);
+
+		sigprocmask(SIG_SETMASK, &unblocked, NULL);
+
+		if (-1 == ret && EINTR != errno) {
+			if (exit_on_error) {
+				int errsv = errno;
+
+				dealloc();
+				exit(errsv);
+			}
+			dolog(JENT_LOG_ERR, "pselect returned with error %s",
+			      strerror(errno));
+		}
+		if (0 == ret) {
+			written = gather_entropy_retry(rng);
+			dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s",
+			      written, rng->dev);
+		}
+	}
+}
+
+void rngd_os_dealloc(struct kernel_rng *rng)
+{
+	(void)rng;
+}
