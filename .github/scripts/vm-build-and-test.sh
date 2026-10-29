@@ -39,8 +39,10 @@ echo "==> $(uname -a)"
 echo "==> cc: $($CC --version 2>&1 | head -n 1)"
 echo "==> using CC=$CC MAKE=$MAKE ncpu=$ncpu"
 
-# jitterentropy-rngd where it has a /dev/random to feed, so that its rngd-version
-# test runs there too.
+# jitterentropy-rngd where it has a /dev/random to feed, so that its tests run
+# there too: rngd-version, rngd-generate, and rngd-signals, the one place
+# SIGUSR1 and SIGUSR2 of the BSD part meet Capsicum and pledge(2), the guest
+# running it as root.
 case "$os" in
 FreeBSD|NetBSD|OpenBSD) rngd=-DENABLE_RNGD=ON ;;
 *)                      rngd= ;;

@@ -88,4 +88,12 @@ if(BUILD_TESTING)
                      -DRNGD=$<TARGET_FILE:jitterentropy-rngd>
                      -DDIR=${CMAKE_CURRENT_BINARY_DIR}
                      -P ${PROJECT_SOURCE_DIR}/tests/rngd/generate.cmake)
+    # --device stands in for /dev/random. Linux has none: the nix VM tests.
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test(NAME rngd-signals
+                 COMMAND sh ${PROJECT_SOURCE_DIR}/tests/rngd/signals.sh
+                         $<TARGET_FILE:jitterentropy-rngd>
+                         ${CMAKE_CURRENT_BINARY_DIR}/rngd-signals)
+        set_tests_properties(rngd-signals PROPERTIES TIMEOUT 900)
+    endif()
 endif()

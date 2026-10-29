@@ -352,6 +352,16 @@ stays out of them, that the options it does not go with and `0` are refused,
 and that `--output` refuses a symbolic link, a hard link and a FIFO and
 overwrites a file of the caller's own. Neither needs root or the kernel.
 
+On FreeBSD, NetBSD, OpenBSD and macOS, `rngd-signals` (`rngd/signals.sh`) runs
+the daemon with `--device` on a regular file in place of `/dev/random` and
+checks that SIGUSR1 logs the status at the default verbosity, that SIGUSR2
+writes a seed of 64 bytes, that both sent during the startup wait until the
+daemon runs, that a SIGUSR1 every second does not put off the seeds of a 2 s
+`--interval`, and that SIGTERM ends it with 0. It needs no root either; run as
+root, as in the BSD CI guests, the daemon switches to `nobody` and enters
+Capsicum or `pledge(2)` as in service. Linux has no `--device`: the nix VM
+tests send its daemon the signals.
+
 ## With no operating system
 
 `tests/efi` builds the library into an EFI application and boots it. It is the
