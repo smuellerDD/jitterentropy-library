@@ -514,8 +514,33 @@ static inline void memset_secure(void *s, int c, size_t n)
  * entropy handler functions
  *******************************************************************/
 
+/*
+ * The status document of the Jitter RNG @ec at verbose level, @when it was
+ * initialized: a line of the log per line of the document, which a single
+ * message would not hold.
+ */
+static void log_status(struct rand_data *ec, const char *when)
+{
+	char buf[4096], *line, *saveptr = NULL;
+
+	if (Verbosity < JENT_LOG_VERBOSE)
+		return;
+
+	if (jent_status(ec, buf, sizeof(buf))) {
+		dolog(JENT_LOG_WARN, "Cannot obtain the status of the Jitter RNG");
+		return;
+	}
+
+	dolog(JENT_LOG_VERBOSE, "Status of the Jitter RNG %s:", when);
+	for (line = strtok_r(buf, "\n", &saveptr); line;
+	     line = strtok_r(NULL, "\n", &saveptr))
+		dolog(JENT_LOG_VERBOSE, "%s", line);
+}
+
 static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 {
+	unsigned int reinits = rng->ec ?
+		jent_entropy_collector_reinitializations(rng->ec) : 0;
 	ssize_t ret;
 
 	/*
@@ -526,6 +551,11 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 		ret = jent_read_entropy(rng->ec, buf, buflen);
 	else
 		ret = jent_read_entropy_safe(&rng->ec, buf, buflen);
+
+	/* jent_read_entropy_safe() replaces the collector to recover */
+	if (rng->ec &&
+	    jent_entropy_collector_reinitializations(rng->ec) != reinits)
+		log_status(rng->ec, "after it re-initialized itself");
 
 	if (ret >= 0)
 		return ret;
@@ -633,6 +663,7 @@ static int realloc_jent(struct kernel_rng *rng)
 		dolog(JENT_LOG_WARN, "Allocation of entropy collector failed");
 		return -EAGAIN;
 	}
+	log_status(rng->ec, "after its re-initialization");
 
 	return 0;
 }
@@ -783,6 +814,8 @@ static int alloc_rng(struct kernel_rng *rng)
 		return -EAGAIN;
 	}
 
+	log_status(rng->ec, "after its initialization");
+
 	rng->fd = open(rng->dev, O_WRONLY);
 	if (-1 == rng->fd) {
 		int errsv = errno;
@@ -878,6 +911,7 @@ static void generate_bytes(void)
 	Random.ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
 	if (!Random.ec)
 		dolog(JENT_LOG_ERR, "Allocation of entropy collector failed");
+	log_status(Random.ec, "after its initialization");
 
 	if (output) {
 		struct stat st;

@@ -151,7 +151,11 @@ is needed.
 .TP
 .BR \-v ", " \-\-verbose
 Log more. Without it only errors are logged; given once warnings as well,
-twice the wakeups and injections, three times debugging messages. A detached
+twice the wakeups and injections and the status document of
+.BR jent_status (3)
+after each initialization of the Jitter RNG - at the start, by the daemon
+after a failed injection, and by the Jitter RNG itself recovering from an
+intermittent health test failure - three times debugging messages. A detached
 daemon has its standard output redirected to
 .IR /dev/null ,
 so
