@@ -150,7 +150,10 @@ jobs:
 
       - name: Show the result
         run: |
-          ko=$(find "$(nix path-info ".#${{ matrix.attr }}")" -name '*.ko')
+          # jitter_rng.ko, or .ko.xz where the kernel compresses modules;
+          # not its certificate.
+          ko=$(find "$(nix path-info ".#${{ matrix.attr }}")" \
+            -name 'jitter_rng.ko*' ! -name '*.cer')
           ls -l "$ko"
           nix shell nixpkgs#kmod -c modinfo "$ko"
 

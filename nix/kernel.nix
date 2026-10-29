@@ -13,6 +13,18 @@ in
     lib.makeOverridable ({ withChardev, withHwrng, withTestInterface }:
       let
         flag = enabled: if enabled then "y" else "n";
+
+        # The flags of the kernel's own modules: their signing rule writes
+        # the certificate the NixOS module tree needs of every module.
+        kbuild = ''
+          make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build \
+            ${lib.escapeShellArgs (kernel.commonMakeFlags or [ ])} \
+            M=$(pwd)/linux_kernel \
+            CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV=${flag withChardev} \
+            CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=${flag withHwrng} \
+            CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=${
+              flag withTestInterface
+            }'';
       in pkgs.stdenv.mkDerivation {
         pname = "jitterentropy-kmod";
         version = kernel.version;
@@ -23,21 +35,16 @@ in
 
         buildPhase = ''
           runHook preBuild
-          make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build \
-            M=$(pwd)/linux_kernel \
-            CONFIG_EXTERNAL_JITTERENTROPY_CHARDEV=${flag withChardev} \
-            CONFIG_EXTERNAL_JITTERENTROPY_HWRNG=${flag withHwrng} \
-            CONFIG_EXTERNAL_JITTERENTROPY_TESTINTERFACE=${
-              flag withTestInterface
-            } \
-            modules
+          ${kbuild} modules
           runHook postBuild
         '';
 
+        # Signed, compressed where the kernel compresses its own, and to
+        # extra/ as before. DEPMOD=true: the module tree runs depmod.
         installPhase = ''
           runHook preInstall
-          install -D linux_kernel/jitter_rng.ko \
-            "$out/lib/modules/${kernel.modDirVersion}/extra/jitter_rng.ko"
+          ${kbuild} INSTALL_MOD_PATH=$out INSTALL_MOD_DIR=extra DEPMOD=true \
+            modules_install
           runHook postInstall
         '';
 
