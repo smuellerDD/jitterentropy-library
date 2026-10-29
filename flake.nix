@@ -18,13 +18,14 @@
         // import ./nix/vm.nix ctx
         // import ./nix/efi.nix ctx
         // import ./nix/raw-entropy.nix ctx
+        // import ./nix/rngd.nix ctx
         // import ./nix/images.nix ctx);
 
       inherit (ctx)
         consumersFor crossTargets cryptoFor efiFor efiVmFor forAllSystems
-        inTreeBuildsFor isosFor modulesFor muslFor muslStaticFor rawEntropyFor
-        rawEntropyKernelVmFor rngdFor sdImagesFor testInterfaceKernelFor
-        toolsFor vmTestsFor;
+        inTreeBuildsFor isosFor lrngKernelFor modulesFor muslFor muslStaticFor
+        rawEntropyFor rawEntropyKernelVmFor rngdFor rngdVmTestsFor sdImagesFor
+        testInterfaceKernelFor toolsFor vmTestsFor;
     in {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
@@ -37,6 +38,8 @@
           musl-static = muslStaticFor pkgs;
           # The kernel of the raw-entropy-kernel check.
           testinterface-kernel = (testInterfaceKernelFor pkgs).kernel;
+          # The kernel of the rngd-lrng check.
+          lrng-kernel = (lrngKernelFor pkgs).kernel;
         } // cryptoFor pkgs
           // modulesFor pkgs
           // inTreeBuildsFor pkgs
@@ -61,6 +64,8 @@
             raw-entropy-kernel =
               rawEntropyKernelVmFor nixpkgs.legacyPackages.${system};
           }
+          # The daemon on the default kernel and on one with the LRNG.
+          // rngdVmTestsFor nixpkgs.legacyPackages.${system}
           # The EFI application boots no kernel and needs no NixOS, but it is a
           # VM that has to come up and say the right thing, so it belongs here
           # with the rest of them.

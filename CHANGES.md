@@ -50,6 +50,7 @@
  * Tests: add the tools jitterentropy-cpuinfo and jitterentropy-flags, which encodes and decodes the flags word from the JENT_* macros; jitterentropy-hashtime, jitterentropy-osr and jitterentropy-rng share their option parsing, a repeated --max-mem or --hloopcnt replacing the field instead of or-ing into it
  * Tests: improved test support - unit tests for src/ and arch/ (make check without CMake), induced failure tests of the health tests, fuzzing, NixOS VM tests of the kernel module, and CI on more platforms, including an EFI application without an operating system
  * Tests: FORCE_NOTIME_NOISE_SOURCE of the user space recording scripts forces the internal timer, as its comment says; it passed --disable-internal-timer, so its recordings held the deltas of the hardware timer
+ * Tests: NixOS VM tests of jitterentropy-rngd under its systemd unit and in the foreground, on the default kernel (the rngd check) and on Linux 6.18 with the LRNG v60 patch set of https://github.com/smuellerDD/lrng in place of random.c (rngd-lrng, its kernel .#lrng-kernel), where the daemon leaves the reseeding to the LRNG
  * Jitter RNG core: apply LLM code review -> add sanity checks
  * Jitter RNG core: add UUID generation and update status printing
  * Jitter RNG core: try to pin the timer thread to one CPU
