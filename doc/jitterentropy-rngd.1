@@ -67,7 +67,9 @@ every 10 minutes regardless of the kernel's entropy estimate.
 These are the defaults of
 .B \-\-phase1
 and
-.BR \-\-phase2 .
+.BR \-\-phase2 ;
+.B \-\-interval
+replaces them with an alarm every so many seconds that injects each time.
 .PP
 On a kernel with the LRNG
 .RI ( /proc/lrng_type
@@ -252,9 +254,17 @@ estimate after every
 checks. The default is 50:12. Neither value of either phase may be 0.
 .TP
 .BR \-t ", " \-\-interval " \fIseconds\fR"
-FreeBSD, NetBSD, OpenBSD and macOS only. Write a seed every
+Seed the kernel every
 .I seconds
-after the first. The default is 600; 0 is refused.
+after the first; 0 is refused. On FreeBSD, NetBSD, OpenBSD and macOS the
+default is 600. On Linux the alarm goes off every
+.I seconds
+in either phase and injects each time, regardless of the kernel's entropy
+estimate, in place of the checks of
+.B \-\-phase1
+and
+.BR \-\-phase2 ,
+neither of which goes with it; without it, those apply.
 .TP
 .BR \-u ", " \-\-user " \fIuser\fR"
 FreeBSD, NetBSD, OpenBSD and macOS only. The user to switch to after the

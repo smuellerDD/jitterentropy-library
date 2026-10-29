@@ -8,8 +8,8 @@ its name holds its service files.
 * **Linux** (`jitterentropy-rngd-linux.c`, `linux/`): the `RNDADDENTROPY`
   ioctl, which credits the entropy - once at startup, whenever the kernel's
   entropy estimate runs low, and every ten minutes regardless (by default;
-  `--phase1` and `--phase2` change that schedule). It needs root
-  (`CAP_SYS_ADMIN`).
+  `--phase1` and `--phase2` change that schedule, `--interval` replaces it
+  with an injection every so many seconds). It needs root (`CAP_SYS_ADMIN`).
 * **FreeBSD, NetBSD, OpenBSD, macOS** (`jitterentropy-rngd-bsd.c`,
   `freebsd/`, `netbsd/`, `openbsd/`, `macos/`): a write to `/dev/random`, once
   at startup and every ten minutes after (`--interval`). None of these kernels

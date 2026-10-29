@@ -192,7 +192,7 @@ static int kernver_ge(unsigned int maj, unsigned int minor,
 const char rngd_os_description[] =
 	"jitterentropy rngd feeding entropy to input_pool of Linux RNG";
 
-const char rngd_os_optstring[] = "";
+const char rngd_os_optstring[] = "t:";
 
 enum {
 	OPT_PHASE1 = RNGD_OS_OPT,
@@ -200,10 +200,23 @@ enum {
 };
 
 const struct option rngd_os_options[] = {
+	{"interval", 1, 0, 't'},
 	{"phase1", 1, 0, OPT_PHASE1},
 	{"phase2", 1, 0, OPT_PHASE2},
 	{0, 0, 0, 0}
 };
+
+/* --interval and --phase1 / --phase2 set the same schedule: not both */
+enum { BY_INTERVAL = 1, BY_PHASES };
+
+static void schedule_by(int by_option)
+{
+	static int by = 0;
+
+	if (by && by != by_option)
+		usage();
+	by = by_option;
+}
 
 /* PERIOD:WAKEUPS of --phase1 / --phase2, zero would stop the alarm */
 static void parse_phase(const char *str, unsigned int phase)
@@ -217,13 +230,32 @@ static void parse_phase(const char *str, unsigned int phase)
 	force_reseed_wakeups[phase] = wakeups;
 }
 
+/* --interval: a seed every @secs in either phase, whatever the estimate */
+static void parse_interval(const char *str)
+{
+	unsigned int secs = parse_uint(str), phase;
+
+	if (!secs)
+		usage();
+	for (phase = 0; phase < 2; phase++) {
+		alarm_period[phase] = secs;
+		force_reseed_wakeups[phase] = 1;
+	}
+}
+
 void rngd_os_parse(int c, const char *arg)
 {
 	switch (c) {
+	case 't':
+		schedule_by(BY_INTERVAL);
+		parse_interval(arg);
+		break;
 	case OPT_PHASE1:
+		schedule_by(BY_PHASES);
 		parse_phase(arg, 0);
 		break;
 	case OPT_PHASE2:
+		schedule_by(BY_PHASES);
 		parse_phase(arg, 1);
 		break;
 	default:
@@ -233,6 +265,8 @@ void rngd_os_parse(int c, const char *arg)
 
 void rngd_os_usage(void)
 {
+	fprintf(stderr, "\t-t --interval\tSeconds between wakeups that each inject, in place\n");
+	fprintf(stderr, "\t\t\tof --phase1 and --phase2\n");
 	fprintf(stderr, "\t   --phase1 PERIOD:WAKEUPS\tAlarm period in seconds and wakeups until\n");
 	fprintf(stderr, "\t           \tthe forced reseed that ends phase 1 (default %u:%u)\n",
 		ALARM_PERIOD_PHASE1, FORCE_RESEED_WAKEUPS_PHASE1);
@@ -667,6 +701,9 @@ void rngd_os_run(struct kernel_rng *rng)
 {
 	(void)rng;
 
+	dolog(JENT_LOG_DEBUG, "Alarm every %u s, forced reseed after %u wakeups; after the first every %u s and %u wakeups",
+	      alarm_period[0], force_reseed_wakeups[0], alarm_period[1],
+	      force_reseed_wakeups[1]);
 	install_alarm(alarm_period[0]);
 	select_fd();
 	/* NOTREACHED */
