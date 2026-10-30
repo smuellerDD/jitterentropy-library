@@ -166,9 +166,12 @@ ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
 			 * retries would only warn while the daemon seeded
 			 * nothing any more.
 			 */
-			if (dropped && (EPERM == errsv || EACCES == errsv))
+			if (dropped && (EPERM == errsv || EACCES == errsv)) {
+				/* dolog() exits, past the caller's wipe */
+				memset_secure(buf, 0, len);
 				dolog(JENT_LOG_ERR, "%s refuses the writes of user %s: %s",
 				      rng->dev, user, strerror(errsv));
+			}
 			dolog(JENT_LOG_WARN, "Error writing to %s: %s",
 			      rng->dev, strerror(errsv));
 			return -errsv;
@@ -196,7 +199,7 @@ static void drop_privileges(void)
 
 	pw = getpwnam(user);
 	if (!pw)
-		dolog_exit(1, "Unknown user %s", user);
+		dolog_exit(RNGD_EXIT_ERROR, "Unknown user %s", user);
 	gid = pw->pw_gid;
 
 	if (setgroups(1, &gid) || setgid(gid) || setuid(pw->pw_uid))
@@ -386,7 +389,7 @@ void rngd_os_run(struct kernel_rng *rng)
 				int errsv = errno;
 
 				dealloc();
-				exit(errsv);
+				exit(rngd_exit_status(errsv));
 			}
 			dolog(JENT_LOG_ERR, "pselect returned with error %s",
 			      strerror(errno));

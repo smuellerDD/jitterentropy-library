@@ -373,7 +373,7 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 			    size_t entropy_bytes, int force_reseed)
 {
 	ssize_t written = 0;
-	int ret;
+	int errsv, ret;
 
 	if (len > SSIZE_MAX)
 		return -EOVERFLOW;
@@ -394,9 +394,14 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	memcpy(rpi->buf, buf, len);
 
 	ret = ioctl(rng->fd, RNDADDENTROPY, rpi);
-	if (0 > ret) {
-		int errsv = errno;
+	errsv = errno;
 
+	/* Taken or refused, the data does not stay until the next injection */
+	rpi->entropy_count = 0;
+	rpi->buf_size = 0;
+	memset_secure(rpi->buf, 0, len);
+
+	if (0 > ret) {
 		dolog(JENT_LOG_WARN, "Error injecting entropy: %s", strerror(errsv));
 		return -errsv;
 	} else {
@@ -405,10 +410,6 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 		written = (ssize_t)len;
 	}
 
-	rpi->entropy_count = 0;
-	rpi->buf_size = 0;
-	memset(rpi->buf, 0, len);
-
 	/*
 	 * The LRNG does not require this IOCTL as the reseed is automatically
 	 * triggered.
@@ -416,7 +417,8 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	if (force_reseed && !lrng_present()) {
 		if (ioctl(rng->fd, RNDRESEEDCRNG) < 0) {
 			static int logged = 0;
-			int errsv = errno;
+
+			errsv = errno;
 
 			/*
 			 * A kernel before 4.17 has no such ioctl: the data is
@@ -678,7 +680,7 @@ static void select_fd(void)
 				int errsv = errno;
 
 				dealloc();
-				exit(errsv);
+				exit(rngd_exit_status(errsv));
 			}
 			dolog(JENT_LOG_ERR, "Select returned with error %s", strerror(errno));
 		}
@@ -814,7 +816,7 @@ void rngd_os_dealloc(struct kernel_rng *rng)
 	(void)rng;
 
 	if (NULL != rpi) {
-		memset(rpi, 0, RNDADDENTROPY_ALLOCSIZE);
+		memset_secure(rpi, 0, RNDADDENTROPY_ALLOCSIZE);
 		free(rpi);
 		rpi = NULL;
 	}

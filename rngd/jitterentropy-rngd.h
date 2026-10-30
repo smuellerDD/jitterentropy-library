@@ -49,6 +49,7 @@
 #include <getopt.h>
 #include <signal.h>
 #include <stddef.h>
+#include <string.h>
 #include <sys/types.h>
 
 #include "jitterentropy.h"
@@ -61,7 +62,12 @@
 #define JENT_LOG_NOTICE	(-1)
 
 /* Not errnos, which differ per system and reach into a shell's 128+n */
+#define RNGD_EXIT_OK		0
+#define RNGD_EXIT_ERROR		1	/* any other failure */
 #define RNGD_EXIT_PERMANENT	2	/* permanent health test failure */
+#define RNGD_EXIT_EIO		3
+#define RNGD_EXIT_EINVAL	4
+#define RNGD_EXIT_EPERM		5	/* EPERM or EACCES */
 
 #define ENTROPYBYTES 32
 #define OVERSAMPLINGFACTOR 2
@@ -85,6 +91,7 @@ void dolog(int severity, const char *fmt, ...)
 	__attribute__((format(printf, 2, 3)));
 void dolog_exit(int exit_status, const char *fmt, ...)
 	__attribute__((format(printf, 2, 3), noreturn));
+int rngd_exit_status(int err);
 void usage(void) __attribute__((noreturn));
 unsigned int parse_uint_until(const char *str, char term, const char **rest);
 unsigned int parse_uint(const char *str);
@@ -93,6 +100,13 @@ void dealloc(void);
 ssize_t gather_entropy_retry(struct kernel_rng *rng);
 void process_term(void) __attribute__((noreturn));
 void process_status(void);
+
+/* A wipe the compiler cannot drop, before a free() or an exit() included */
+static inline void memset_secure(void *s, int c, size_t n)
+{
+	memset(s, c, n);
+	__asm__ __volatile__("" : : "r" (s) : "memory");
+}
 
 /*
  * The operating system's part. Its options extend the daemon's: short ones in

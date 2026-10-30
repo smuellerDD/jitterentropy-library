@@ -83,17 +83,10 @@ static int foreground = 0;
  * a wrapping monitor will pick up the errors and handle it as it sees fit, such
  * as creating audit logs and possibly restart the daemon.
  *
- * The following errors are returned:
- *
- * * EOPNOTSUPP - the Jitter RNG triggered a fatal health test error
- * * Errors the kernel reports for an injection: of the IOCTLs RNDADDENTROPY
- *   and RNDRESEEDCRNG to /dev/random on Linux, of write(2) to it elsewhere
- * * Errors of pselect(2) waiting for the next occasion
- *
- * Every other failure - open(2), the PID file, fork(2), the startup of the
- * Jitter RNG - ends the daemon with 1, with or without this option. A
- * permanent health test failure ends it with RNGD_EXIT_PERMANENT, with or
- * without this option as well, see read_jent().
+ * This covers failed reads, injections and pselect(2), with the status of
+ * rngd_exit_status(). Every other failure ends the daemon with RNGD_EXIT_ERROR
+ * regardless, and a permanent health test failure with RNGD_EXIT_PERMANENT, for
+ * a monitor to tell it from those a restart may mend.
  */
 int exit_on_error = 0;
 
@@ -499,6 +492,22 @@ void dolog(int severity, const char *fmt, ...)
 	}
 }
 
+/* The RNGD_EXIT_* of the errno @err */
+int rngd_exit_status(int err)
+{
+	switch (err) {
+	case EIO:
+		return RNGD_EXIT_EIO;
+	case EINVAL:
+		return RNGD_EXIT_EINVAL;
+	case EPERM:
+	case EACCES:
+		return RNGD_EXIT_EPERM;
+	default:
+		return RNGD_EXIT_ERROR;
+	}
+}
+
 /* An error that ends the daemon with a status other than dolog()'s 1 */
 void dolog_exit(int exit_status, const char *fmt, ...)
 {
@@ -510,12 +519,6 @@ void dolog_exit(int exit_status, const char *fmt, ...)
 
 	dealloc();
 	exit(exit_status);
-}
-
-static inline void memset_secure(void *s, int c, size_t n)
-{
-	memset(s, c, n);
-	__asm__ __volatile__("" : : "r" (s) : "memory");
 }
 
 /*******************************************************************
@@ -555,7 +558,7 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 {
 	unsigned int reinits = rng->ec ?
 		jent_entropy_collector_reinitializations(rng->ec) : 0;
-	ssize_t ret;
+	ssize_t ret, err = -EIO;
 
 	/*
 	 *jent_read_entropy_safe implies a changing H_submitter which is not
@@ -590,13 +593,17 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 		dolog_exit(RNGD_EXIT_PERMANENT,
 			   "Permanent health test failure of the Jitter RNG (error code %zd): it must not be used any more",
 			   ret);
+	case JENT_ERR_EINVAL:
+	case JENT_ERR_NOTIME:
+		err = -EINVAL;
+		break;
 	default:
 		break;
 	}
 
 	dolog(JENT_LOG_WARN, "Cannot read entropy");
 
-	return -EOPNOTSUPP;
+	return err;
 }
 
 static ssize_t gather_entropy(struct kernel_rng *rng)
@@ -624,7 +631,7 @@ out:
 	if (exit_on_error && ret < 0) {
 		/* We now exit as requested by caller */
 		dealloc();
-		exit((int)-ret);
+		exit(rngd_exit_status((int)-ret));
 	}
 
 	/*
@@ -685,6 +692,8 @@ static int realloc_jent(struct kernel_rng *rng)
 
 ssize_t gather_entropy_retry(struct kernel_rng *rng)
 {
+	/* Set while no injection succeeds, for the log to tell it once */
+	static int failing = 0;
 	unsigned int i;
 	ssize_t written = gather_entropy(rng);
 
@@ -699,9 +708,14 @@ ssize_t gather_entropy_retry(struct kernel_rng *rng)
 	if (written < 0) {
 		struct timespec delay;
 
-		dolog(JENT_LOG_WARN,
+		/*
+		 * Warnings are hidden by default, but the daemon seeds nothing:
+		 * a notice, only once as this repeats.
+		 */
+		dolog(failing ? JENT_LOG_WARN : JENT_LOG_NOTICE,
 		      "Gathering of entropy still failing after %u retries",
 		      GATHER_RETRIES);
+		failing = 1;
 
 		/*
 		 * Back off before returning to the caller so that a permanent
@@ -710,6 +724,9 @@ ssize_t gather_entropy_retry(struct kernel_rng *rng)
 		delay.tv_sec = 1;
 		delay.tv_nsec = 0;
 		nanosleep(&delay, NULL);
+	} else if (failing) {
+		dolog(JENT_LOG_NOTICE, "Gathering of entropy works again");
+		failing = 0;
 	}
 
 	return written;
@@ -1203,5 +1220,5 @@ int main(int argc, char *argv[])
 
 out:
 	dealloc();
-	return -ret;
+	return rngd_exit_status(-ret);
 }

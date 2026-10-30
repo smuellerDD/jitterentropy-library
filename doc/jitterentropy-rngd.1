@@ -121,8 +121,11 @@ sandbox.
 An injection that fails - on an intermittent health test failure the Jitter
 RNG could not recover from, or on an injection the kernel refuses - makes the
 daemon initialize the Jitter RNG anew and try again, up to five times, before
-it waits for the next occasion. A permanent health test failure ends the
-daemon instead (see
+it waits for the next occasion. That a failure outlasted these retries is
+logged whatever
+.B \-\-verbose
+says, once, as is the first injection to work again. A permanent health test
+failure ends the daemon instead (see
 .BR "EXIT STATUS" ):
 a Jitter RNG that reported one must not be used any more, and a new instance
 would only start its health tests afresh. The health tests report failures in
@@ -395,16 +398,22 @@ as well.
 .PP
 With
 .B \-\-exit\-on\-error
-a failed injection ends the daemon with its
-.IR errno :
-.B EOPNOTSUPP
-for a health test failure of the Jitter RNG, otherwise that of the failing
-ioctl or
+a failed injection ends the daemon with a status for its
+.IR errno ,
+be it of the read, of the failing ioctl or
 .BR write (2),
 or of
 .BR pselect (2)
-waiting for the next occasion. Every other failure - opening a device, the PID
-file, the startup of the Jitter RNG - exits with 1, with the option or without.
+waiting for the next occasion: 3 for
+.BR EIO ,
+which a health test failure the Jitter RNG did not recover from gives, 4 for
+.BR EINVAL ,
+which a read without an instance or a timer gives, 5 for
+.B EPERM
+or
+.BR EACCES ,
+and 1 for any other. Every other failure - opening a device, the PID file, the
+startup of the Jitter RNG - exits with 1, with the option or without.
 .SH SIGNALS
 .TP
 .BR SIGTERM ", " SIGINT ", " SIGQUIT ", " SIGHUP
