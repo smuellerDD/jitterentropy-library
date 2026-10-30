@@ -93,6 +93,9 @@ def run(args, secs):
     for bad in ("- Error]", "- Warning]"):
         assert bad not in log, f"{bad} in the log"
     assert "Status of the Jitter RNG after its initialization:" in log
+    assert ("Kernel RNG: the LRNG" if lrng
+            else "RNDRESEEDCRNG works") in log
+    assert "/proc/sys/crypto/fips_enabled: " in log
     return log, log.count("Injected 64 bytes")
 
 

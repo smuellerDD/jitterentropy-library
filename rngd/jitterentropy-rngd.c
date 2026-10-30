@@ -883,7 +883,8 @@ static int alloc(void)
 
 	written = gather_entropy(&Random);
 	if (written >= 0) {
-		dolog(JENT_LOG_VERBOSE, "%zd bytes to %s", written, Random.dev);
+		dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s", written,
+		      Random.dev);
 	} else {
 		/*
 		 * We consider this as no error at this point - note that

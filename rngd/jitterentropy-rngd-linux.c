@@ -90,6 +90,8 @@ static unsigned int force_reseed_wakeups[2] = {
 };
 #define ENTROPYAVAIL "/proc/sys/kernel/random/entropy_avail"
 #define ENTROPYTHRESH "/proc/sys/kernel/random/write_wakeup_threshold"
+#define POOLSIZE "/proc/sys/kernel/random/poolsize"
+#define FIPS_ENABLED "/proc/sys/crypto/fips_enabled"
 #define LRNG_FILE "/proc/lrng_type"
 
 /* Older headers lack it: their kernels refuse it, which write_random() takes */
@@ -395,11 +397,13 @@ void rngd_os_seeded(void)
  * entropy handler functions
  *******************************************************************/
 
+static void log_kernel(int reseed_err);
+
 static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 			    size_t entropy_bytes, int force_reseed)
 {
 	ssize_t written = 0;
-	int errsv, ret;
+	int errsv, ret, reseed_err = 0;
 
 	if (len > SSIZE_MAX)
 		return -EOVERFLOW;
@@ -445,6 +449,7 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 			static int logged = 0;
 
 			errsv = errno;
+			reseed_err = errsv;
 
 			/*
 			 * A kernel before 4.17 has no such ioctl: the data is
@@ -466,6 +471,7 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	}
 
 out:
+	log_kernel(reseed_err);
 	return written;
 }
 
@@ -549,6 +555,55 @@ static int read_entropy_value(int fd)
 	}
 
 	return (int)entropy;
+}
+
+/* The value of the file @path, which a kernel may not have, for the log */
+static void log_proc_value(const char *path)
+{
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+
+	if (-1 == fd) {
+		dolog(JENT_LOG_NOTICE, "%s: not available", path);
+		return;
+	}
+	dolog(JENT_LOG_NOTICE, "%s: %d", path, read_entropy_value(fd));
+	close(fd);
+}
+
+/*
+ * Report the kernel after its first injection, whatever the verbosity.
+ * @reseed_err tells what the version cannot, a filter may stand in front of it.
+ */
+static void log_kernel(int reseed_err)
+{
+	static int logged = 0;
+	struct utsname kernel;
+
+	if (logged)
+		return;
+	logged = 1;
+
+	if (!uname(&kernel)) {
+		dolog(JENT_LOG_NOTICE, "Kernel: %s %s", kernel.sysname,
+		      kernel.release);
+		dolog(JENT_LOG_NOTICE, "Kernel build: %s", kernel.version);
+		dolog(JENT_LOG_NOTICE, "Kernel machine: %s", kernel.machine);
+	}
+
+	if (lrng_present())
+		dolog(JENT_LOG_NOTICE, "Kernel RNG: the LRNG, which needs no reseed IOCTL");
+	else if (!reseed_err)
+		dolog(JENT_LOG_NOTICE, "Kernel RNG: random.c, RNDRESEEDCRNG works");
+	else if (EINVAL == reseed_err)
+		dolog(JENT_LOG_NOTICE, "Kernel RNG: random.c, RNDRESEEDCRNG not supported");
+	else
+		dolog(JENT_LOG_NOTICE, "Kernel RNG: random.c, RNDRESEEDCRNG refused: %s",
+		      strerror(reseed_err));
+
+	log_proc_value(ENTROPYAVAIL);
+	log_proc_value(ENTROPYTHRESH);
+	log_proc_value(POOLSIZE);
+	log_proc_value(FIPS_ENABLED);
 }
 
 /*******************************************************************
