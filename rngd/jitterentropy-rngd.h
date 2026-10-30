@@ -102,6 +102,9 @@ void dealloc(void);
 ssize_t gather_entropy_retry(struct kernel_rng *rng);
 void process_term(void) __attribute__((noreturn));
 void process_status(void);
+void term_signals(sigset_t *set);
+void user_signals(sigset_t *set);
+int write_all(int fd, const char *buf, size_t len);
 void daemon_ready(void);
 
 /* A wipe the compiler cannot drop, before a free() or an exit() included */

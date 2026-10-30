@@ -790,9 +790,26 @@ int install_handler(int sig, void (*handler)(int), int flags)
 	return sigaction(sig, &sa, NULL);
 }
 
+static const int term_sigs[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
+
+void term_signals(sigset_t *set)
+{
+	size_t i;
+
+	sigemptyset(set);
+	for (i = 0; i < ARRAY_SIZE(term_sigs); i++)
+		sigaddset(set, term_sigs[i]);
+}
+
+void user_signals(sigset_t *set)
+{
+	sigemptyset(set);
+	sigaddset(set, SIGUSR1);
+	sigaddset(set, SIGUSR2);
+}
+
 static void install_term(void)
 {
-	static const int term_sigs[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
 	size_t i;
 
 	dolog(JENT_LOG_DEBUG, "Install termination signal handler");
@@ -911,8 +928,8 @@ static int alloc(void)
 /* Bytes of the Jitter RNG --generate reads at a time */
 #define GENERATE_CHUNK	1024
 
-/* All @len bytes of @buf to @fd: 0 or a -errno */
-static int write_all(int fd, const char *buf, size_t len)
+/* All @len bytes of @buf to @fd: 0 or a -errno, -ENOSPC if it takes no more */
+int write_all(int fd, const char *buf, size_t len)
 {
 	while (len) {
 		ssize_t ret = write(fd, buf, len);
@@ -922,12 +939,19 @@ static int write_all(int fd, const char *buf, size_t len)
 		if (ret < 0)
 			return -errno;
 		if (ret == 0)
-			return -EIO;
+			return -ENOSPC;
 		buf += ret;
 		len -= (size_t)ret;
 	}
 
 	return 0;
+}
+
+/* What --output and --pid take: a regular file of our user, with one link */
+static int own_single_link_file(const struct stat *st)
+{
+	return S_ISREG(st->st_mode) && st->st_uid == geteuid() &&
+	       st->st_nlink == 1;
 }
 
 /*
@@ -970,8 +994,7 @@ static void generate_bytes(void)
 		if (fstat(fd, &st))
 			dolog(JENT_LOG_ERR, "Cannot stat %s: %s", output,
 			      strerror(errno));
-		if (!S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
-		    st.st_nlink != 1)
+		if (!own_single_link_file(&st))
 			dolog(JENT_LOG_ERR, "%s is not a regular file of user %u with a single link",
 			      output, (unsigned int)geteuid());
 		if (fchmod(fd, S_IRUSR|S_IWUSR) || ftruncate(fd, 0) ||
@@ -1054,8 +1077,7 @@ again:
 		goto again;
 	}
 
-	if (!S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
-	    st.st_nlink != 1)
+	if (!own_single_link_file(&st))
 		dolog(JENT_LOG_ERR, "PID file %s is not a regular file of user %u with a single link",
 		      pid_file, (unsigned int)geteuid());
 

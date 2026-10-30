@@ -162,13 +162,11 @@ static int get_kernver(void)
 		return -errno;
 
 	/*
-	 * Parse into local variables and only publish them once all three
-	 * components were obtained. Otherwise a partial parse would leave
-	 * kern_maj set, which makes all subsequent calls report success while
-	 * kern_minor / kern_patchlevel hold bogus values.
+	 * Publish only once parsed: kern_maj set by a partial parse would have
+	 * all later calls report success with bogus values.
 	 */
 
-	/* 5.11.2 */
+	/* 5.11.2, or 6.18-rc1 with no patchlevel, which is then 0 */
 	res = strtok_r(kernel.release, ".", &saveptr);
 	if (!res)
 		goto err;
@@ -180,9 +178,7 @@ static int get_kernver(void)
 	minor = strtoul(res, NULL, 10);
 
 	res = strtok_r(NULL, ".", &saveptr);
-	if (!res)
-		goto err;
-	patchlevel = strtoul(res, NULL, 10);
+	patchlevel = res ? strtoul(res, NULL, 10) : 0;
 
 	if (maj == ULONG_MAX)
 		goto err;
@@ -649,6 +645,13 @@ static void set_alarm(unsigned int secs)
 		dolog(JENT_LOG_ERR, "Cannot set the alarm: %s", strerror(errno));
 }
 
+static void seed_random(void)
+{
+	ssize_t written = gather_entropy_retry(&Random);
+
+	dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
+}
+
 /*
  * Wakeup and check entropy_avail -- this covers the drain of entropy
  * from the nonblocking_pool via get_random_bytes. @expiries is the number of
@@ -657,7 +660,6 @@ static void set_alarm(unsigned int secs)
 static void process_alarm(uint64_t expiries)
 {
 	int entropy = 0, thresh = 0;
-	ssize_t written = 0;
 	static unsigned int phase = 0;
 	static unsigned int wakeups = 0;
 	unsigned int due = force_reseed_wakeups[phase] - wakeups;
@@ -672,16 +674,14 @@ static void process_alarm(uint64_t expiries)
 			set_alarm(alarm_period[phase]);
 		}
 		dolog(JENT_LOG_DEBUG, "Force reseed");
-		written = gather_entropy_retry(&Random);
-		dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
+		seed_random();
 		return;
 	}
 	wakeups += (unsigned int)expiries;
 
 	/* /dev/random may never ask: a ready kernel does not. */
 	if (!seeded) {
-		written = gather_entropy_retry(&Random);
-		dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
+		seed_random();
 		return;
 	}
 
@@ -697,8 +697,7 @@ static void process_alarm(uint64_t expiries)
 	}
 	dolog(JENT_LOG_DEBUG, "Insufficient entropy %d available (threshold %d)",
 	      entropy, thresh);
-	written = gather_entropy_retry(&Random);
-	dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
+	seed_random();
 }
 
 /*
@@ -734,14 +733,9 @@ static void select_fd(void)
 {
 	fd_set rfds, wfds;
 	int ret = 0, nfds;
-	ssize_t written = 0;
 	sigset_t blocked, unblocked;
 
-	sigemptyset(&blocked);
-	sigaddset(&blocked, SIGHUP);
-	sigaddset(&blocked, SIGINT);
-	sigaddset(&blocked, SIGQUIT);
-	sigaddset(&blocked, SIGTERM);
+	term_signals(&blocked);
 
 	while (1) {
 		/*
@@ -812,9 +806,7 @@ static void select_fd(void)
 		}
 		if (FD_ISSET(Random.fd, &wfds)) {
 			dolog(JENT_LOG_VERBOSE, "Wakeup call for select on /dev/random");
-			written = gather_entropy_retry(&Random);
-			dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random",
-			      written);
+			seed_random();
 		}
 	}
 }
@@ -862,14 +854,6 @@ static void drop_capabilities(unsigned int keep)
 /*******************************************************************
  * the daemon's hooks
  *******************************************************************/
-
-/* SIGUSR1 and SIGUSR2, for Signal_fd */
-static void user_signals(sigset_t *set)
-{
-	sigemptyset(set);
-	sigaddset(set, SIGUSR1);
-	sigaddset(set, SIGUSR2);
-}
 
 /*
  * No core dump, and no debugger short of CAP_SYS_PTRACE: the first seed and

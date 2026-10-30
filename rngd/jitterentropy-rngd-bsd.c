@@ -132,43 +132,36 @@ void rngd_os_usage(void)
 ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
 		       size_t entropy_bytes)
 {
-	size_t done = 0;
+	int ret;
 
 	(void)entropy_bytes;
 
-	while (done < len) {
-		ssize_t ret = write(rng->fd, buf + done, len - done);
+	ret = write_all(rng->fd, buf, len);
+	if (ret) {
+		int errsv = -ret;
 
-		if (ret < 0 && errno == EINTR)
-			continue;
-		if (ret < 0) {
-			int errsv = errno;
-
-			/*
-			 * Refused for good, on NetBSD with a --user: the
-			 * retries would only warn while the daemon seeded
-			 * nothing any more.
-			 */
-			if (dropped && (EPERM == errsv || EACCES == errsv)) {
-				/* dolog() exits, past the caller's wipe */
-				memset_secure(buf, 0, len);
-				dolog(JENT_LOG_ERR, "%s refuses the writes of user %s: %s",
-				      rng->dev, user, strerror(errsv));
-			}
-			dolog(JENT_LOG_WARN, "Error writing to %s: %s",
-			      rng->dev, strerror(errsv));
-			return -errsv;
+		/*
+		 * Refused for good, on NetBSD with a --user: the retries would
+		 * only warn while the daemon seeded nothing any more.
+		 */
+		if (dropped && (EPERM == errsv || EACCES == errsv)) {
+			/* dolog() exits, past the caller's wipe */
+			memset_secure(buf, 0, len);
+			dolog(JENT_LOG_ERR, "%s refuses the writes of user %s: %s",
+			      rng->dev, user, strerror(errsv));
 		}
-		if (ret == 0) {
+		if (ENOSPC == errsv) {
 			dolog(JENT_LOG_WARN, "%s took no data", rng->dev);
 			return -EIO;
 		}
-		done += (size_t)ret;
+		dolog(JENT_LOG_WARN, "Error writing to %s: %s",
+		      rng->dev, strerror(errsv));
+		return ret;
 	}
 
-	dolog(JENT_LOG_DEBUG, "Wrote %zu bytes to %s", done, rng->dev);
+	dolog(JENT_LOG_DEBUG, "Wrote %zu bytes to %s", len, rng->dev);
 
-	return (ssize_t)done;
+	return (ssize_t)len;
 }
 
 /* Root only: on macOS the daemon is started unprivileged in the first place. */
@@ -246,14 +239,6 @@ static void sig_user(int sig)
 		Status_pending = 1;
 	else
 		Reseed_pending = 1;
-}
-
-/* SIGUSR1 and SIGUSR2 */
-static void user_signals(sigset_t *set)
-{
-	sigemptyset(set);
-	sigaddset(set, SIGUSR1);
-	sigaddset(set, SIGUSR2);
 }
 
 /*
@@ -352,11 +337,7 @@ void rngd_os_run(struct kernel_rng *rng)
 		dolog(JENT_LOG_ERR, "Cannot install the handler of SIGUSR1 and SIGUSR2: %s",
 		      strerror(errno));
 
-	sigemptyset(&blocked);
-	sigaddset(&blocked, SIGHUP);
-	sigaddset(&blocked, SIGINT);
-	sigaddset(&blocked, SIGQUIT);
-	sigaddset(&blocked, SIGTERM);
+	term_signals(&blocked);
 
 	set_due(&due);
 	daemon_ready();
