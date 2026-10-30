@@ -585,11 +585,8 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 
 	switch (ret) {
 	/*
-	 * A permanent health test failure: the noise source must not be used
-	 * any more. gather_entropy_retry() would re-initialize the Jitter RNG
-	 * as for any other failure, and the new instance, its health tests
-	 * starting afresh, would carry on past the failure. So the daemon
-	 * ends here, with or without --exit-on-error.
+	 * The noise source must not be used any more: a re-initialization would
+	 * restart the health tests and carry on past the failure.
 	 */
 	case JENT_ERR_RCT_PERMANENT:
 	case JENT_ERR_APT_PERMANENT:
@@ -611,6 +608,9 @@ static ssize_t read_jent(struct kernel_rng *rng, char *buf, size_t buflen)
 	return err;
 }
 
+/* Whether the last gather_entropy() failed at the Jitter RNG, not the kernel */
+static int read_failed = 0;
+
 static ssize_t gather_entropy(struct kernel_rng *rng)
 {
 	char buf[INJECT_BYTES];
@@ -618,7 +618,8 @@ static ssize_t gather_entropy(struct kernel_rng *rng)
 	ssize_t ret = 0;
 
 	ret = read_jent(rng, buf, buflen);
-	if (ret < 0)
+	read_failed = ret < 0;
+	if (read_failed)
 		goto out;
 
 	/* Full entropy, where the kernel's interface takes a count at all */
@@ -659,15 +660,37 @@ out:
 }
 
 /*
- * Number of times the Jitter RNG is torn down and re-initialized when the
- * gathering of entropy reports an error.
+ * Number of times the gathering of entropy is tried again after an error.
  *
  * The retry has to be bounded: an error that does not heal (say, the
  * RNDADDENTROPY IOCTL being rejected) would otherwise make the caller spin in
- * a tight loop, burning a CPU indefinitely while re-allocating the entropy
- * collector on every iteration.
+ * a tight loop, burning a CPU indefinitely.
  */
 #define GATHER_RETRIES	5
+
+/*
+ * The startup test and a new collector in @rng: 0, or a failure logged at
+ * @severity. @when labels the status logged of the new Jitter RNG.
+ */
+static int start_jent(struct kernel_rng *rng, int severity, const char *when)
+{
+	int ret = jent_entropy_init_ex(jent_osr, jent_flags);
+
+	if (ret) {
+		dolog(severity, "The initialization of CPU Jitter RNG failed with error code %d",
+		      ret);
+		return -EAGAIN;
+	}
+
+	rng->ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
+	if (!rng->ec) {
+		dolog(severity, "Allocation of entropy collector failed");
+		return -EAGAIN;
+	}
+	log_status(rng->ec, when, JENT_LOG_VERBOSE);
+
+	return 0;
+}
 
 /*
  * A fresh Jitter RNG for gather_entropy_retry(). A failure only warns: the
@@ -675,28 +698,12 @@ out:
  */
 static int realloc_jent(struct kernel_rng *rng)
 {
-	int ret;
-
 	if (NULL != rng->ec) {
 		jent_entropy_collector_free(rng->ec);
 		rng->ec = NULL;
 	}
 
-	ret = jent_entropy_init_ex(jent_osr, jent_flags);
-	if (ret) {
-		dolog(JENT_LOG_WARN, "The initialization of CPU Jitter RNG failed with error code %d",
-		      ret);
-		return -EAGAIN;
-	}
-
-	rng->ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
-	if (!rng->ec) {
-		dolog(JENT_LOG_WARN, "Allocation of entropy collector failed");
-		return -EAGAIN;
-	}
-	log_status(rng->ec, "after its re-initialization", JENT_LOG_VERBOSE);
-
-	return 0;
+	return start_jent(rng, JENT_LOG_WARN, "after its re-initialization");
 }
 
 ssize_t gather_entropy_retry(struct kernel_rng *rng)
@@ -707,9 +714,15 @@ ssize_t gather_entropy_retry(struct kernel_rng *rng)
 	ssize_t written = gather_entropy(rng);
 
 	for (i = 0; written < 0 && i < GATHER_RETRIES; i++) {
-		dolog(JENT_LOG_DEBUG, "Re-initializing the Jitter RNG");
-		if (realloc_jent(rng))
-			continue;
+		/*
+		 * A new instance mends a read, not what the kernel refused,
+		 * and would give up what the health tests raised.
+		 */
+		if (read_failed) {
+			dolog(JENT_LOG_DEBUG, "Re-initializing the Jitter RNG");
+			if (realloc_jent(rng))
+				continue;
+		}
 
 		written = gather_entropy(rng);
 	}
@@ -853,57 +866,18 @@ void dealloc(void)
 	}
 }
 
-static int alloc_rng(struct kernel_rng *rng)
+static void alloc(void)
 {
-	rng->ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
-	if (!rng->ec) {
-		dolog(JENT_LOG_ERR, "Allocation of entropy collector failed");
-		return -EAGAIN;
-	}
-
-	if (status) {
-		char buf[4096];
-		int ret = jent_status(rng->ec, buf, sizeof(buf));
-
-		if (ret)
-			return ret;
-
-		/* As it is: jent_status() ends the document with a newline */
-		fputs(buf, stderr);
-		return -EAGAIN;
-	}
-
-	log_status(rng->ec, "after its initialization", JENT_LOG_VERBOSE);
-
-	rng->fd = open(rng->dev, O_WRONLY);
-	if (-1 == rng->fd) {
-		int errsv = errno;
-
-		dolog(JENT_LOG_ERR, "Open of %s failed: %s", rng->dev, strerror(errno));
-		return -errsv;
-	}
-
-	return 0;
-}
-
-static int alloc(void)
-{
-	int ret = 0;
 	ssize_t written = 0;
 
-	ret = jent_entropy_init_ex(jent_osr, jent_flags);
-	if (ret) {
-		dolog(JENT_LOG_ERR, "The initialization of CPU Jitter RNG failed with error code %d\n", ret);
-		return ret;
-	}
+	start_jent(&Random, JENT_LOG_ERR, "after its initialization");
 
-	ret = alloc_rng(&Random);
-	if (ret)
-		return ret;
+	Random.fd = open(Random.dev, O_WRONLY);
+	if (-1 == Random.fd)
+		dolog(JENT_LOG_ERR, "Open of %s failed: %s", Random.dev,
+		      strerror(errno));
 
-	ret = rngd_os_alloc(&Random);
-	if (ret)
-		return ret;
+	rngd_os_alloc(&Random);
 
 	if (oneshot)
 		rngd_os_drop_privileges(1);
@@ -917,8 +891,21 @@ static int alloc(void)
 		dolog(JENT_LOG_NOTICE, "The first seed of %s failed, retrying: %zd",
 		      Random.dev, written);
 	}
+}
 
-	return 0;
+/* --status: on stderr, the log being stdout's. No root or /dev/random needed */
+static void print_status(void)
+{
+	char buf[4096];
+
+	/* In Random, so that dealloc() frees it on every exit */
+	start_jent(&Random, JENT_LOG_ERR, "after its initialization");
+
+	if (jent_status(Random.ec, buf, sizeof(buf)))
+		dolog(JENT_LOG_ERR, "Cannot obtain the status of the Jitter RNG");
+
+	/* As it is: jent_status() ends the document with a newline */
+	fputs(buf, stderr);
 }
 
 /*******************************************************************
@@ -965,18 +952,10 @@ static void generate_bytes(void)
 	char buf[GENERATE_CHUNK], hexbuf[2 * GENERATE_CHUNK];
 	const char *name = output ? output : "stdout";
 	unsigned int left = generate;
-	int fd = STDOUT_FILENO, ret;
-
-	ret = jent_entropy_init_ex(jent_osr, jent_flags);
-	if (ret)
-		dolog(JENT_LOG_ERR, "The initialization of CPU Jitter RNG failed with error code %d",
-		      ret);
+	int fd = STDOUT_FILENO, ret = 0;
 
 	/* In Random, so that dealloc() frees it on every exit */
-	Random.ec = jent_entropy_collector_alloc(jent_osr, jent_flags);
-	if (!Random.ec)
-		dolog(JENT_LOG_ERR, "Allocation of entropy collector failed");
-	log_status(Random.ec, "after its initialization", JENT_LOG_VERBOSE);
+	start_jent(&Random, JENT_LOG_ERR, "after its initialization");
 
 	if (output) {
 		struct stat st;
@@ -1131,10 +1110,9 @@ static void detach(void)
 	pid_t pid;
 
 	/*
-	 * The parent exits with the verdict of the child, which writes a byte
-	 * after the first seed: the kernel is seeded and the PID file exists
-	 * when the start returns. A child that exits before leaves EOF and its
-	 * exit status, the parent's then.
+	 * The child writes a byte once it runs, the first seed tried: exit 0
+	 * says the daemon is up, not that the seed worked. A child that exits
+	 * before leaves EOF, and the parent takes over its exit status.
 	 */
 	if (pipe(ready))
 		dolog(JENT_LOG_ERR, "Cannot create pipe to daemonize: %s",
@@ -1231,9 +1209,8 @@ static void daemonize(void)
 }
 
 /*
- * The last that can fail the start is done: a failure until here still had
- * the invoker's terminal and exit status. The parent gone is none: the daemon
- * seeded the kernel.
+ * Nothing can fail the start any more: until here a failure still had the
+ * invoker's terminal and exit status.
  */
 void daemon_ready(void)
 {
@@ -1288,7 +1265,6 @@ static unsigned int open_std_fds(void)
 int main(int argc, char *argv[])
 {
 	unsigned int closed_fds;
-	int ret;
 
 	/* Before anything opens a file */
 	closed_fds = open_std_fds();
@@ -1318,6 +1294,11 @@ int main(int argc, char *argv[])
 		dealloc();
 		return 0;
 	}
+	if (status) {
+		print_status();
+		dealloc();
+		return RNGD_EXIT_ERROR;
+	}
 
 	/*
 	 * Not for --generate, which a reader going away ends quietly: here that
@@ -1329,12 +1310,10 @@ int main(int argc, char *argv[])
 
 	rngd_os_start();
 
-	if (!foreground && !oneshot && !status)
+	if (!foreground && !oneshot)
 		daemonize();
 
-	ret = alloc();
-	if (ret)
-		goto out;
+	alloc();
 
 	/* alloc() injected once; a failure gets the retries the alarm has */
 	if (oneshot) {
@@ -1353,8 +1332,4 @@ int main(int argc, char *argv[])
 	rngd_os_sandbox(&Random);
 	rngd_os_run(&Random);
 	/* NOTREACHED */
-
-out:
-	dealloc();
-	return rngd_exit_status(-ret);
 }

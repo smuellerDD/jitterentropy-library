@@ -51,6 +51,13 @@ check_hex("${_text}" ${_bytes})
 rngd_ok(--generate 32 --hex -vv)
 check_hex("${_stdout}" 32)
 
+# --status needs neither, and ends with 1 after the document.
+execute_process(COMMAND "${RNGD}" --status RESULT_VARIABLE _ret
+                OUTPUT_QUIET ERROR_VARIABLE _stderr)
+if(NOT _ret EQUAL 1 OR NOT _stderr MATCHES "\"version\"")
+    message(FATAL_ERROR "jitterentropy-rngd --status: ${_ret}\n${_stderr}")
+endif()
+
 rngd_refused(--generate 0)
 rngd_refused(--generate -1)
 rngd_refused(--hex)

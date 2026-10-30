@@ -83,6 +83,8 @@
 #define ALARM_PERIOD_PHASE1	5
 #define FORCE_RESEED_WAKEUPS_PHASE2	12
 #define ALARM_PERIOD_PHASE2	50
+/* The alarm while no first seed went in: the BSDs' UNSEEDED_INTERVAL */
+#define UNSEEDED_PERIOD	5
 static unsigned int alarm_period[2] = {
 	ALARM_PERIOD_PHASE1, ALARM_PERIOD_PHASE2
 };
@@ -617,10 +619,8 @@ static void log_kernel(int reseed_err)
  *******************************************************************/
 
 /*
- * The alarm: a timerfd that select_fd() waits for along with /dev/random,
- * rather than alarm(2) and SIGALRM - no signal handler, and the expiries the
- * daemon was too busy to see are counted rather than lost. -1 with the LRNG,
- * which reseeds by itself.
+ * The alarm, a timerfd: what expires while the daemon is busy is counted, not
+ * lost. The LRNG has one only until the first seed, -1 if that worked at once.
  */
 static int Alarm_fd = -1;
 
@@ -629,6 +629,9 @@ static int Alarm_fd = -1;
  * this exists stays pending rather than ending the daemon, as by default.
  */
 static int Signal_fd = -1;
+
+/* The alarm retries a failed first seed; the schedule starts after it */
+static int Seed_retrying = 0;
 
 /* Let the alarm go off every @secs seconds from now on. */
 static void set_alarm(unsigned int secs)
@@ -664,6 +667,16 @@ static void process_alarm(uint64_t expiries)
 	static unsigned int wakeups = 0;
 	unsigned int due = force_reseed_wakeups[phase] - wakeups;
 
+	if (Seed_retrying) {
+		if (!seeded)
+			seed_random();
+		if (seeded) {
+			Seed_retrying = 0;
+			set_alarm(lrng_present() ? 0 : alarm_period[0]);
+		}
+		return;
+	}
+
 	dolog(JENT_LOG_VERBOSE, "Wakeup call for alarm on %s", ENTROPYAVAIL);
 
 	if (expiries >= due) {
@@ -678,12 +691,6 @@ static void process_alarm(uint64_t expiries)
 		return;
 	}
 	wakeups += (unsigned int)expiries;
-
-	/* /dev/random may never ask: a ready kernel does not. */
-	if (!seeded) {
-		seed_random();
-		return;
-	}
 
 	entropy = read_entropy_value(Entropy_avail_fd);
 	thresh = read_entropy_value(Entropy_thresh_fd);
@@ -836,7 +843,7 @@ static void drop_capabilities(unsigned int keep)
 	}
 
 	if (capget(&hdr, caps)) {
-		dolog(JENT_LOG_WARN, "Cannot read the capabilities: %s",
+		dolog(JENT_LOG_NOTICE, "Cannot read the capabilities: %s",
 		      strerror(errno));
 		return;
 	}
@@ -847,7 +854,7 @@ static void drop_capabilities(unsigned int keep)
 	memset(&caps[1], 0, sizeof(caps[1]));
 
 	if (capset(&hdr, caps))
-		dolog(JENT_LOG_WARN, "Cannot drop the capabilities: %s",
+		dolog(JENT_LOG_NOTICE, "Cannot drop the capabilities: %s",
 		      strerror(errno));
 }
 
@@ -856,19 +863,16 @@ static void drop_capabilities(unsigned int keep)
  *******************************************************************/
 
 /*
- * No core dump, and no debugger short of CAP_SYS_PTRACE: the first seed and
- * --generate precede every sandbox, so this comes before any random number.
- * Not RLIMIT_CORE, which the unit sets as its filter denies setrlimit(2), and
- * no speculation controls, which would change the timing that is measured.
- *
- * Refused W^X is all the daemon's memory ever wants, a kernel before 6.3 has
- * no such prctl: nothing to report.
+ * No core dump or debugger, before any random number: the first seed and
+ * --generate precede every sandbox. No speculation controls, which would change
+ * the timing that is measured. PR_SET_MDWE is new in Linux 6.3, and any other
+ * refusal is only logged: a seeded kernel is worth more than the hardening.
  */
 void rngd_os_harden(void)
 {
 	if (prctl(PR_SET_DUMPABLE, 0L, 0L, 0L, 0L) ||
 	    prctl(PR_SET_NO_NEW_PRIVS, 1L, 0L, 0L, 0L))
-		dolog(JENT_LOG_WARN, "Cannot harden the process: %s",
+		dolog(JENT_LOG_NOTICE, "Cannot harden the process: %s",
 		      strerror(errno));
 
 	(void)prctl(PR_SET_MDWE, PR_MDWE_REFUSE_EXEC_GAIN, 0L, 0L, 0L);
@@ -881,11 +885,7 @@ void rngd_os_start(void)
 	if (geteuid())
 		dolog(JENT_LOG_ERR, "Program must start as root!");
 
-	/*
-	 * The LRNG reseeds by itself and takes data when /dev/random reports
-	 * it wants some: the daemon sets no alarm there, which would leave a
-	 * schedule asked for unkept without a word.
-	 */
+	/* The LRNG reseeds by itself: a schedule asked for would go unkept. */
 	if (schedule_set_by && lrng_present())
 		dolog(JENT_LOG_ERR, "%s has no effect on a kernel with the LRNG, which reseeds by itself",
 		      BY_INTERVAL == schedule_set_by ?
@@ -896,19 +896,17 @@ void rngd_os_start(void)
 	sigprocmask(SIG_BLOCK, &usr, NULL);
 }
 
-int rngd_os_alloc(struct kernel_rng *rng)
+void rngd_os_alloc(struct kernel_rng *rng)
 {
 	(void)rng;
 
 	rpi = malloc(RNDADDENTROPY_ALLOCSIZE);
-	if (!rpi) {
+	if (!rpi)
 		dolog(JENT_LOG_ERR, "Cannot allocate memory for random bytes");
-		return -ENOMEM;
-	}
 
 	/* For the alarm alone: --oneshot can run before /proc is mounted. */
 	if (oneshot)
-		return 0;
+		return;
 
 	/* Before the first seed, so that it is seen if that fails the start */
 	if (lrng_present())
@@ -919,22 +917,14 @@ int rngd_os_alloc(struct kernel_rng *rng)
 		      alarm_period[1], force_reseed_wakeups[1]);
 
 	Entropy_avail_fd = open(ENTROPYAVAIL, O_RDONLY);
-	if (-1 == Entropy_avail_fd) {
-		int errsv = errno;
-
-		dolog(JENT_LOG_ERR, "Open of %s failed: %s", ENTROPYAVAIL, strerror(errno));
-		return -errsv;
-	}
+	if (-1 == Entropy_avail_fd)
+		dolog(JENT_LOG_ERR, "Open of %s failed: %s", ENTROPYAVAIL,
+		      strerror(errno));
 
 	Entropy_thresh_fd = open(ENTROPYTHRESH, O_RDONLY);
-	if (-1 == Entropy_thresh_fd) {
-		int errsv = errno;
-
-		dolog(JENT_LOG_ERR, "Open of %s failed: %s", ENTROPYTHRESH, strerror(errno));
-		return -errsv;
-	}
-
-	return 0;
+	if (-1 == Entropy_thresh_fd)
+		dolog(JENT_LOG_ERR, "Open of %s failed: %s", ENTROPYTHRESH,
+		      strerror(errno));
 }
 
 void rngd_os_drop_privileges(int seeding)
@@ -962,14 +952,19 @@ void rngd_os_run(struct kernel_rng *rng)
 		dolog(JENT_LOG_ERR, "Cannot create the signalfd for SIGUSR1 and SIGUSR2: %s",
 		      strerror(errno));
 
-	/* After daemonize(), so that the timer is the detached daemon's own */
-	if (!lrng_present()) {
+	/*
+	 * After daemonize(), so that the timer is the detached daemon's own.
+	 * On the LRNG it retries a first seed that failed, and nothing else.
+	 */
+	if (!lrng_present() || !seeded) {
 		Alarm_fd = timerfd_create(CLOCK_MONOTONIC,
 					  TFD_CLOEXEC | TFD_NONBLOCK);
 		if (-1 == Alarm_fd)
 			dolog(JENT_LOG_ERR, "Cannot create the alarm: %s",
 			      strerror(errno));
-		set_alarm(alarm_period[0]);
+		Seed_retrying = !seeded;
+		set_alarm(Seed_retrying && alarm_period[0] > UNSEEDED_PERIOD ?
+			  UNSEEDED_PERIOD : alarm_period[0]);
 	}
 	daemon_ready();
 	select_fd();

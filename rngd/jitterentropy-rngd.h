@@ -130,11 +130,11 @@ void rngd_os_usage(void);
 /* After the options are parsed, before any random number exists. */
 void rngd_os_harden(void);
 
-/* The daemon's start, past what --generate takes. */
+/* The daemon's start, past what --generate and --status take. */
 void rngd_os_start(void);
 
-/* After Random is open: what else the injections need. 0 or a -errno. */
-int rngd_os_alloc(struct kernel_rng *rng);
+/* After Random is open: what else the injections need, or the daemon ends. */
+void rngd_os_alloc(struct kernel_rng *rng);
 
 /* Inject @len bytes with @entropy_bytes of entropy: bytes taken or -errno */
 ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,

@@ -45,9 +45,12 @@ number generator
 The daemon injects:
 .IP \(bu 3
 once at startup. When the invocation returns, the kernel
-has therefore been seeded, unless that injection failed, which the daemon
-reports as a warning (see
-.BR \-\-verbose ).
+has therefore been seeded, unless that injection failed, which the daemon logs
+whatever
+.B \-\-verbose
+says, and retries; with
+.B \-\-exit\-on\-error
+the failure ends the start.
 The kernel schedules during the injection, so it may still report
 insufficient entropy right after the start;
 .IP \(bu 3
@@ -96,7 +99,11 @@ it is not dumpable: it leaves no core dump and only a process with
 .B CAP_SYS_PTRACE
 can attach to it. It also sets
 .B no_new_privs
-and, from Linux 6.3 on, refuses memory that becomes executable.
+and, from Linux 6.3 on, refuses memory that becomes executable. Where a
+capability drop or either of the first two is refused, the daemon logs it
+whatever
+.B \-\-verbose
+says and runs on without.
 .SS FreeBSD, NetBSD, OpenBSD and macOS
 None of these kernels has an entropy estimate to poll. The daemon writes 64
 bytes of Jitter RNG output to
@@ -145,10 +152,11 @@ whether it has the LRNG, the outcome of
 its entropy settings and
 .IR /proc/sys/crypto/fips_enabled .
 .PP
-An injection that fails - on an intermittent health test failure the Jitter
-RNG could not recover from, or on an injection the kernel refuses - makes the
-daemon initialize the Jitter RNG anew and try again, up to five times, before
-it waits for the next occasion. That a failure outlasted these retries is
+An injection that fails makes the daemon try again, up to five times, before
+it waits for the next occasion. On an intermittent health test failure the
+Jitter RNG could not recover from, it initializes the Jitter RNG anew first;
+an injection the kernel refuses leaves the Jitter RNG as it is. That a failure
+outlasted these retries is
 logged whatever
 .B \-\-verbose
 says, once, as is the first injection to work again. A permanent health test
@@ -162,9 +170,10 @@ FIPS and NTG.1 mode only -
 or a system in FIPS mode.
 .PP
 The daemon detaches before it allocates the Jitter RNG, whose memory locks in
-FIPS and NTG.1 mode a forked child would not inherit, and the invocation
-returns after the first injection, with the exit status of a daemon that ended
-before it. Started by init it does not fork, and writes the
+FIPS and NTG.1 mode a forked child would not inherit. The invocation returns
+once the daemon runs, after the first injection, with 0 even if that failed and
+is being retried, and with the exit status of a daemon that ended before.
+Started by init it does not fork, and writes the
 .B \-\-pid
 file all the same.
 .PP
@@ -407,6 +416,8 @@ or
 on which it shuts down cleanly. 1 for an error: on Linux no root privileges, a
 Jitter RNG that cannot be initialized or allocated, a file that cannot be
 opened, a user that cannot be switched to or whose seeds the kernel refuses, a
+Capsicum or
+.BR pledge (2)
 sandbox that cannot be entered, a schedule given on a kernel with the LRNG,
 an invalid option, a
 .B \-\-oneshot

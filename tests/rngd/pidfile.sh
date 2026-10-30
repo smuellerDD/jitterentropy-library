@@ -1,17 +1,8 @@
 #!/bin/sh
 # rngd-pidfile: the PID file of jitterentropy-rngd on FreeBSD, NetBSD, OpenBSD
 # and macOS. --device on a regular file stands in for /dev/random, so that it
-# needs neither root nor the kernel.
-#
-#  - the detached daemon writes its PID, and a second instance naming the
-#    same file refuses to start;
-#  - a stale PID file of the daemon's own user is taken over;
-#  - a relative --pid and --device mean the directory the daemon started in;
-#  - a hard link, a symbolic link or a FIFO in its place ends the start with
-#    1 and leaves the file behind it as it was.
-#
-# Linux needs root and the kernel to start, which writes the file after the
-# first injection: its daemon is not tested here.
+# needs neither root nor the kernel. Linux needs both to start: the nix VM
+# tests check its daemon.
 #
 #   sh pidfile.sh <jitterentropy-rngd> <scratch directory, absolute>
 #

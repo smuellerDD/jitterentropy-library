@@ -313,14 +313,12 @@ void rngd_os_start(void)
 	sigprocmask(SIG_BLOCK, &usr, NULL);
 }
 
-int rngd_os_alloc(struct kernel_rng *rng)
+void rngd_os_alloc(struct kernel_rng *rng)
 {
 	/* Before the first seed, so that it is seen if that fails the start */
 	if (!oneshot)
 		dolog(JENT_LOG_NOTICE, "Seeding %s every %u s", rng->dev,
 		      interval);
-
-	return 0;
 }
 
 void rngd_os_seeded(void)

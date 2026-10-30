@@ -349,8 +349,9 @@ With `-DENABLE_RNGD=ON`, `rngd-version` runs `jitterentropy-rngd --version`,
 and `rngd-generate` (`rngd/generate.cmake`) has `--generate` write raw bytes
 and hex digits to a file and to stdout, checks their count and that the log
 stays out of them, that the options it does not go with and `0` are refused,
-and that `--output` refuses a symbolic link, a hard link and a FIFO and
-overwrites a file of the caller's own. Neither needs root or the kernel.
+that `--output` refuses a symbolic link, a hard link and a FIFO and overwrites
+a file of the caller's own, and that `--status` prints its document. Neither
+needs root or the kernel.
 
 On FreeBSD, NetBSD, OpenBSD and macOS, `rngd-signals` (`rngd/signals.sh`) runs
 the daemon with `--device` on a regular file in place of `/dev/random` and

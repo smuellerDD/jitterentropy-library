@@ -146,6 +146,17 @@ machine.succeed(
 machine.wait_until_succeeds("test -s /tmp/rngd-init.pid", timeout=30)
 machine.succeed("systemctl stop rngd-init.service")
 
+# Injections refused for want of CAP_SYS_ADMIN: no re-initialization, and the
+# alarm retries the first seed - one try at the start, six after 5 s.
+out = machine.succeed(
+    "rc=0; timeout -s TERM 9 setpriv --bounding-set=-sys_admin"
+    " --inh-caps=-sys_admin jitterentropy-rngd -F -vvv 2>&1 || rc=$?;"
+    " [ $rc = 124 ]")
+print(out)
+assert "The first seed of /dev/random failed" in out, out
+assert "Re-initializing the Jitter RNG" not in out, out
+assert out.count("Error injecting entropy") >= 7, out
+
 # --oneshot and --generate.
 out = machine.succeed("jitterentropy-rngd --oneshot")
 assert "Seeded the kernel, exiting" in out, out
