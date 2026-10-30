@@ -25,6 +25,7 @@ DeviceAllow=/dev/random rw
 DevicePolicy=strict
 ExecStart=@PATH@/jitterentropy-rngd -F
 IPAddressDeny=any
+LimitCORE=0
 LimitMEMLOCK=2M
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
@@ -54,6 +55,8 @@ SystemCallFilter=~@chown @clock @cpu-emulation @debug @ipc @module @mount @obsol
 # The internal timer's thread pins itself to a CPU of its own, which
 # @resources denies; the filter would kill the daemon for it with SIGSYS.
 SystemCallFilter=sched_setaffinity
+# It drops the capabilities it does not need, which @privileged denies.
+SystemCallFilter=capget capset
 UMask=0077
 
 [Install]

@@ -360,7 +360,8 @@ daemon runs, that a SIGUSR1 every second does not put off the seeds of a 2 s
 `--interval`, and that SIGTERM ends it with 0. It needs no root either; run as
 root, as in the BSD CI guests, the daemon switches to `nobody` and enters
 Capsicum or `pledge(2)` as in service. Linux has no `--device`: the nix VM
-tests send its daemon the signals.
+tests send its daemon the signals, and check that it is not dumpable and holds
+no capability past those it needs.
 
 On the same systems `rngd-pidfile` (`rngd/pidfile.sh`) has the detached daemon
 write its PID file, a second instance naming it refuse to start and a stale one

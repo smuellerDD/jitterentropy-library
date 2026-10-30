@@ -49,6 +49,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/ioctl.h>
+#include <sys/prctl.h>
 #include <sys/select.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
@@ -57,6 +58,7 @@
 #include <sys/utsname.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <linux/capability.h>
 #include <linux/random.h>
 #include <linux/version.h>
 #include <signal.h>
@@ -89,6 +91,30 @@ static unsigned int force_reseed_wakeups[2] = {
 #define ENTROPYAVAIL "/proc/sys/kernel/random/entropy_avail"
 #define ENTROPYTHRESH "/proc/sys/kernel/random/write_wakeup_threshold"
 #define LRNG_FILE "/proc/lrng_type"
+
+/* Older headers lack it: their kernels refuse it, which write_random() takes */
+#ifndef RNDRESEEDCRNG
+#define RNDRESEEDCRNG _IO('R', 0x07)
+#endif
+
+/* Linux 6.3, as for RNDRESEEDCRNG: rngd_os_harden() takes the refusal */
+#ifndef PR_SET_MDWE
+#define PR_SET_MDWE 65
+#endif
+#ifndef PR_MDWE_REFUSE_EXEC_GAIN
+#define PR_MDWE_REFUSE_EXEC_GAIN 1UL
+#endif
+
+/*
+ * The capabilities a run takes: the mlock() of a new Jitter RNG instance, which
+ * FIPS and NTG.1 mode demand, past RLIMIT_MEMLOCK, and to seed, RNDADDENTROPY.
+ */
+#define GENERATE_CAPS	(1U << CAP_IPC_LOCK)
+#define SEEDING_CAPS	(GENERATE_CAPS | (1U << CAP_SYS_ADMIN))
+
+/* Both libcs have these and neither declares them: that header is libcap's. */
+int capget(cap_user_header_t hdrp, cap_user_data_t datap);
+int capset(cap_user_header_t hdrp, const cap_user_data_t datap);
 
 /* The RNDADDENTROPY argument, for Random */
 static struct rand_pool_info *rpi = NULL;
@@ -719,6 +745,46 @@ static void select_fd(void)
 }
 
 /*******************************************************************
+ * the sandbox
+ *******************************************************************/
+
+/*
+ * Down to @keep: the bounding set first, as that takes CAP_SETPCAP. Only this
+ * thread and those it starts are bound, but no other runs outside a read.
+ */
+static void drop_capabilities(unsigned int keep)
+{
+	struct __user_cap_header_struct hdr = {
+		_LINUX_CAPABILITY_VERSION_3, 0
+	};
+	struct __user_cap_data_struct caps[_LINUX_CAPABILITY_U32S_3];
+	int cap, held;
+
+	for (cap = 0; ; cap++) {
+		held = prctl(PR_CAPBSET_READ, (long)cap, 0L, 0L, 0L);
+		if (held < 0)
+			break;
+		if (held && (cap > 31 || !(keep & (1U << cap))))
+			(void)prctl(PR_CAPBSET_DROP, (long)cap, 0L, 0L, 0L);
+	}
+
+	if (capget(&hdr, caps)) {
+		dolog(JENT_LOG_WARN, "Cannot read the capabilities: %s",
+		      strerror(errno));
+		return;
+	}
+
+	caps[0].effective &= keep;
+	caps[0].permitted &= keep;
+	caps[0].inheritable = 0;
+	memset(&caps[1], 0, sizeof(caps[1]));
+
+	if (capset(&hdr, caps))
+		dolog(JENT_LOG_WARN, "Cannot drop the capabilities: %s",
+		      strerror(errno));
+}
+
+/*******************************************************************
  * the daemon's hooks
  *******************************************************************/
 
@@ -728,6 +794,25 @@ static void user_signals(sigset_t *set)
 	sigemptyset(set);
 	sigaddset(set, SIGUSR1);
 	sigaddset(set, SIGUSR2);
+}
+
+/*
+ * No core dump, and no debugger short of CAP_SYS_PTRACE: the first seed and
+ * --generate precede every sandbox, so this comes before any random number.
+ * Not RLIMIT_CORE, which the unit sets as its filter denies setrlimit(2), and
+ * no speculation controls, which would change the timing that is measured.
+ *
+ * Refused W^X is all the daemon's memory ever wants, a kernel before 6.3 has
+ * no such prctl: nothing to report.
+ */
+void rngd_os_harden(void)
+{
+	if (prctl(PR_SET_DUMPABLE, 0L, 0L, 0L, 0L) ||
+	    prctl(PR_SET_NO_NEW_PRIVS, 1L, 0L, 0L, 0L))
+		dolog(JENT_LOG_WARN, "Cannot harden the process: %s",
+		      strerror(errno));
+
+	(void)prctl(PR_SET_MDWE, PR_MDWE_REFUSE_EXEC_GAIN, 0L, 0L, 0L);
 }
 
 void rngd_os_start(void)
@@ -779,6 +864,18 @@ int rngd_os_alloc(struct kernel_rng *rng)
 	}
 
 	return 0;
+}
+
+void rngd_os_drop_privileges(int seeding)
+{
+	drop_capabilities(seeding ? SEEDING_CAPS : GENERATE_CAPS);
+}
+
+void rngd_os_sandbox(struct kernel_rng *rng)
+{
+	(void)rng;
+
+	drop_capabilities(SEEDING_CAPS);
 }
 
 void rngd_os_run(struct kernel_rng *rng)

@@ -33,7 +33,50 @@ machine.wait_until_succeeds(
     timeout=60)
 machine.succeed("systemctl is-active jitterentropy.service")
 
+# Hardened under the unit, which narrows the capabilities further.
+assert machine.succeed(
+    "systemctl show -p LimitCORE --value jitterentropy.service").strip() == "0"
+unit_status = machine.succeed(
+    "cat /proc/$(systemctl show -p MainPID --value jitterentropy.service)"
+    "/status")
+assert "NoNewPrivs:\t1\n" in unit_status, unit_status
+assert "CapEff:\t0000000000200000\n" in unit_status, unit_status
+
 machine.succeed("systemctl stop jitterentropy.service")
+
+
+def hardened(launch, caps="0000000000204000"):
+    """Run the daemon by launch until it holds caps, return its PID."""
+    machine.succeed(f"{launch} > /dev/null 2>&1 & echo $! > /tmp/rngd.pid")
+    machine.wait_until_succeeds(
+        f"grep -q '^CapEff:.{caps}$' /proc/$(cat /tmp/rngd.pid)/status",
+        timeout=30)
+    return machine.succeed("cat /tmp/rngd.pid").strip()
+
+
+# As root by hand: the bounding set goes too.
+pid = hardened("jitterentropy-rngd -F")
+machine.succeed(f"grep -q '^CapBnd:.0000000000204000$' /proc/{pid}/status")
+machine.succeed(f"kill {pid}")
+
+# --generate needs less, but only once its file is open: root reaches this one
+# through CAP_DAC_OVERRIDE alone.
+pid = hardened("jitterentropy-rngd --generate 4000000000", "0000000000004000")
+machine.succeed(f"kill {pid}")
+machine.succeed(
+    "install -d -o nobody -m 0700 /tmp/nobody &&"
+    " jitterentropy-rngd --generate 32 --output /tmp/nobody/seed &&"
+    " test $(stat -c %s /tmp/nobody/seed) = 32")
+
+# Not dumpable: the kernel gives such a process's /proc files to root, whoever
+# runs it. --generate takes no root, and these bytes outlast the test.
+machine.succeed(
+    "setpriv --reuid=65534 --regid=65534 --clear-groups"
+    " jitterentropy-rngd --generate 4000000000 > /dev/null 2>&1 &"
+    " echo $! > /tmp/rngd.pid")
+machine.wait_until_succeeds(
+    "test $(stat -c %u /proc/$(cat /tmp/rngd.pid)/fd) = 0", timeout=30)
+machine.succeed("kill $(cat /tmp/rngd.pid)")
 
 
 def run(args, secs):

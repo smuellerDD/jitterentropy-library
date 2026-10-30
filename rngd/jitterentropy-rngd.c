@@ -878,6 +878,9 @@ static int alloc(void)
 	if (ret)
 		return ret;
 
+	if (oneshot)
+		rngd_os_drop_privileges(1);
+
 	written = gather_entropy(&Random);
 	if (written >= 0) {
 		dolog(JENT_LOG_VERBOSE, "%zd bytes to %s", written, Random.dev);
@@ -970,6 +973,9 @@ static void generate_bytes(void)
 			dolog(JENT_LOG_ERR, "Cannot prepare %s: %s", output,
 			      strerror(errno));
 	}
+
+	/* Not before the open: root may name any file. */
+	rngd_os_drop_privileges(0);
 
 	while (left) {
 		size_t len = left < sizeof(buf) ? left : sizeof(buf), i;
@@ -1188,6 +1194,8 @@ int main(int argc, char *argv[])
 	if (use_syslog)
 		openlog("jitterentropy-rngd", LOG_PID | LOG_NDELAY, LOG_DAEMON);
 
+	rngd_os_harden();
+
 	/* Before the operating system's part: the kernel takes nothing here */
 	if (generate) {
 		/* Not into the /dev/null standing in for a closed stdout */
@@ -1215,6 +1223,10 @@ int main(int argc, char *argv[])
 	if (!foreground)
 		daemonize();
 	install_term();
+
+	/* The zone file is a file: read it while there is a file system. */
+	tzset();
+	rngd_os_sandbox(&Random);
 	rngd_os_run(&Random);
 	/* NOTREACHED */
 

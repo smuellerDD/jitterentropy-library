@@ -121,7 +121,10 @@ extern const struct option rngd_os_options[];
 void rngd_os_parse(int c, const char *arg);
 void rngd_os_usage(void);
 
-/* After the options are parsed, before anything else. */
+/* After the options are parsed, before any random number exists. */
+void rngd_os_harden(void);
+
+/* The daemon's start, past what --generate takes. */
 void rngd_os_start(void);
 
 /* After Random is open: what else the injections need. 0 or a -errno. */
@@ -131,8 +134,14 @@ int rngd_os_alloc(struct kernel_rng *rng);
 ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
 		       size_t entropy_bytes);
 
+/* Keep only what the run needs, @seeding if that includes injecting */
+void rngd_os_drop_privileges(int seeding);
+
 /* After each injection the kernel took in full. */
 void rngd_os_seeded(void);
+
+/* Once detached: give up what seeding and re-initializing do not need. */
+void rngd_os_sandbox(struct kernel_rng *rng);
 
 /*
  * The daemon from the first seed on, detached unless --foreground: wait for

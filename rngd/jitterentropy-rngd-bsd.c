@@ -213,9 +213,9 @@ static void drop_privileges(void)
 }
 
 /*
- * Confine the daemon to writing @fd and computing - and to re-initializing
- * the Jitter RNG, by the library's own health test reset or by
- * gather_entropy_retry().
+ * Give up root, then confine the daemon to writing Random and computing - and
+ * to re-initializing the Jitter RNG, by the library's own health test reset or
+ * by gather_entropy_retry().
  *
  * Capability mode permits all a re-initialization calls: mmap(), mlock(),
  * cpuset_getaffinity(), hw.ncpu, thr_new(), getrandom(). No pledge promise
@@ -225,10 +225,16 @@ static void drop_privileges(void)
  * file at exit fails the same way in both, leaving a stale file the next start
  * takes over. NetBSD and macOS have no sandbox a program enters by itself.
  */
-static void sandbox(int fd)
+void rngd_os_sandbox(struct kernel_rng *rng)
 {
+#if defined(__FreeBSD__)
+	cap_rights_t rights;
+#endif
+
+	drop_privileges();
+
 #if defined(__OpenBSD__)
-	(void)fd;
+	(void)rng;
 	if (jent_flags & (JENT_FORCE_FIPS | JENT_NTG1)) {
 		dolog(JENT_LOG_VERBOSE,
 		      "No pledge: in FIPS or NTG.1 mode a re-initialization must lock its memory");
@@ -237,13 +243,11 @@ static void sandbox(int fd)
 	if (pledge("stdio error", NULL))
 		dolog(JENT_LOG_ERR, "pledge: %s", strerror(errno));
 #elif defined(__FreeBSD__)
-	cap_rights_t rights;
-
 	cap_rights_init(&rights, CAP_WRITE);
-	if (cap_rights_limit(fd, &rights) || cap_enter())
+	if (cap_rights_limit(rng->fd, &rights) || cap_enter())
 		dolog(JENT_LOG_ERR, "Capsicum: %s", strerror(errno));
 #else
-	(void)fd;
+	(void)rng;
 #endif
 }
 
@@ -316,6 +320,15 @@ static void time_left(const struct timespec *due, struct timespec *left)
  * the daemon's hooks
  *******************************************************************/
 
+void rngd_os_harden(void)
+{
+}
+
+void rngd_os_drop_privileges(int seeding)
+{
+	(void)seeding;
+}
+
 void rngd_os_start(void)
 {
 	sigset_t usr;
@@ -345,12 +358,6 @@ void rngd_os_run(struct kernel_rng *rng)
 	    install_handler(SIGUSR2, sig_user, 0))
 		dolog(JENT_LOG_ERR, "Cannot install the handler of SIGUSR1 and SIGUSR2: %s",
 		      strerror(errno));
-
-	/* The zone file is a file: read it while there still is a file system. */
-	tzset();
-
-	drop_privileges();
-	sandbox(rng->fd);
 
 	sigemptyset(&blocked);
 	sigaddset(&blocked, SIGHUP);

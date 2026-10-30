@@ -80,6 +80,23 @@ by itself. There is no schedule to set, and
 and
 .B \-\-phase2
 end the daemon at its start.
+.PP
+After the first seed, and under
+.B \-\-oneshot
+before it, the daemon keeps only the capabilities
+.B CAP_SYS_ADMIN
+and, for the memory lock of a new instance,
+.BR CAP_IPC_LOCK .
+.B \-\-generate
+keeps only the latter, once its file is open.
+.PP
+From its start, including under
+.BR \-\-generate ,
+it is not dumpable: it leaves no core dump and only a process with
+.B CAP_SYS_PTRACE
+can attach to it. It also sets
+.B no_new_privs
+and, from Linux 6.3 on, refuses memory that becomes executable.
 .SS FreeBSD, NetBSD, OpenBSD and macOS
 None of these kernels has an entropy estimate to poll. The daemon writes 64
 bytes of Jitter RNG output to

@@ -10,6 +10,8 @@ its name holds its service files.
   entropy estimate runs low, and every ten minutes regardless (by default;
   `--phase1` and `--phase2` change that schedule, `--interval` replaces it
   with an injection every so many seconds). It needs root (`CAP_SYS_ADMIN`).
+  It leaves no core dump, takes no debugger short of `CAP_SYS_PTRACE` and
+  drops every capability but `CAP_SYS_ADMIN` and `CAP_IPC_LOCK`.
 * **FreeBSD, NetBSD, OpenBSD, macOS** (`jitterentropy-rngd-bsd.c`,
   `freebsd/`, `netbsd/`, `openbsd/`, `macos/`): a write to `/dev/random`, once
   at startup and every ten minutes after (`--interval`). None of these kernels
