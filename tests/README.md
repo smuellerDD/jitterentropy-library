@@ -365,8 +365,9 @@ no capability past those it needs.
 
 On the same systems `rngd-pidfile` (`rngd/pidfile.sh`) has the detached daemon
 write its PID file, a second instance naming it refuse to start and a stale one
-be taken over, and checks that a hard link, a symbolic link or a FIFO in its
-place ends the start with 1 and leaves the file behind it as it was.
+be taken over, and checks that a relative path means the directory it started
+in, and that a hard link, a symbolic link or a FIFO in its place ends the start
+with 1 and leaves the file behind it as it was.
 
 ## With no operating system
 

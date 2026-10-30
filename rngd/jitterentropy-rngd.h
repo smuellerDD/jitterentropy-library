@@ -85,6 +85,7 @@ extern struct kernel_rng Random;
 
 extern unsigned int jent_flags;
 extern int exit_on_error;
+extern int oneshot;
 extern volatile sig_atomic_t Term_pending;
 
 void dolog(int severity, const char *fmt, ...)

@@ -52,6 +52,7 @@ rngd_ok(--generate 32 --hex -vv)
 check_hex("${_stdout}" 32)
 
 rngd_refused(--generate 0)
+rngd_refused(--generate -1)
 rngd_refused(--hex)
 rngd_refused(--output "${_hex}")
 rngd_refused(--generate 8 --oneshot)

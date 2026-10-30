@@ -33,14 +33,14 @@ machine.wait_until_succeeds(
     timeout=60)
 machine.succeed("systemctl is-active jitterentropy.service")
 
-# Hardened under the unit, which narrows the capabilities further.
+# Hardened under the unit.
 assert machine.succeed(
     "systemctl show -p LimitCORE --value jitterentropy.service").strip() == "0"
 unit_status = machine.succeed(
     "cat /proc/$(systemctl show -p MainPID --value jitterentropy.service)"
     "/status")
 assert "NoNewPrivs:\t1\n" in unit_status, unit_status
-assert "CapEff:\t0000000000200000\n" in unit_status, unit_status
+assert "CapEff:\t0000000000204000\n" in unit_status, unit_status
 
 machine.succeed("systemctl stop jitterentropy.service")
 
@@ -125,6 +125,20 @@ else:
     print(f"-t 2: {injections} injections in 9 s")
     assert ("Alarm every 2 s, forced reseed after 1 wakeups") in log
     assert injections >= 4, injections
+
+# Detaching keeps the locks of JENT_FORCE_SECURE_MEM, a relative --pid means
+# the directory it started in, and --pid works with init as the parent.
+machine.succeed("cd /tmp && jitterentropy-rngd --flags 256 -p rngd-detached.pid")
+machine.succeed(
+    "pid=$(cat /tmp/rngd-detached.pid);"
+    " ! grep -q '^VmLck:[[:space:]]*0 kB' /proc/$pid/status;"
+    " grep -q '^VmLck:' /proc/$pid/status; kill $pid")
+machine.wait_until_fails("test -e /tmp/rngd-detached.pid", timeout=30)
+machine.succeed(
+    "systemd-run --unit=rngd-init --service-type=exec"
+    " jitterentropy-rngd -p /tmp/rngd-init.pid")
+machine.wait_until_succeeds("test -s /tmp/rngd-init.pid", timeout=30)
+machine.succeed("systemctl stop rngd-init.service")
 
 # --oneshot and --generate.
 machine.succeed("jitterentropy-rngd --oneshot")

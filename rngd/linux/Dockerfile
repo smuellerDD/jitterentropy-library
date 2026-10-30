@@ -17,5 +17,5 @@ FROM alpine
 COPY --from=0 /build/rngd/jitterentropy-rngd /usr/bin
 
 # -F: the daemon is the container's main process and must not detach.
-ENTRYPOINT ["/usr/bin/jitterentropy-rngd"]
-CMD ["-F", "-v"]
+ENTRYPOINT ["/usr/bin/jitterentropy-rngd", "-F"]
+CMD ["-v"]

@@ -6,11 +6,10 @@
 #   rcctl enable jitterentropy_rngd
 #   rcctl set jitterentropy_rngd flags ...	# further options
 #
-# rc_bg detaches it: the daemon itself stays in the foreground, where it
-# keeps the memory locks of FIPS and NTG.1 mode.
+# rc_bg detaches it. The options that takes are part of daemon: the flags of
+# rcctl replace daemon_flags, and with -F gone would detach it twice.
 
-daemon="@PATH@/jitterentropy-rngd"
-daemon_flags="-F --syslog"
+daemon="@PATH@/jitterentropy-rngd -F --syslog"
 
 . /etc/rc.d/rc.subr
 

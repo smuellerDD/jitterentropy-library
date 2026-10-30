@@ -21,36 +21,17 @@
  */
 
 /*
- * None of these kernels has the Linux RNDADDENTROPY, and none has an entropy
- * count to poll. What each takes is a write to /dev/random, straight into its
- * generator:
+ * None of these kernels has the Linux RNDADDENTROPY or an entropy count to
+ * poll: each takes a write to /dev/random straight into its generator. Only
+ * root may open the node for writing on FreeBSD and OpenBSD, on macOS it is
+ * 0666. NetBSD 10 and later check every write against the writer's credential,
+ * not the opener's, and refuse all but root's, crediting that one bit per bit.
  *
- *  - FreeBSD hashes every write and hands it to Fortuna as RANDOM_RANDOMDEV
- *    events, past the harvest mask. Only root may open the node for writing.
- *  - NetBSD mixes it into the pool and consolidates. Since NetBSD 10 it takes
- *    a write from root alone: random_write() checks KAUTH_DEVICE_RND_ADDDATA
- *    at every write against the writer's credential, not the opener's, and
- *    refuses anyone else's with EPERM. Root's counts toward the entropy
- *    estimate at one bit per bit.
- *  - OpenBSD mixes it into its pool and rekeys its ChaCha20 state at once.
- *    Only root may open the node for writing.
- *  - macOS hashes it with SHA-512 and reseeds the kernel PRNG at once. The
- *    node is 0666, so the daemon needs no privilege at all there.
+ * So the daemon writes one seed at the start with the privileges it has, and
+ * one each interval after with none, except on NetBSD, where it stays root.
  *
- * So the daemon writes one seed when it starts, still with the privileges it
- * was started with, and one each interval after, with none - except on
- * NetBSD, where it stays root for them. There is nothing to wait for in
- * between.
- *
- * SIGUSR1 logs the status of the Jitter RNG and SIGUSR2 writes a seed now. No
- * signalfd here: both stay blocked but while the daemon waits, so that their
- * handler, which notes them, runs in pselect(2) alone.
- *
- * It detaches as on Linux unless --foreground, forking after the first seed.
- * A forked child does not inherit the memory locks of its parent, which FIPS
- * and NTG.1 mode take, so the rc.d scripts of FreeBSD and OpenBSD and the
- * launchd plist keep it in the foreground and let daemon(8), rc_bg and launchd
- * detach it. NetBSD's rc.subr does neither.
+ * No signalfd here: SIGUSR1 and SIGUSR2 stay blocked but while the daemon
+ * waits, so that their handler, which notes them, runs in pselect(2) alone.
  */
 
 #include <sys/types.h>
@@ -221,9 +202,10 @@ static void drop_privileges(void)
  * cpuset_getaffinity(), hw.ncpu, thr_new(), getrandom(). No pledge promise
  * grants mlock(); "error" has it fail with ENOSYS instead of killing the
  * daemon, which the library tolerates as any refused lock - unless FIPS or
- * NTG.1 mode demands the lock, so those stay unpledged. The unlink() of the PID
- * file at exit fails the same way in both, leaving a stale file the next start
- * takes over. NetBSD and macOS have no sandbox a program enters by itself.
+ * NTG.1 mode or JENT_FORCE_SECURE_MEM demands it, so those stay unpledged. The
+ * unlink() of the PID file at exit fails the same way in both, leaving a stale
+ * file the next start takes over. NetBSD and macOS have no sandbox a program
+ * enters by itself.
  */
 void rngd_os_sandbox(struct kernel_rng *rng)
 {
@@ -235,9 +217,10 @@ void rngd_os_sandbox(struct kernel_rng *rng)
 
 #if defined(__OpenBSD__)
 	(void)rng;
-	if (jent_flags & (JENT_FORCE_FIPS | JENT_NTG1)) {
+	if (jent_flags &
+	    (JENT_FORCE_FIPS | JENT_NTG1 | JENT_FORCE_SECURE_MEM)) {
 		dolog(JENT_LOG_VERBOSE,
-		      "No pledge: in FIPS or NTG.1 mode a re-initialization must lock its memory");
+		      "No pledge: with these flags a re-initialization must lock its memory");
 		return;
 	}
 	if (pledge("stdio error", NULL))

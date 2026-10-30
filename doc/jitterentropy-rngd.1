@@ -44,7 +44,7 @@ number generator
 .RB ( RNDRESEEDCRNG ).
 The daemon injects:
 .IP \(bu 3
-once at startup, before it detaches. When the invocation returns, the kernel
+once at startup. When the invocation returns, the kernel
 has therefore been seeded, unless that injection failed, which the daemon
 reports as a warning (see
 .BR \-\-verbose ).
@@ -101,7 +101,7 @@ and, from Linux 6.3 on, refuses memory that becomes executable.
 None of these kernels has an entropy estimate to poll. The daemon writes 64
 bytes of Jitter RNG output to
 .I /dev/random
-once at startup, before it detaches, and every 10 minutes after
+once at startup, before the invocation returns, and every 10 minutes after
 .RB ( \-\-interval ).
 FreeBSD feeds every write to its Fortuna generator, OpenBSD and macOS reseed
 theirs with it at once. None counts it as entropy, except NetBSD for a write
@@ -132,7 +132,7 @@ on FreeBSD, with
 on OpenBSD outside FIPS and NTG.1 mode. Under the
 .BR pledge (2)
 promises a new Jitter RNG instance cannot lock its memory, which FIPS and
-NTG.1 mode demand, so these modes run unpledged. NetBSD and macOS have no such
+NTG.1 mode and JENT_FORCE_SECURE_MEM demand, so these run unpledged. NetBSD and macOS have no such
 sandbox.
 .SS All systems
 An injection that fails - on an intermittent health test failure the Jitter
@@ -151,10 +151,12 @@ FIPS and NTG.1 mode only -
 .BR \-\-ntg1 ,
 or a system in FIPS mode.
 .PP
-The daemon detaches after the first injection, and a detached child does not
-inherit the memory locks the Jitter RNG takes in FIPS and NTG.1 mode. The
-service files installed for systemd, FreeBSD, OpenBSD and macOS keep it in
-the foreground and leave detaching to the service manager.
+The daemon detaches before it allocates the Jitter RNG, whose memory locks in
+FIPS and NTG.1 mode a forked child would not inherit, and the invocation
+returns after the first injection, with the exit status of a daemon that ended
+before it. Started by init it does not fork, and writes the
+.B \-\-pid
+file all the same.
 .PP
 The Jitter RNG works in virtual machines as well as on bare metal, provided a
 high-resolution time stamp is available. Where the library has no CPU counter

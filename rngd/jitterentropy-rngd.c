@@ -50,6 +50,7 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <time.h>
 #include <syslog.h>
@@ -91,7 +92,7 @@ static int foreground = 0;
 int exit_on_error = 0;
 
 /* --oneshot: seed the kernel once in the foreground and exit */
-static int oneshot = 0;
+int oneshot = 0;
 
 /* Set once the kernel accepted a full injection */
 static int seeded = 0;
@@ -111,7 +112,7 @@ struct kernel_rng Random = {
 
 static int Pidfile_fd = -1;
 /* "/var/run/jitterentropy-rngd.pid" */
-static char *Pidfile = NULL;
+static const char *Pidfile = NULL;
 
 unsigned int jent_flags = 0;
 static unsigned int jent_osr = 1;
@@ -172,6 +173,10 @@ unsigned int parse_uint_until(const char *str, char term, const char **rest)
 
 	errno = 0;
 	val = strtoul(str, &endptr, 10);
+
+	/* strtoul() negates a sign, which would wrap to a huge value */
+	if (strchr(str, '-'))
+		usage();
 
 	/* Reject empty strings, trailing garbage and out-of-range values */
 	if (errno || endptr == str || *endptr != term)
@@ -819,10 +824,11 @@ void dealloc(void)
 		Random.fd = -1;
 	}
 	if (-1 != Pidfile_fd) {
-		close(Pidfile_fd);
-		Pidfile_fd = -1;
+		/* Under the lock: a new instance must not lose the file. */
 		if (NULL != Pidfile)
 			unlink(Pidfile);
+		close(Pidfile_fd);
+		Pidfile_fd = -1;
 	}
 }
 
@@ -1022,7 +1028,7 @@ static void generate_bytes(void)
 static void create_pid_file(const char *pid_file)
 {
 	char pid_str[12];	/* max. integer length + '\n' + null */
-	struct stat st;
+	struct stat st, now;
 	int fd;
 
 	/*
@@ -1031,6 +1037,7 @@ static void create_pid_file(const char *pid_file)
 	 * check below keep a planted symlink or hard link from redirecting the
 	 * truncation, O_NONBLOCK keeps a FIFO from blocking the open.
 	 */
+again:
 	fd = open(pid_file, O_RDWR|O_CREAT|O_NOFOLLOW|O_NONBLOCK,
 		  S_IRUSR|S_IWUSR);
 	if (fd == -1)
@@ -1064,6 +1071,13 @@ static void create_pid_file(const char *pid_file)
 			      strerror(errsv));
 	}
 
+	/* Unlinked since the open: a lock on it holds nobody off the path */
+	if (lstat(pid_file, &now) || now.st_dev != st.st_dev ||
+	    now.st_ino != st.st_ino) {
+		close(fd);
+		goto again;
+	}
+
 	/* From here on we own the PID file and dealloc() may remove it. */
 	Pidfile_fd = fd;
 
@@ -1077,20 +1091,20 @@ static void create_pid_file(const char *pid_file)
 		dolog(JENT_LOG_ERR, "Cannot write to pid file");
 }
 
-static void daemonize(void)
+/* The write end of the pipe the parent of daemonize() waits on */
+static int Ready_fd = -1;
+
+/* Fork, for a daemon that init did not start: the parent never returns. */
+static void detach(void)
 {
 	int ready[2];
 	pid_t pid;
 
-	/* already a daemon */
-	if (1 == getppid())
-	       return;
-
 	/*
 	 * The parent exits with the verdict of the child, which writes a byte
-	 * once it owns the PID file: a second instance naming the same file
-	 * fails its start, and the file exists when the start returns. A child
-	 * that exits before - dolog(JENT_LOG_ERR) - leaves only EOF.
+	 * after the first seed: the kernel is seeded and the PID file exists
+	 * when the start returns. A child that exits before leaves EOF and its
+	 * exit status, the parent's then.
 	 */
 	if (pipe(ready))
 		dolog(JENT_LOG_ERR, "Cannot create pipe to daemonize: %s",
@@ -1109,21 +1123,67 @@ static void daemonize(void)
 	 */
 	if (0 < pid) {
 		ssize_t n;
+		int wstatus;
 		char c;
 
 		close(ready[1]);
 		do {
 			n = read(ready[0], &c, 1);
 		} while (n < 0 && errno == EINTR);
-		_exit(n == 1 ? 0 : 1);
+		if (n == 1)
+			_exit(0);
+		while (waitpid(pid, &wstatus, 0) < 0) {
+			if (errno != EINTR)
+				_exit(1);
+		}
+		_exit(WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : 1);
 	}
 
 	/* we are the child now */
 	close(ready[0]);
+	Ready_fd = ready[1];
 
 	/* new SID for the child process */
 	if (setsid() < 0)
 		dolog(JENT_LOG_ERR, "Cannot obtain new SID for child\n");
+}
+
+/* @path, absolute: daemonize() leaves the directory it is relative to */
+static const char *absolute_path(const char *path)
+{
+	char cwd[PATH_MAX], *full;
+	size_t len;
+
+	if ('/' == *path)
+		return path;
+
+	if (!getcwd(cwd, sizeof(cwd)))
+		dolog_exit(RNGD_EXIT_ERROR, "Cannot resolve %s: %s", path,
+			   strerror(errno));
+
+	len = strlen(cwd) + strlen(path) + 2;
+	full = malloc(len);
+	if (!full)
+		dolog_exit(RNGD_EXIT_ERROR, "Cannot resolve %s: %s", path,
+			   strerror(ENOMEM));
+	snprintf(full, len, "%s/%s", cwd, path);
+
+	return full;
+}
+
+/*
+ * Before the Jitter RNG is allocated: a forked child does not inherit the
+ * memory locks of FIPS and NTG.1 mode. daemonized() completes it.
+ */
+static void daemonize(void)
+{
+	/* Already a daemon, whose parent would have nothing to wait for */
+	if (1 != getppid())
+		detach();
+
+	if (Pidfile && strlen(Pidfile))
+		Pidfile = absolute_path(Pidfile);
+	Random.dev = absolute_path(Random.dev);
 
 	/* Change the current working directory.  This prevents the current
 	 * directory from being locked; hence not being able to remove it. */
@@ -1132,7 +1192,11 @@ static void daemonize(void)
 
 	if (Pidfile && strlen(Pidfile))
 		create_pid_file(Pidfile);
+}
 
+/* After the first seed, whose failure still has the invoker's terminal */
+static void daemonized(void)
+{
 	/* Redirect standard files to /dev/null */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-result"
@@ -1142,9 +1206,12 @@ static void daemonize(void)
 #pragma GCC diagnostic pop
 
 	/* Started: release the parent. */
-	if (write(ready[1], "", 1) != 1)
-		dolog(JENT_LOG_ERR, "Cannot signal the start to the parent");
-	close(ready[1]);
+	if (-1 != Ready_fd) {
+		if (write(Ready_fd, "", 1) != 1)
+			dolog(JENT_LOG_ERR, "Cannot signal the start to the parent");
+		close(Ready_fd);
+		Ready_fd = -1;
+	}
 
 	/* stdout is no longer a terminal, so drop the colors */
 	detect_color();
@@ -1209,6 +1276,9 @@ int main(int argc, char *argv[])
 
 	rngd_os_start();
 
+	if (!foreground && !oneshot && !status)
+		daemonize();
+
 	ret = alloc();
 	if (ret)
 		goto out;
@@ -1222,7 +1292,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (!foreground)
-		daemonize();
+		daemonized();
 	install_term();
 
 	/* The zone file is a file: read it while there is a file system. */

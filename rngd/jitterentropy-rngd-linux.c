@@ -435,8 +435,8 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 		dolog(JENT_LOG_WARN, "Error injecting entropy: %s", strerror(errsv));
 		return -errsv;
 	} else {
-		dolog(JENT_LOG_DEBUG, "Injected %zu bytes with an entropy count of %zu bytes of entropy",
-		      len, entropy_bytes);
+		dolog(JENT_LOG_DEBUG, "Injected %zu bytes with %zu bits of entropy",
+		      len, entropy_bytes << 3);
 		written = (ssize_t)len;
 	}
 
@@ -901,6 +901,10 @@ int rngd_os_alloc(struct kernel_rng *rng)
 		dolog(JENT_LOG_ERR, "Cannot allocate memory for random bytes");
 		return -ENOMEM;
 	}
+
+	/* For the alarm alone: --oneshot can run before /proc is mounted. */
+	if (oneshot)
+		return 0;
 
 	Entropy_avail_fd = open(ENTROPYAVAIL, O_RDONLY);
 	if (-1 == Entropy_avail_fd) {

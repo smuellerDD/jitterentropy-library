@@ -6,6 +6,7 @@
 #  - the detached daemon writes its PID, and a second instance naming the
 #    same file refuses to start;
 #  - a stale PID file of the daemon's own user is taken over;
+#  - a relative --pid and --device mean the directory the daemon started in;
 #  - a hard link, a symbolic link or a FIFO in its place ends the start with
 #    1 and leaves the file behind it as it was.
 #
@@ -13,8 +14,6 @@
 # first injection: its daemon is not tested here.
 #
 #   sh pidfile.sh <jitterentropy-rngd> <scratch directory, absolute>
-#
-# Absolute: the daemon changes to / before it writes the PID file.
 #
 # POSIX sh and utilities only, and no function named after a default alias
 # of a ksh, such as stop.
@@ -93,6 +92,15 @@ finish "$running"
 running=
 
 printf 'victim\n' > "$victim"
+
+echo "== a relative path means the directory the daemon started in"
+rm -f "$pidfile"
+(cd "$dir" && "$rngd" -p pid -t 600 -d seed >> "$log" 2>&1) ||
+	fail "the start with relative paths failed with $?"
+running=$(cat "$pidfile")
+kill -0 "$running" 2>/dev/null || fail "no daemon of PID $running"
+finish "$running"
+running=
 
 echo "== a hard link in place of the PID file"
 rm -f "$pidfile"
