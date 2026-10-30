@@ -53,6 +53,8 @@
 
 /* The Linux daemon forces a reseed this often, in either phase. */
 #define DEFAULT_INTERVAL	600
+/* And retries a first seed that failed this often, as its first alarm. */
+#define UNSEEDED_INTERVAL	5
 
 /* The user after the first seed: NetBSD refuses the writes of all but root */
 #if defined(__NetBSD__)
@@ -274,8 +276,13 @@ static void process_reseed(struct kernel_rng *rng)
 /* The interval from now on: when the next seed is due */
 static void set_due(struct timespec *due)
 {
+	unsigned int secs = interval;
+
+	if (!seeded && secs > UNSEEDED_INTERVAL)
+		secs = UNSEEDED_INTERVAL;
+
 	clock_gettime(CLOCK_MONOTONIC, due);
-	due->tv_sec += (time_t)interval;
+	due->tv_sec += (time_t)secs;
 }
 
 /*
@@ -323,7 +330,7 @@ void rngd_os_start(void)
 
 int rngd_os_alloc(struct kernel_rng *rng)
 {
-	/* Before the first seed, after which a detached daemon's stdout is gone */
+	/* Before the first seed, so that it is seen if that fails the start */
 	if (!oneshot)
 		dolog(JENT_LOG_NOTICE, "Seeding %s every %u s", rng->dev,
 		      interval);
@@ -352,6 +359,7 @@ void rngd_os_run(struct kernel_rng *rng)
 	sigaddset(&blocked, SIGTERM);
 
 	set_due(&due);
+	daemon_ready();
 
 	while (1) {
 		struct timespec ts;

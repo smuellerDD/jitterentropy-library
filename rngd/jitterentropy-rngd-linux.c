@@ -71,9 +71,10 @@
 #define RNDADDENTROPY_ALLOCSIZE	(sizeof(struct rand_pool_info) + \
 				 RNDADDENTROPY_BUFSIZE)
 /*
- * After (force reseed wakeups), the installed alarm handler will unconditionally
- * trigger a reseed irrespective of the seed level in two phases. This ensures
- * that new seed is added after every (force reseed wakeups) * (alarm period).
+ * After (force reseed wakeups), the installed alarm handler will
+ * unconditionally trigger a reseed irrespective of the seed level in two
+ * phases. This ensures that new seed is added after every
+ * (force reseed wakeups) * (alarm period).
  * PHASE1: 120(force reseed wakeups) * 5(alarm period) == 600s
  * PHASE2: 12(force reseed wakeups) * 50(alarm period) == 600s
  * These are the defaults of --phase1 and --phase2.
@@ -117,6 +118,9 @@ static unsigned int force_reseed_wakeups[2] = {
 /* Both libcs have these and neither declares them: that header is libcap's. */
 int capget(cap_user_header_t hdrp, cap_user_data_t datap);
 int capset(cap_user_header_t hdrp, const cap_user_data_t datap);
+
+/* The errno of the last RNDRESEEDCRNG, 0 if it worked */
+static int Reseed_err = 0;
 
 /* The RNDADDENTROPY argument, for Random */
 static struct rand_pool_info *rpi = NULL;
@@ -403,7 +407,7 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 			    size_t entropy_bytes, int force_reseed)
 {
 	ssize_t written = 0;
-	int errsv, ret, reseed_err = 0;
+	int errsv, ret;
 
 	if (len > SSIZE_MAX)
 		return -EOVERFLOW;
@@ -444,12 +448,13 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	 * The LRNG does not require this IOCTL as the reseed is automatically
 	 * triggered.
 	 */
+	Reseed_err = 0;
 	if (force_reseed && !lrng_present()) {
 		if (ioctl(rng->fd, RNDRESEEDCRNG) < 0) {
 			static int logged = 0;
 
 			errsv = errno;
-			reseed_err = errsv;
+			Reseed_err = errsv;
 
 			/*
 			 * A kernel before 4.17 has no such ioctl: the data is
@@ -458,7 +463,12 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 			if (errsv == EINVAL)
 				goto out;
 
-			written = -errsv;
+			/*
+			 * The data is in and credited: no reason to inject
+			 * again, unless --exit-on-error asks to hear of it.
+			 */
+			if (exit_on_error)
+				written = -errsv;
 			if (!logged) {
 				dolog(JENT_LOG_WARN,
 				      "Error triggering a reseed of the kernel DRNG: %s",
@@ -471,7 +481,7 @@ static ssize_t write_random(struct kernel_rng *rng, char *buf, size_t len,
 	}
 
 out:
-	log_kernel(reseed_err);
+	log_kernel(Reseed_err);
 	return written;
 }
 
@@ -668,6 +678,13 @@ static void process_alarm(uint64_t expiries)
 	}
 	wakeups += (unsigned int)expiries;
 
+	/* /dev/random may never ask: a ready kernel does not. */
+	if (!seeded) {
+		written = gather_entropy_retry(&Random);
+		dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
+		return;
+	}
+
 	entropy = read_entropy_value(Entropy_avail_fd);
 	thresh = read_entropy_value(Entropy_thresh_fd);
 
@@ -700,6 +717,9 @@ static void process_reseed(void)
 	else if (lrng_present())
 		dolog(JENT_LOG_NOTICE, "Injected %zd bytes into the LRNG, as SIGUSR2 asked",
 		      written);
+	else if (Reseed_err)
+		dolog(JENT_LOG_NOTICE, "Injected %zd bytes, as SIGUSR2 asked, but the reseed failed: %s",
+		      written, strerror(Reseed_err));
 	else
 		dolog(JENT_LOG_NOTICE, "Reseeded the kernel with %zd bytes, as SIGUSR2 asked",
 		      written);
@@ -769,7 +789,7 @@ static void select_fd(void)
 		if (-1 != Alarm_fd && FD_ISSET(Alarm_fd, &rfds)) {
 			uint64_t expiries = 0;
 
-			/* Non-blocking: a wakeup without an expiry reads none */
+			/* Non-blocking: a wakeup with no expiry reads none */
 			if (sizeof(expiries) ==
 			    read(Alarm_fd, &expiries, sizeof(expiries)))
 				process_alarm(expiries);
@@ -906,7 +926,7 @@ int rngd_os_alloc(struct kernel_rng *rng)
 	if (oneshot)
 		return 0;
 
-	/* Before the first seed, after which a detached daemon's stdout is gone */
+	/* Before the first seed, so that it is seen if that fails the start */
 	if (lrng_present())
 		dolog(JENT_LOG_NOTICE, "Seeding when /dev/random asks: the LRNG reseeds by itself");
 	else
@@ -967,6 +987,7 @@ void rngd_os_run(struct kernel_rng *rng)
 			      strerror(errno));
 		set_alarm(alarm_period[0]);
 	}
+	daemon_ready();
 	select_fd();
 	/* NOTREACHED */
 	exit(1);

@@ -86,6 +86,7 @@ extern struct kernel_rng Random;
 extern unsigned int jent_flags;
 extern int exit_on_error;
 extern int oneshot;
+extern int seeded;
 extern volatile sig_atomic_t Term_pending;
 
 void dolog(int severity, const char *fmt, ...)
@@ -101,6 +102,7 @@ void dealloc(void);
 ssize_t gather_entropy_retry(struct kernel_rng *rng);
 void process_term(void) __attribute__((noreturn));
 void process_status(void);
+void daemon_ready(void);
 
 /* A wipe the compiler cannot drop, before a free() or an exit() included */
 static inline void memset_secure(void *s, int c, size_t n)
@@ -145,8 +147,8 @@ void rngd_os_seeded(void);
 void rngd_os_sandbox(struct kernel_rng *rng);
 
 /*
- * The daemon from the first seed on, detached unless --foreground: wait for
- * the occasions to seed, and seed. Ends by process_term() or an error.
+ * Seed on every occasion, until process_term() or an error. Calls
+ * daemon_ready() once nothing that can fail the start is left.
  */
 void rngd_os_run(struct kernel_rng *rng) __attribute__((noreturn));
 

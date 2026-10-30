@@ -95,7 +95,7 @@ int exit_on_error = 0;
 int oneshot = 0;
 
 /* Set once the kernel accepted a full injection */
-static int seeded = 0;
+int seeded = 0;
 
 /* --generate: write this many bytes of the Jitter RNG out and exit */
 static unsigned int generate = 0;
@@ -647,7 +647,7 @@ out:
 	 * whenever it eventually happens.
 	 */
 	if (ret > 0) {
-		/* Whatever the verbosity: else a working daemon logs nothing. */
+		/* At any verbosity: else a working daemon logs nothing. */
 		if (!seeded)
 			dolog(JENT_LOG_NOTICE, "First seed: %zd bytes reached %s",
 			      ret, rng->dev);
@@ -896,13 +896,8 @@ static int alloc(void)
 		dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s", written,
 		      Random.dev);
 	} else {
-		/*
-		 * We consider this as no error at this point - note that
-		 * dolog(JENT_LOG_ERR) terminates the daemon, which would defeat the
-		 * re-initialization performed by gather_entropy_retry().
-		 * gather_entropy() already honors --exit-on-error itself.
-		 */
-		dolog(JENT_LOG_WARN, "Cannot write to %s, failure: %zd",
+		/* dolog(JENT_LOG_ERR) would end the daemon, not retry this */
+		dolog(JENT_LOG_NOTICE, "The first seed of %s failed, retrying: %zd",
 		      Random.dev, written);
 	}
 
@@ -1052,6 +1047,13 @@ again:
 	if (fstat(fd, &st))
 		dolog(JENT_LOG_ERR, "Cannot stat pid file %s: %s", pid_file,
 		      strerror(errno));
+
+	/* An instance shutting down unlinked it since the open. */
+	if (!st.st_nlink) {
+		close(fd);
+		goto again;
+	}
+
 	if (!S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
 	    st.st_nlink != 1)
 		dolog(JENT_LOG_ERR, "PID file %s is not a regular file of user %u with a single link",
@@ -1097,6 +1099,8 @@ again:
 
 /* The write end of the pipe the parent of daemonize() waits on */
 static int Ready_fd = -1;
+/* What daemon_ready() puts in place of the standard files */
+static int Null_fd = -1;
 
 /* Fork, for a daemon that init did not start: the parent never returns. */
 static void detach(void)
@@ -1177,7 +1181,7 @@ static const char *absolute_path(const char *path)
 
 /*
  * Before the Jitter RNG is allocated: a forked child does not inherit the
- * memory locks of FIPS and NTG.1 mode. daemonized() completes it.
+ * memory locks of FIPS and NTG.1 mode. daemon_ready() completes it.
  */
 static void daemonize(void)
 {
@@ -1194,39 +1198,52 @@ static void daemonize(void)
 	if ((chdir("/")) < 0)
 		dolog(JENT_LOG_ERR, "Cannot change directory\n");
 
+	/* Now: no sandbox opens it later, and the descriptors take it there. */
+	Null_fd = open("/dev/null", O_RDWR);
+	if (-1 == Null_fd)
+		dolog(JENT_LOG_ERR, "Cannot open /dev/null: %s",
+		      strerror(errno));
+
 	if (Pidfile && strlen(Pidfile))
 		create_pid_file(Pidfile);
 }
 
-/* After the first seed, whose failure still has the invoker's terminal */
-static void daemonized(void)
+/*
+ * The last that can fail the start is done: a failure until here still had
+ * the invoker's terminal and exit status. The parent gone is none: the daemon
+ * seeded the kernel.
+ */
+void daemon_ready(void)
 {
+	int fd;
+
+	if (-1 == Null_fd)
+		return;
+
 	dolog(JENT_LOG_NOTICE, "Daemonized as PID %d", (int)getpid());
 
-	/* Redirect standard files to /dev/null */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-result"
-	freopen( "/dev/null", "r", stdin);
-	freopen( "/dev/null", "w", stdout);
-	freopen( "/dev/null", "w", stderr);
-#pragma GCC diagnostic pop
+	fflush(NULL);
+	for (fd = STDIN_FILENO; fd <= STDERR_FILENO; fd++)
+		dup2(Null_fd, fd);
+	close(Null_fd);
+	Null_fd = -1;
+
+	/* stdout is no longer a terminal, so drop the colors */
+	use_color = 0;
 
 	/* Started: release the parent. */
 	if (-1 != Ready_fd) {
 		if (write(Ready_fd, "", 1) != 1)
-			dolog(JENT_LOG_ERR, "Cannot signal the start to the parent");
+			dolog(JENT_LOG_WARN, "Cannot signal the start to the parent");
 		close(Ready_fd);
 		Ready_fd = -1;
 	}
-
-	/* stdout is no longer a terminal, so drop the colors */
-	detect_color();
 }
 
 
 /*
  * Open /dev/null on each closed standard descriptor: /dev/random opened as 1
- * would give way to the /dev/null of daemonize(), and the syslog socket as 1
+ * would give way to the /dev/null of daemon_ready(), and the syslog socket as 1
  * would receive the bytes of --generate. Returns the mask of those closed.
  */
 static unsigned int open_std_fds(void)
@@ -1280,6 +1297,14 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
+	/*
+	 * Not for --generate, which a reader going away ends quietly: here that
+	 * is a log's or the parent's, no reason to stop seeding.
+	 */
+	if (install_handler(SIGPIPE, SIG_IGN, 0))
+		dolog(JENT_LOG_ERR, "Cannot ignore SIGPIPE: %s",
+		      strerror(errno));
+
 	rngd_os_start();
 
 	if (!foreground && !oneshot && !status)
@@ -1299,8 +1324,6 @@ int main(int argc, char *argv[])
 		return seeded ? 0 : 1;
 	}
 
-	if (!foreground)
-		daemonized();
 	install_term();
 
 	/* The zone file is a file: read it while there is a file system. */

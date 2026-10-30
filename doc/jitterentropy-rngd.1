@@ -135,8 +135,8 @@ promises a new Jitter RNG instance cannot lock its memory, which FIPS and
 NTG.1 mode and JENT_FORCE_SECURE_MEM demand, so these run unpledged. NetBSD and macOS have no such
 sandbox.
 .SS All systems
-The schedule of the seeds and the first seed the kernel takes are logged
-whatever
+The schedule of the seeds and the first seed the kernel takes, or the failure
+of it, which the daemon then retries every 5 seconds, are logged whatever
 .B \-\-verbose
 says, on Linux with the kernel it met: its
 .BR uname (2),
