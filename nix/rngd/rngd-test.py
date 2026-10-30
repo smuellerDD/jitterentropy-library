@@ -42,6 +42,12 @@ unit_status = machine.succeed(
 assert "NoNewPrivs:\t1\n" in unit_status, unit_status
 assert "CapEff:\t0000000000204000\n" in unit_status, unit_status
 
+# The first seed and the kernel at the unit's default verbosity.
+machine.succeed(
+    "journalctl -u jitterentropy.service | grep -q 'First seed: 64 bytes'")
+machine.succeed(
+    "journalctl -u jitterentropy.service | grep -q 'Notice. Kernel RNG: '")
+
 machine.succeed("systemctl stop jitterentropy.service")
 
 
@@ -141,7 +147,8 @@ machine.wait_until_succeeds("test -s /tmp/rngd-init.pid", timeout=30)
 machine.succeed("systemctl stop rngd-init.service")
 
 # --oneshot and --generate.
-machine.succeed("jitterentropy-rngd --oneshot")
+out = machine.succeed("jitterentropy-rngd --oneshot")
+assert "Seeded the kernel, exiting" in out, out
 machine.succeed(
     "test \"$(jitterentropy-rngd --generate 32 --hex | wc -c)\""
     " = 64")

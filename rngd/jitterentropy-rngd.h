@@ -58,7 +58,7 @@
 #define JENT_LOG_VERBOSE	2
 #define JENT_LOG_WARN	1
 #define JENT_LOG_ERR		0
-/* Logged at any verbosity: what was asked for, as by SIGUSR1 */
+/* Logged at any verbosity: what was asked for, and the daemon's milestones */
 #define JENT_LOG_NOTICE	(-1)
 
 /* Not errnos, which differ per system and reach into a shell's 128+n */

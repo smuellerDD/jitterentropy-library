@@ -647,6 +647,10 @@ out:
 	 * whenever it eventually happens.
 	 */
 	if (ret > 0) {
+		/* Whatever the verbosity: else a working daemon logs nothing. */
+		if (!seeded)
+			dolog(JENT_LOG_NOTICE, "First seed: %zd bytes reached %s",
+			      ret, rng->dev);
 		seeded = 1;
 		rngd_os_seeded();
 	}
@@ -758,7 +762,7 @@ static void sig_term(int sig)
 /* Deferred clean shutdown - does not return */
 void process_term(void)
 {
-	dolog(JENT_LOG_DEBUG, "Shutting down cleanly");
+	dolog(JENT_LOG_NOTICE, "Shutting down cleanly");
 
 	dealloc();
 
@@ -1197,6 +1201,8 @@ static void daemonize(void)
 /* After the first seed, whose failure still has the invoker's terminal */
 static void daemonized(void)
 {
+	dolog(JENT_LOG_NOTICE, "Daemonized as PID %d", (int)getpid());
+
 	/* Redirect standard files to /dev/null */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-result"
@@ -1287,6 +1293,8 @@ int main(int argc, char *argv[])
 	if (oneshot) {
 		if (!seeded)
 			gather_entropy_retry(&Random);
+		if (seeded)
+			dolog(JENT_LOG_NOTICE, "Seeded the kernel, exiting");
 		dealloc();
 		return seeded ? 0 : 1;
 	}

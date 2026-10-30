@@ -323,7 +323,10 @@ void rngd_os_start(void)
 
 int rngd_os_alloc(struct kernel_rng *rng)
 {
-	(void)rng;
+	/* Before the first seed, after which a detached daemon's stdout is gone */
+	if (!oneshot)
+		dolog(JENT_LOG_NOTICE, "Seeding %s every %u s", rng->dev,
+		      interval);
 
 	return 0;
 }

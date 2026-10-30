@@ -906,6 +906,14 @@ int rngd_os_alloc(struct kernel_rng *rng)
 	if (oneshot)
 		return 0;
 
+	/* Before the first seed, after which a detached daemon's stdout is gone */
+	if (lrng_present())
+		dolog(JENT_LOG_NOTICE, "Seeding when /dev/random asks: the LRNG reseeds by itself");
+	else
+		dolog(JENT_LOG_NOTICE, "Alarm every %u s, forced reseed after %u wakeups; after the first every %u s and %u wakeups",
+		      alarm_period[0], force_reseed_wakeups[0],
+		      alarm_period[1], force_reseed_wakeups[1]);
+
 	Entropy_avail_fd = open(ENTROPYAVAIL, O_RDONLY);
 	if (-1 == Entropy_avail_fd) {
 		int errsv = errno;
@@ -957,9 +965,6 @@ void rngd_os_run(struct kernel_rng *rng)
 		if (-1 == Alarm_fd)
 			dolog(JENT_LOG_ERR, "Cannot create the alarm: %s",
 			      strerror(errno));
-		dolog(JENT_LOG_DEBUG, "Alarm every %u s, forced reseed after %u wakeups; after the first every %u s and %u wakeups",
-		      alarm_period[0], force_reseed_wakeups[0],
-		      alarm_period[1], force_reseed_wakeups[1]);
 		set_alarm(alarm_period[0]);
 	}
 	select_fd();

@@ -135,6 +135,16 @@ promises a new Jitter RNG instance cannot lock its memory, which FIPS and
 NTG.1 mode and JENT_FORCE_SECURE_MEM demand, so these run unpledged. NetBSD and macOS have no such
 sandbox.
 .SS All systems
+The schedule of the seeds and the first seed the kernel takes are logged
+whatever
+.B \-\-verbose
+says, on Linux with the kernel it met: its
+.BR uname (2),
+whether it has the LRNG, the outcome of
+.BR RNDRESEEDCRNG ,
+its entropy settings and
+.IR /proc/sys/crypto/fips_enabled .
+.PP
 An injection that fails - on an intermittent health test failure the Jitter
 RNG could not recover from, or on an injection the kernel refuses - makes the
 daemon initialize the Jitter RNG anew and try again, up to five times, before
@@ -177,7 +187,8 @@ is needed.
 .SH OPTIONS
 .TP
 .BR \-v ", " \-\-verbose
-Log more. Without it only errors are logged; given once warnings as well,
+Log more. Without it only errors and notices are logged; given once warnings
+as well,
 twice the wakeups and injections and the status document of
 .BR jent_status (3)
 after each initialization of the Jitter RNG - at the start, by the daemon
