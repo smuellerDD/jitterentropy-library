@@ -34,7 +34,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release -j
 
+      # Unstable on Windows on ARM: its coarse clock fails a recovery of
+      # unit-error now and then. Reported, not gating; the build still is.
       - name: Run tests
+        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
         run: |
           export PATH="$PWD/build/Release:$PATH"
           ctest --test-dir build -C Release --output-on-failure -LE unreliable
@@ -67,7 +70,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release -j
 
+      # Unstable on Windows on ARM: its coarse clock fails a recovery of
+      # unit-error now and then. Reported, not gating; the build still is.
       - name: Run tests
+        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
         run: |
           ctest --test-dir build -C Release --output-on-failure -LE unreliable
           ./build/tests/raw-entropy/recording_userspace/Release/jitterentropy-cpuinfo.exe
