@@ -140,6 +140,20 @@ machine.succeed(
     " ! grep -q '^VmLck:[[:space:]]*0 kB' /proc/$pid/status;"
     " grep -q '^VmLck:' /proc/$pid/status; kill $pid")
 machine.wait_until_fails("test -e /tmp/rngd-detached.pid", timeout=30)
+# Root has given up the CAP_DAC_OVERRIDE that created this one: emptied and
+# reported at the exit, and the next start takes it over.
+machine.succeed(
+    "install -d -o nobody -m 0755 /tmp/rngd-dir &&"
+    " jitterentropy-rngd --syslog -p /tmp/rngd-dir/pid")
+pid = machine.succeed("cat /tmp/rngd-dir/pid").strip()
+machine.succeed(f"kill {pid}")
+machine.wait_until_fails(f"kill -0 {pid}", timeout=30)
+machine.succeed("test -e /tmp/rngd-dir/pid && ! test -s /tmp/rngd-dir/pid")
+machine.wait_until_succeeds(
+    "journalctl -t jitterentropy-rngd | grep -q 'Cannot remove PID file'",
+    timeout=30)
+machine.succeed("jitterentropy-rngd -p /tmp/rngd-dir/pid")
+machine.succeed("kill $(cat /tmp/rngd-dir/pid)")
 machine.succeed(
     "systemd-run --unit=rngd-init --service-type=exec"
     " jitterentropy-rngd -p /tmp/rngd-init.pid")

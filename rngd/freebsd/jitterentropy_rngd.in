@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # PROVIDE: jitterentropy_rngd
-# REQUIRE: FILESYSTEMS random
+# REQUIRE: FILESYSTEMS random syslogd
 # BEFORE: LOGIN
 # KEYWORD: shutdown
 #
@@ -13,6 +13,7 @@
 #
 # daemon(8) detaches it and keeps the PID file: the daemon itself stays in
 # the foreground, where it keeps the memory locks of FIPS and NTG.1 mode.
+# After syslogd: in capability mode the daemon cannot connect to it later.
 
 . /etc/rc.subr
 

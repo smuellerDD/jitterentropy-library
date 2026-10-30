@@ -82,25 +82,32 @@ if(BUILD_TESTING)
     add_test(NAME rngd-version COMMAND jitterentropy-rngd --version)
     set_tests_properties(rngd-version PROPERTIES
         PASS_REGULAR_EXPRESSION "jitterentropy-rngd ${PROJECT_VERSION}")
+    # The ones below drive the real noise source: a clock the Jitter RNG
+    # refuses is the machine's, which skips rather than fails them.
+    set(_jent_rngd_skip "The initialization of CPU Jitter RNG failed")
     # Nor does --generate, which writes the bytes out instead of seeding.
     add_test(NAME rngd-generate
              COMMAND ${CMAKE_COMMAND}
                      -DRNGD=$<TARGET_FILE:jitterentropy-rngd>
                      -DDIR=${CMAKE_CURRENT_BINARY_DIR}
                      -P ${PROJECT_SOURCE_DIR}/tests/rngd/generate.cmake)
+    set_tests_properties(rngd-generate PROPERTIES
+        SKIP_REGULAR_EXPRESSION "${_jent_rngd_skip}")
     # --device stands in for /dev/random. Linux has none: the nix VM tests.
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME rngd-signals
                  COMMAND sh ${PROJECT_SOURCE_DIR}/tests/rngd/signals.sh
                          $<TARGET_FILE:jitterentropy-rngd>
                          ${CMAKE_CURRENT_BINARY_DIR}/rngd-signals)
-        set_tests_properties(rngd-signals PROPERTIES TIMEOUT 900)
+        set_tests_properties(rngd-signals PROPERTIES TIMEOUT 900
+            SKIP_REGULAR_EXPRESSION "${_jent_rngd_skip}")
         # The PID file, which takes the detached daemon - on Linux root
         # and the kernel as well.
         add_test(NAME rngd-pidfile
                  COMMAND sh ${PROJECT_SOURCE_DIR}/tests/rngd/pidfile.sh
                          $<TARGET_FILE:jitterentropy-rngd>
                          ${CMAKE_CURRENT_BINARY_DIR}/rngd-pidfile)
-        set_tests_properties(rngd-pidfile PROPERTIES TIMEOUT 900)
+        set_tests_properties(rngd-pidfile PROPERTIES TIMEOUT 900
+            SKIP_REGULAR_EXPRESSION "${_jent_rngd_skip}")
     endif()
 endif()

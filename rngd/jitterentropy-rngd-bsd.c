@@ -145,10 +145,12 @@ ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
 		 * only warn while the daemon seeded nothing any more.
 		 */
 		if (dropped && (EPERM == errsv || EACCES == errsv)) {
-			/* dolog() exits, past the caller's wipe */
+			/* dolog_exit() exits, past the caller's wipe */
 			memset_secure(buf, 0, len);
-			dolog(JENT_LOG_ERR, "%s refuses the writes of user %s: %s",
-			      rng->dev, user, strerror(errsv));
+			dolog_exit(exit_on_error ? rngd_exit_status(errsv) :
+				   RNGD_EXIT_ERROR,
+				   "%s refuses the writes of user %s: %s",
+				   rng->dev, user, strerror(errsv));
 		}
 		if (ENOSPC == errsv) {
 			dolog(JENT_LOG_WARN, "%s took no data", rng->dev);
@@ -189,20 +191,14 @@ static void drop_privileges(void)
 }
 
 /*
- * Give up root, then confine the daemon to writing Random and computing - and
- * to re-initializing the Jitter RNG, by the library's own health test reset or
- * by gather_entropy_retry().
- *
- * Capability mode permits all a re-initialization calls: mmap(), mlock(),
- * cpuset_getaffinity(), hw.ncpu, thr_new(), getrandom(). No pledge promise
- * grants mlock(); "error" has it fail with ENOSYS instead of killing the
- * daemon, which the library tolerates as any refused lock - unless FIPS or
- * NTG.1 mode or JENT_FORCE_SECURE_MEM demands it, so those stay unpledged. The
- * unlink() of the PID file at exit fails the same way in both, leaving a stale
- * file the next start takes over. NetBSD and macOS have no sandbox a program
- * enters by itself.
+ * Give up root, then confine the daemon to writing Random, computing and
+ * re-initializing the Jitter RNG. Capability mode permits all that calls. No
+ * pledge promise grants mlock(); "error" has it fail with ENOSYS, which the
+ * library tolerates unless FIPS or NTG.1 mode or JENT_FORCE_SECURE_MEM demands
+ * the lock, so those stay unpledged. Both fail the unlink() of the PID file at
+ * exit, see dealloc(). NetBSD and macOS have no such sandbox.
  */
-void rngd_os_sandbox(struct kernel_rng *rng)
+void rngd_os_sandbox(void)
 {
 #if defined(__FreeBSD__)
 	cap_rights_t rights;
@@ -211,7 +207,6 @@ void rngd_os_sandbox(struct kernel_rng *rng)
 	drop_privileges();
 
 #if defined(__OpenBSD__)
-	(void)rng;
 	if (jent_flags &
 	    (JENT_FORCE_FIPS | JENT_NTG1 | JENT_FORCE_SECURE_MEM)) {
 		dolog(JENT_LOG_VERBOSE,
@@ -222,10 +217,8 @@ void rngd_os_sandbox(struct kernel_rng *rng)
 		dolog(JENT_LOG_ERR, "pledge: %s", strerror(errno));
 #elif defined(__FreeBSD__)
 	cap_rights_init(&rights, CAP_WRITE);
-	if (cap_rights_limit(rng->fd, &rights) || cap_enter())
+	if (cap_rights_limit(Random.fd, &rights) || cap_enter())
 		dolog(JENT_LOG_ERR, "Capsicum: %s", strerror(errno));
-#else
-	(void)rng;
 #endif
 }
 
@@ -241,21 +234,11 @@ static void sig_user(int sig)
 		Reseed_pending = 1;
 }
 
-/*
- * SIGUSR2: a seed now, as each interval writes one - which leaves the
- * interval as it runs. The outcome is logged whatever the verbosity, as
- * asked for.
- */
-static void process_reseed(struct kernel_rng *rng)
+/* SIGUSR2's seed, which leaves the interval as it runs */
+void rngd_os_reseeded(ssize_t written)
 {
-	ssize_t written = gather_entropy_retry(rng);
-
-	if (written > 0)
-		dolog(JENT_LOG_NOTICE, "Seeded %s with %zd bytes, as SIGUSR2 asked",
-		      rng->dev, written);
-	else
-		dolog(JENT_LOG_NOTICE, "The seed SIGUSR2 asked for failed: %zd",
-		      written);
+	dolog(JENT_LOG_NOTICE, "Seeded %s with %zd bytes, as SIGUSR2 asked",
+	      Random.dev, written);
 }
 
 /* The interval from now on: when the next seed is due */
@@ -313,11 +296,11 @@ void rngd_os_start(void)
 	sigprocmask(SIG_BLOCK, &usr, NULL);
 }
 
-void rngd_os_alloc(struct kernel_rng *rng)
+void rngd_os_alloc(void)
 {
 	/* Before the first seed, so that it is seen if that fails the start */
 	if (!oneshot)
-		dolog(JENT_LOG_NOTICE, "Seeding %s every %u s", rng->dev,
+		dolog(JENT_LOG_NOTICE, "Seeding %s every %u s", Random.dev,
 		      interval);
 }
 
@@ -325,7 +308,7 @@ void rngd_os_seeded(void)
 {
 }
 
-void rngd_os_run(struct kernel_rng *rng)
+void rngd_os_run(void)
 {
 	sigset_t blocked, unblocked, waiting;
 	struct timespec due;
@@ -342,7 +325,6 @@ void rngd_os_run(struct kernel_rng *rng)
 
 	while (1) {
 		struct timespec ts;
-		ssize_t written;
 		int ret;
 
 		/* As in the Linux select_fd(): test and wait are one. */
@@ -382,18 +364,15 @@ void rngd_os_run(struct kernel_rng *rng)
 		}
 		if (Reseed_pending) {
 			Reseed_pending = 0;
-			process_reseed(rng);
+			process_reseed();
 		}
 		if (0 == ret) {
-			written = gather_entropy_retry(rng);
-			dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s",
-			      written, rng->dev);
+			seed_random();
 			set_due(&due);
 		}
 	}
 }
 
-void rngd_os_dealloc(struct kernel_rng *rng)
+void rngd_os_dealloc(void)
 {
-	(void)rng;
 }

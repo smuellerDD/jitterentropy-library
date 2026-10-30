@@ -754,6 +754,26 @@ ssize_t gather_entropy_retry(struct kernel_rng *rng)
 	return written;
 }
 
+/* The seed of an occasion, for the log at -vv */
+void seed_random(void)
+{
+	ssize_t written = gather_entropy_retry(&Random);
+
+	dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s", written, Random.dev);
+}
+
+/* SIGUSR2: a seed now, its outcome logged whatever the verbosity */
+void process_reseed(void)
+{
+	ssize_t written = gather_entropy_retry(&Random);
+
+	if (written > 0)
+		rngd_os_reseeded(written);
+	else
+		dolog(JENT_LOG_NOTICE, "The seed SIGUSR2 asked for failed: %zd",
+		      written);
+}
+
 /*******************************************************************
  * Signal handling functions
  *******************************************************************/
@@ -852,15 +872,23 @@ void dealloc(void)
 		jent_entropy_collector_free(Random.ec);
 		Random.ec = NULL;
 	}
-	rngd_os_dealloc(&Random);
+	rngd_os_dealloc();
 	if (-1 != Random.fd) {
 		close(Random.fd);
 		Random.fd = -1;
 	}
 	if (-1 != Pidfile_fd) {
-		/* Under the lock: a new instance must not lose the file. */
-		if (NULL != Pidfile)
-			unlink(Pidfile);
+		/*
+		 * Under the lock, or a new instance could lose the file. Should
+		 * dropped privileges forbid it, the next start reuses it empty.
+		 */
+		if (NULL != Pidfile && unlink(Pidfile) && ENOENT != errno) {
+			dolog(JENT_LOG_NOTICE, "Cannot remove PID file %s: %s",
+			      Pidfile, strerror(errno));
+			if (ftruncate(Pidfile_fd, 0))
+				dolog(JENT_LOG_NOTICE, "Cannot empty PID file %s: %s",
+				      Pidfile, strerror(errno));
+		}
 		close(Pidfile_fd);
 		Pidfile_fd = -1;
 	}
@@ -877,7 +905,7 @@ static void alloc(void)
 		dolog(JENT_LOG_ERR, "Open of %s failed: %s", Random.dev,
 		      strerror(errno));
 
-	rngd_os_alloc(&Random);
+	rngd_os_alloc();
 
 	if (oneshot)
 		rngd_os_drop_privileges(1);
@@ -1329,7 +1357,7 @@ int main(int argc, char *argv[])
 
 	/* The zone file is a file: read it while there is a file system. */
 	tzset();
-	rngd_os_sandbox(&Random);
-	rngd_os_run(&Random);
+	rngd_os_sandbox();
+	rngd_os_run();
 	/* NOTREACHED */
 }

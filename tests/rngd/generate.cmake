@@ -10,7 +10,9 @@ function(rngd_ok)
     execute_process(COMMAND "${RNGD}" ${ARGN} RESULT_VARIABLE _ret
                     OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
     if(NOT _ret EQUAL 0)
-        message(FATAL_ERROR "jitterentropy-rngd ${ARGN}: ${_ret}\n${_stderr}")
+        # Not in the error, whose wrapped lines SKIP_REGULAR_EXPRESSION misses
+        message(STATUS "${_stderr}")
+        message(FATAL_ERROR "jitterentropy-rngd ${ARGN}: ${_ret}")
     endif()
     set(_stdout "${_stdout}" PARENT_SCOPE)
 endfunction()

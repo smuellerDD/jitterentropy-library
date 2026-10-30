@@ -102,6 +102,8 @@ void dealloc(void);
 ssize_t gather_entropy_retry(struct kernel_rng *rng);
 void process_term(void) __attribute__((noreturn));
 void process_status(void);
+void process_reseed(void);
+void seed_random(void);
 void term_signals(sigset_t *set);
 void user_signals(sigset_t *set);
 int write_all(int fd, const char *buf, size_t len);
@@ -134,7 +136,7 @@ void rngd_os_harden(void);
 void rngd_os_start(void);
 
 /* After Random is open: what else the injections need, or the daemon ends. */
-void rngd_os_alloc(struct kernel_rng *rng);
+void rngd_os_alloc(void);
 
 /* Inject @len bytes with @entropy_bytes of entropy: bytes taken or -errno */
 ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
@@ -143,19 +145,22 @@ ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
 /* Keep only what the run needs, @seeding if that includes injecting */
 void rngd_os_drop_privileges(int seeding);
 
+/* The seed of SIGUSR2 took @written bytes: log what that did, as a notice. */
+void rngd_os_reseeded(ssize_t written);
+
 /* After each injection the kernel took in full. */
 void rngd_os_seeded(void);
 
 /* Once detached: give up what seeding and re-initializing do not need. */
-void rngd_os_sandbox(struct kernel_rng *rng);
+void rngd_os_sandbox(void);
 
 /*
  * Seed on every occasion, until process_term() or an error. Calls
  * daemon_ready() once nothing that can fail the start is left.
  */
-void rngd_os_run(struct kernel_rng *rng) __attribute__((noreturn));
+void rngd_os_run(void) __attribute__((noreturn));
 
 /* Release what rngd_os_alloc() set up. Called on every exit. */
-void rngd_os_dealloc(struct kernel_rng *rng);
+void rngd_os_dealloc(void);
 
 #endif /* JITTERENTROPY_RNGD_H */

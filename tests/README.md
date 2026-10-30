@@ -351,7 +351,8 @@ and hex digits to a file and to stdout, checks their count and that the log
 stays out of them, that the options it does not go with and `0` are refused,
 that `--output` refuses a symbolic link, a hard link and a FIFO and overwrites
 a file of the caller's own, and that `--status` prints its document. Neither
-needs root or the kernel.
+needs root or the kernel. `rngd-generate`, and the two tests below, are skipped
+on a machine whose clock the Jitter RNG refuses.
 
 On FreeBSD, NetBSD, OpenBSD and macOS, `rngd-signals` (`rngd/signals.sh`) runs
 the daemon with `--device` on a regular file in place of `/dev/random` and

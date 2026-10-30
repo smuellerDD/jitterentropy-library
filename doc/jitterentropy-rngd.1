@@ -161,7 +161,13 @@ on OpenBSD outside FIPS and NTG.1 mode. Under the
 .BR pledge (2)
 promises a new Jitter RNG instance cannot lock its memory, which FIPS and
 NTG.1 mode and JENT_FORCE_SECURE_MEM demand, so these run unpledged. NetBSD and macOS have no such
-sandbox.
+sandbox. In capability mode
+.BR syslog (3)
+cannot connect again, so on FreeBSD the log of
+.B \-\-syslog
+ends when
+.BR syslogd (8)
+restarts.
 .SS All systems
 The schedule of the seeds and the first seed the kernel takes, or the failure
 of it, which the daemon then retries every 5 seconds, are logged whatever
@@ -244,7 +250,8 @@ facility instead of writing them to standard output.
 Write the PID to
 .I file
 and lock it, so that a second instance naming the same file refuses to start
-and exits with 1.
+and exits with 1. It is removed at the exit; where the daemon may no longer do
+that, it says so and leaves the file empty for the next start to take over.
 An existing
 .I file
 must be a regular file of the daemon's user with no other link, and not a

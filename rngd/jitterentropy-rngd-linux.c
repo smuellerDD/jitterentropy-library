@@ -702,13 +702,6 @@ static void set_alarm(unsigned int secs)
 		dolog(JENT_LOG_ERR, "Cannot set the alarm: %s", strerror(errno));
 }
 
-static void seed_random(void)
-{
-	ssize_t written = gather_entropy_retry(&Random);
-
-	dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s", written, Random.dev);
-}
-
 /*
  * Wakeup and check entropy_avail -- this covers the drain of entropy
  * from the nonblocking_pool via get_random_bytes. @expiries is the number of
@@ -761,21 +754,10 @@ static void process_alarm(uint64_t expiries)
 	seed_random();
 }
 
-/*
- * SIGUSR2: an injection now and a reseed of the kernel's RNG after it, as the
- * alarm forces one. The LRNG gets the injection alone, as on every occasion:
- * it reseeds by itself. The outcome is logged whatever the verbosity, as
- * asked for.
- */
-static void process_reseed(void)
+/* SIGUSR2's seed: an injection and a reseed, on the LRNG the injection alone */
+void rngd_os_reseeded(ssize_t written)
 {
-	ssize_t written = gather_entropy_retry(&Random);
-
-	if (written <= 0)
-		dolog(JENT_LOG_NOTICE, "The %s SIGUSR2 asked for failed: %zd",
-		      unprivileged ? "seed" :
-		      lrng_present() ? "injection" : "reseed", written);
-	else if (unprivileged)
+	if (unprivileged)
 		dolog(JENT_LOG_NOTICE, "Seeded %s with %zd bytes, as SIGUSR2 asked",
 		      Random.dev, written);
 	else if (lrng_present())
@@ -790,9 +772,8 @@ static void process_reseed(void)
 }
 
 /*
- * Wait for the alarm, for /dev/random to want more entropy - only that
- * implements polling, and current kernels never report it writable - and for
- * a termination signal.
+ * Wait for the alarm, a signal, or /dev/random wanting data: current kernels
+ * report it writable only until their generator is ready.
  */
 static void select_fd(void)
 {
@@ -820,10 +801,10 @@ static void select_fd(void)
 		FD_ZERO(&wfds);
 		nfds = 0;
 		/*
-		 * /dev/urandom has no poll: writable at all times, it would
-		 * have the daemon spin.
+		 * /dev/urandom is always writable, and /dev/random until the
+		 * kernel is ready: polling would spin, the alarm paces these.
 		 */
-		if (!unprivileged) {
+		if (!unprivileged && !Seed_retrying) {
 			FD_SET(Random.fd, &wfds);
 			nfds = Random.fd + 1;
 		}
@@ -972,10 +953,8 @@ void rngd_os_start(void)
 	sigprocmask(SIG_BLOCK, &usr, NULL);
 }
 
-void rngd_os_alloc(struct kernel_rng *rng)
+void rngd_os_alloc(void)
 {
-	(void)rng;
-
 	rpi = malloc(RNDADDENTROPY_ALLOCSIZE);
 	if (!rpi)
 		dolog(JENT_LOG_ERR, "Cannot allocate memory for random bytes");
@@ -1014,18 +993,14 @@ void rngd_os_drop_privileges(int seeding)
 			  SEEDING_CAPS : GENERATE_CAPS);
 }
 
-void rngd_os_sandbox(struct kernel_rng *rng)
+void rngd_os_sandbox(void)
 {
-	(void)rng;
-
 	rngd_os_drop_privileges(1);
 }
 
-void rngd_os_run(struct kernel_rng *rng)
+void rngd_os_run(void)
 {
 	sigset_t usr;
-
-	(void)rng;
 
 	/* After daemonize(), as the alarm below */
 	user_signals(&usr);
@@ -1054,10 +1029,8 @@ void rngd_os_run(struct kernel_rng *rng)
 	exit(1);
 }
 
-void rngd_os_dealloc(struct kernel_rng *rng)
+void rngd_os_dealloc(void)
 {
-	(void)rng;
-
 	if (NULL != rpi) {
 		memset_secure(rpi, 0, RNDADDENTROPY_ALLOCSIZE);
 		free(rpi);
