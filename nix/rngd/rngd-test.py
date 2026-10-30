@@ -157,6 +157,33 @@ assert "The first seed of /dev/random failed" in out, out
 assert "Re-initializing the Jitter RNG" not in out, out
 assert out.count("Error injecting entropy") >= 7, out
 
+# Unprivileged: plain writes where asked for, a refusal where not. Periodic
+# alone, so that seven seconds see the first seed and nothing else.
+nobody = "setpriv --reuid=65534 --regid=65534 --clear-groups"
+out = machine.fail(f"{nobody} jitterentropy-rngd -F 2>&1")
+assert "must start as root" in out, out
+out = machine.succeed(
+    f"rc=0; timeout -s TERM 7 {nobody} jitterentropy-rngd -F -vvv"
+    " --unprivileged 2>&1 || rc=$?; [ $rc = 124 ]")
+print(out)
+assert "Seeding /dev/urandom every 600 s" in out, out
+assert "First seed: 64 bytes reached /dev/urandom" in out, out
+assert "no entropy credited, no reseed requested" in out, out
+assert "Injected" not in out, out
+assert out.count("Wrote 64 bytes to /dev/urandom") == 1, out
+out = machine.succeed(
+    f"rc=0; timeout -s TERM 4 {nobody} jitterentropy-rngd -F -vvv -t 1"
+    " --unprivileged 2>&1 || rc=$?; [ $rc = 124 ]")
+assert out.count("Wrote 64 bytes to /dev/urandom") >= 3, out
+out = machine.fail(
+    f"{nobody} jitterentropy-rngd -F --unprivileged --phase1 5:120 2>&1")
+assert "use --interval" in out, out
+machine.fail(f"{nobody} jitterentropy-rngd -F --device /dev/urandom")
+machine.succeed(f"{nobody} jitterentropy-rngd --oneshot --unprivileged")
+# As root it gives up CAP_SYS_ADMIN as well, which it does not use.
+pid = hardened("jitterentropy-rngd -F --unprivileged", "0000000000004000")
+machine.succeed(f"kill {pid}")
+
 # --oneshot and --generate.
 out = machine.succeed("jitterentropy-rngd --oneshot")
 assert "Seeded the kernel, exiting" in out, out

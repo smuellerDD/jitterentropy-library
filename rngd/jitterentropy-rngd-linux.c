@@ -83,6 +83,9 @@
 #define ALARM_PERIOD_PHASE1	5
 #define FORCE_RESEED_WAKEUPS_PHASE2	12
 #define ALARM_PERIOD_PHASE2	50
+/* --unprivileged writes as often as the forced reseed comes, and only then. */
+#define PLAIN_INTERVAL	(ALARM_PERIOD_PHASE1 * \
+			 FORCE_RESEED_WAKEUPS_PHASE1)
 /* The alarm while no first seed went in: the BSDs' UNSEEDED_INTERVAL */
 #define UNSEEDED_PERIOD	5
 static unsigned int alarm_period[2] = {
@@ -132,6 +135,12 @@ static int Entropy_thresh_fd = -1;
 
 static unsigned long kern_maj = ULONG_MAX, kern_minor, kern_patchlevel;
 
+/*
+ * --unprivileged: plain writes to /dev/urandom. Never a fallback: a daemon that
+ * lost its privileges is not to go on crediting nothing.
+ */
+static int unprivileged = 0;
+
 /* Is the LRNG present instead of the legacy /dev/random? */
 static int lrng_present(void)
 {
@@ -148,6 +157,12 @@ static int lrng_present(void)
 	}
 
 	return lrng_present;
+}
+
+/* Does the LRNG say when it wants data? It does not ask for plain writes. */
+static int lrng_in_charge(void)
+{
+	return !unprivileged && lrng_present();
 }
 
 static int get_kernver(void)
@@ -228,12 +243,14 @@ const char rngd_os_optstring[] = "t:";
 enum {
 	OPT_PHASE1 = RNGD_OS_OPT,
 	OPT_PHASE2,
+	OPT_UNPRIVILEGED,
 };
 
 const struct option rngd_os_options[] = {
 	{"interval", 1, 0, 't'},
 	{"phase1", 1, 0, OPT_PHASE1},
 	{"phase2", 1, 0, OPT_PHASE2},
+	{"unprivileged", 0, 0, OPT_UNPRIVILEGED},
 	{0, 0, 0, 0}
 };
 
@@ -264,16 +281,23 @@ static void parse_phase(const char *str, unsigned int phase)
 }
 
 /* --interval: a seed every @secs in either phase, whatever the estimate */
-static void parse_interval(const char *str)
+static void set_interval(unsigned int secs)
 {
-	unsigned int secs = parse_uint(str), phase;
+	unsigned int phase;
 
-	if (!secs)
-		usage();
 	for (phase = 0; phase < 2; phase++) {
 		alarm_period[phase] = secs;
 		force_reseed_wakeups[phase] = 1;
 	}
+}
+
+static void parse_interval(const char *str)
+{
+	unsigned int secs = parse_uint(str);
+
+	if (!secs)
+		usage();
+	set_interval(secs);
 }
 
 void rngd_os_parse(int c, const char *arg)
@@ -291,6 +315,10 @@ void rngd_os_parse(int c, const char *arg)
 		schedule_by(BY_PHASES);
 		parse_phase(arg, 1);
 		break;
+	case OPT_UNPRIVILEGED:
+		Random.dev = "/dev/urandom";
+		unprivileged = 1;
+		break;
 	default:
 		usage();
 	}
@@ -306,6 +334,9 @@ void rngd_os_usage(void)
 	fprintf(stderr, "\t   --phase2 PERIOD:WAKEUPS\tThe same for every later forced reseed\n");
 	fprintf(stderr, "\t           \t(default %u:%u)\n",
 		ALARM_PERIOD_PHASE2, FORCE_RESEED_WAKEUPS_PHASE2);
+	fprintf(stderr, "\t   --unprivileged\tWrite to /dev/urandom every %u s or --interval,\n",
+		PLAIN_INTERVAL);
+	fprintf(stderr, "\t           \tneeding no root but crediting no entropy\n");
 	fprintf(stderr, "\nLRNG presence %sdetected\n",
 		lrng_present() ? "" : "not ");
 }
@@ -483,9 +514,29 @@ out:
 	return written;
 }
 
+/* Into the pool as any write is, with no credit and no reseed */
+static ssize_t write_plain(struct kernel_rng *rng, const char *buf, size_t len)
+{
+	int ret = write_all(rng->fd, buf, len);
+
+	if (ret) {
+		dolog(JENT_LOG_WARN, "Error writing to %s: %s", rng->dev,
+		      strerror(-ret));
+		return ret;
+	}
+	dolog(JENT_LOG_DEBUG, "Wrote %zu bytes to %s", len, rng->dev);
+
+	log_kernel(0);
+
+	return (ssize_t)len;
+}
+
 ssize_t rngd_os_inject(struct kernel_rng *rng, char *buf, size_t len,
 		       size_t entropy_bytes)
 {
+	if (unprivileged)
+		return write_plain(rng, buf, len);
+
 	if (lrng_present()) {
 		/*
 		 * The LRNG operates fully 90B compliant, no special handling
@@ -598,7 +649,10 @@ static void log_kernel(int reseed_err)
 		dolog(JENT_LOG_NOTICE, "Kernel machine: %s", kernel.machine);
 	}
 
-	if (lrng_present())
+	if (unprivileged)
+		dolog(JENT_LOG_NOTICE, "Kernel RNG: %s, taking plain writes: no entropy credited, no reseed requested",
+		      lrng_present() ? "the LRNG" : "random.c");
+	else if (lrng_present())
 		dolog(JENT_LOG_NOTICE, "Kernel RNG: the LRNG, which needs no reseed IOCTL");
 	else if (!reseed_err)
 		dolog(JENT_LOG_NOTICE, "Kernel RNG: random.c, RNDRESEEDCRNG works");
@@ -652,7 +706,7 @@ static void seed_random(void)
 {
 	ssize_t written = gather_entropy_retry(&Random);
 
-	dolog(JENT_LOG_VERBOSE, "%zd bytes written to /dev/random", written);
+	dolog(JENT_LOG_VERBOSE, "%zd bytes written to %s", written, Random.dev);
 }
 
 /*
@@ -672,12 +726,12 @@ static void process_alarm(uint64_t expiries)
 			seed_random();
 		if (seeded) {
 			Seed_retrying = 0;
-			set_alarm(lrng_present() ? 0 : alarm_period[0]);
+			set_alarm(lrng_in_charge() ? 0 : alarm_period[0]);
 		}
 		return;
 	}
 
-	dolog(JENT_LOG_VERBOSE, "Wakeup call for alarm on %s", ENTROPYAVAIL);
+	dolog(JENT_LOG_VERBOSE, "Wakeup call for alarm");
 
 	if (expiries >= due) {
 		wakeups = 0;
@@ -719,7 +773,11 @@ static void process_reseed(void)
 
 	if (written <= 0)
 		dolog(JENT_LOG_NOTICE, "The %s SIGUSR2 asked for failed: %zd",
+		      unprivileged ? "seed" :
 		      lrng_present() ? "injection" : "reseed", written);
+	else if (unprivileged)
+		dolog(JENT_LOG_NOTICE, "Seeded %s with %zd bytes, as SIGUSR2 asked",
+		      Random.dev, written);
 	else if (lrng_present())
 		dolog(JENT_LOG_NOTICE, "Injected %zd bytes into the LRNG, as SIGUSR2 asked",
 		      written);
@@ -760,8 +818,15 @@ static void select_fd(void)
 
 		FD_ZERO(&rfds);
 		FD_ZERO(&wfds);
-		FD_SET(Random.fd, &wfds);
-		nfds = Random.fd + 1;
+		nfds = 0;
+		/*
+		 * /dev/urandom has no poll: writable at all times, it would
+		 * have the daemon spin.
+		 */
+		if (!unprivileged) {
+			FD_SET(Random.fd, &wfds);
+			nfds = Random.fd + 1;
+		}
 		if (-1 != Alarm_fd) {
 			FD_SET(Alarm_fd, &rfds);
 			if (Alarm_fd >= nfds)
@@ -882,11 +947,22 @@ void rngd_os_start(void)
 {
 	sigset_t usr;
 
-	if (geteuid())
-		dolog(JENT_LOG_ERR, "Program must start as root!");
+	if (geteuid() && !unprivileged)
+		dolog(JENT_LOG_ERR, "Program must start as root, or with --unprivileged!");
+
+	/*
+	 * Periodic alone: an estimate says nothing of writes that credit
+	 * nothing, and a low one would have them repeat on every alarm.
+	 */
+	if (unprivileged) {
+		if (BY_PHASES == schedule_set_by)
+			dolog(JENT_LOG_ERR, "--phase1 / --phase2 go by the kernel's entropy estimate, which --unprivileged does not: use --interval");
+		if (!schedule_set_by)
+			set_interval(PLAIN_INTERVAL);
+	}
 
 	/* The LRNG reseeds by itself: a schedule asked for would go unkept. */
-	if (schedule_set_by && lrng_present())
+	if (schedule_set_by && lrng_in_charge())
 		dolog(JENT_LOG_ERR, "%s has no effect on a kernel with the LRNG, which reseeds by itself",
 		      BY_INTERVAL == schedule_set_by ?
 		      "--interval" : "--phase1 / --phase2");
@@ -909,7 +985,12 @@ void rngd_os_alloc(struct kernel_rng *rng)
 		return;
 
 	/* Before the first seed, so that it is seen if that fails the start */
-	if (lrng_present())
+	if (unprivileged) {
+		dolog(JENT_LOG_NOTICE, "Seeding %s every %u s", Random.dev,
+		      alarm_period[0]);
+		return;
+	}
+	if (lrng_in_charge())
 		dolog(JENT_LOG_NOTICE, "Seeding when /dev/random asks: the LRNG reseeds by itself");
 	else
 		dolog(JENT_LOG_NOTICE, "Alarm every %u s, forced reseed after %u wakeups; after the first every %u s and %u wakeups",
@@ -929,14 +1010,15 @@ void rngd_os_alloc(struct kernel_rng *rng)
 
 void rngd_os_drop_privileges(int seeding)
 {
-	drop_capabilities(seeding ? SEEDING_CAPS : GENERATE_CAPS);
+	drop_capabilities(seeding && !unprivileged ?
+			  SEEDING_CAPS : GENERATE_CAPS);
 }
 
 void rngd_os_sandbox(struct kernel_rng *rng)
 {
 	(void)rng;
 
-	drop_capabilities(SEEDING_CAPS);
+	rngd_os_drop_privileges(1);
 }
 
 void rngd_os_run(struct kernel_rng *rng)
@@ -956,7 +1038,7 @@ void rngd_os_run(struct kernel_rng *rng)
 	 * After daemonize(), so that the timer is the detached daemon's own.
 	 * On the LRNG it retries a first seed that failed, and nothing else.
 	 */
-	if (!lrng_present() || !seeded) {
+	if (!lrng_in_charge() || !seeded) {
 		Alarm_fd = timerfd_create(CLOCK_MONOTONIC,
 					  TFD_CLOEXEC | TFD_NONBLOCK);
 		if (-1 == Alarm_fd)

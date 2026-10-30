@@ -36,7 +36,11 @@ ioctl of
 .I /dev/random
 described in
 .BR random (4).
-It must be started as root.
+It must be started as root, unless
+.B \-\-unprivileged
+has it write to
+.I /dev/urandom
+instead.
 .PP
 Every injection hands 64 bytes of Jitter RNG output to the kernel and claims
 full entropy for them, followed by a request to reseed the kernel's random
@@ -83,6 +87,23 @@ by itself. There is no schedule to set, and
 and
 .B \-\-phase2
 end the daemon at its start.
+.PP
+With
+.B \-\-unprivileged
+the daemon writes to
+.I /dev/urandom
+in place of the ioctls, which needs no root. The kernel mixes the bytes into
+its pool and takes them up at its next reseed, but no entropy is credited and
+no reseed is requested, so writes do not initialize its random number
+generator: what is ordered after the daemon's first write may still find it
+unseeded. The daemon writes periodically alone, once at startup and every 10
+minutes after
+.RB ( \-\-interval ),
+on any kernel: an entropy estimate says nothing of writes that credit nothing.
+.B \-\-phase1
+and
+.B \-\-phase2
+are refused with it.
 .PP
 After the first seed, and under
 .B \-\-oneshot
@@ -312,7 +333,10 @@ kernel with the LRNG neither phase may be given.
 .BR \-t ", " \-\-interval " \fIseconds\fR"
 Seed the kernel every
 .I seconds
-after the first; 0 is refused. On FreeBSD, NetBSD, OpenBSD and macOS the
+after the first; 0 is refused. On FreeBSD, NetBSD, OpenBSD and macOS, and on
+Linux with
+.BR \-\-unprivileged ,
+the
 default is 600. On Linux the alarm goes off every
 .I seconds
 in either phase and injects each time, regardless of the kernel's entropy
@@ -321,7 +345,13 @@ estimate, in place of the checks of
 and
 .BR \-\-phase2 ,
 neither of which goes with it; without it, those apply. On a kernel with the
-LRNG it is refused.
+LRNG it is refused, unless with
+.BR \-\-unprivileged .
+.TP
+.B \-\-unprivileged
+Linux only. Write to
+.I /dev/urandom
+in place of the ioctls, which needs no root but credits no entropy: see above.
 .TP
 .BR \-u ", " \-\-user " \fIuser\fR"
 FreeBSD, NetBSD, OpenBSD and macOS only. The user to switch to after the
@@ -413,7 +443,10 @@ wrote all its bytes, and when the daemon was terminated by
 .B SIGQUIT
 or
 .BR SIGHUP ,
-on which it shuts down cleanly. 1 for an error: on Linux no root privileges, a
+on which it shuts down cleanly. 1 for an error: on Linux no root privileges
+without
+.BR \-\-unprivileged ,
+a
 Jitter RNG that cannot be initialized or allocated, a file that cannot be
 opened, a user that cannot be switched to or whose seeds the kernel refuses, a
 Capsicum or
@@ -515,6 +548,11 @@ is unset or
 .TP
 .I /dev/random
 The device the entropy is injected into.
+.TP
+.I /dev/urandom
+Linux: what
+.B \-\-unprivileged
+writes to instead.
 .TP
 .IR /proc/sys/kernel/random/entropy_avail ", " /proc/sys/kernel/random/write_wakeup_threshold
 Linux: the kernel's entropy estimate and the threshold below which the daemon

@@ -11,7 +11,11 @@ its name holds its service files.
   `--phase1` and `--phase2` change that schedule, `--interval` replaces it
   with an injection every so many seconds). It needs root (`CAP_SYS_ADMIN`).
   It leaves no core dump, takes no debugger short of `CAP_SYS_PTRACE` and
-  drops every capability but `CAP_SYS_ADMIN` and `CAP_IPC_LOCK`.
+  drops every capability but `CAP_SYS_ADMIN` and `CAP_IPC_LOCK`. With
+  `--unprivileged` it needs no root: the bytes go into the kernel's pool by
+  plain writes to `/dev/urandom`, at startup and every ten minutes after
+  (`--interval`), with no entropy credited and no reseed requested, so they do
+  not initialize the kernel's generator.
 * **FreeBSD, NetBSD, OpenBSD, macOS** (`jitterentropy-rngd-bsd.c`,
   `freebsd/`, `netbsd/`, `openbsd/`, `macos/`): a write to `/dev/random`, once
   at startup and every ten minutes after (`--interval`). None of these kernels
