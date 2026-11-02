@@ -327,7 +327,7 @@ void rngd_os_run(void)
 		struct timespec ts;
 		int ret;
 
-		/* As in the Linux select_fd(): test and wait are one. */
+		/* As in the Linux wait_fds(): test and wait are one. */
 		sigprocmask(SIG_BLOCK, &blocked, &unblocked);
 
 		if (Term_pending) {
