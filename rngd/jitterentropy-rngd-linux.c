@@ -39,6 +39,7 @@
 #define _GNU_SOURCE
 
 #include <unistd.h>
+#include <poll.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <asm/types.h>
@@ -50,7 +51,6 @@
 #include <stdint.h>
 #include <sys/ioctl.h>
 #include <sys/prctl.h>
-#include <sys/select.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
@@ -771,21 +771,34 @@ void rngd_os_reseeded(ssize_t written)
 		      written);
 }
 
+/* What wait_fds() waits for */
+enum { WAIT_ALARM, WAIT_SIGNAL, WAIT_RANDOM, WAIT_FDS };
+
 /*
  * Wait for the alarm, a signal, or /dev/random wanting data: current kernels
  * report it writable only until their generator is ready.
+ *
+ * ppoll(2), as an fd_set ends at FD_SETSIZE: the descriptors of the daemon are
+ * numbered past what its parent left open, which it does not close.
  */
-static void select_fd(void)
+static void wait_fds(void)
 {
-	fd_set rfds, wfds;
-	int ret = 0, nfds;
+	struct pollfd fds[WAIT_FDS];
+	int ret = 0;
 	sigset_t blocked, unblocked;
 
 	term_signals(&blocked);
 
+	/* The LRNG's -1 for no alarm is one ppoll(2) skips, leaving no revents. */
+	fds[WAIT_ALARM].fd = Alarm_fd;
+	fds[WAIT_ALARM].events = POLLIN;
+	fds[WAIT_SIGNAL].fd = Signal_fd;
+	fds[WAIT_SIGNAL].events = POLLIN;
+	fds[WAIT_RANDOM].events = POLLOUT;
+
 	while (1) {
 		/*
-		 * pselect(2) unblocks the termination signals only while it
+		 * ppoll(2) unblocks the termination signals only while it
 		 * waits, so the flag test and going to sleep are atomic: a
 		 * signal in between would wait for the next wakeup.
 		 */
@@ -797,27 +810,15 @@ static void select_fd(void)
 			/* NOTREACHED */
 		}
 
-		FD_ZERO(&rfds);
-		FD_ZERO(&wfds);
-		nfds = 0;
 		/*
 		 * /dev/urandom is always writable, and /dev/random until the
 		 * kernel is ready: polling would spin, the alarm paces these.
 		 */
-		if (!unprivileged && !Seed_retrying) {
-			FD_SET(Random.fd, &wfds);
-			nfds = Random.fd + 1;
-		}
-		if (-1 != Alarm_fd) {
-			FD_SET(Alarm_fd, &rfds);
-			if (Alarm_fd >= nfds)
-				nfds = Alarm_fd + 1;
-		}
-		FD_SET(Signal_fd, &rfds);
-		if (Signal_fd >= nfds)
-			nfds = Signal_fd + 1;
-		dolog(JENT_LOG_DEBUG, "Polling /dev/random");
-		ret = pselect(nfds, &rfds, &wfds, NULL, NULL, &unblocked);
+		fds[WAIT_RANDOM].fd = unprivileged || Seed_retrying ?
+				      -1 : Random.fd;
+		dolog(JENT_LOG_DEBUG, -1 == fds[WAIT_RANDOM].fd ?
+		      "Waiting for the alarm" : "Polling /dev/random");
+		ret = ppoll(fds, WAIT_FDS, NULL, &unblocked);
 
 		sigprocmask(SIG_SETMASK, &unblocked, NULL);
 
@@ -830,10 +831,10 @@ static void select_fd(void)
 				dealloc();
 				exit(rngd_exit_status(errsv));
 			}
-			dolog(JENT_LOG_ERR, "Select returned with error %s", strerror(errno));
+			dolog(JENT_LOG_ERR, "ppoll returned with error %s", strerror(errno));
 		}
 
-		if (-1 != Alarm_fd && FD_ISSET(Alarm_fd, &rfds)) {
+		if (fds[WAIT_ALARM].revents) {
 			uint64_t expiries = 0;
 
 			/* Non-blocking: a wakeup with no expiry reads none */
@@ -841,7 +842,7 @@ static void select_fd(void)
 			    read(Alarm_fd, &expiries, sizeof(expiries)))
 				process_alarm(expiries);
 		}
-		if (FD_ISSET(Signal_fd, &rfds)) {
+		if (fds[WAIT_SIGNAL].revents) {
 			struct signalfd_siginfo si;
 			int status = 0, reseed = 0;
 
@@ -857,8 +858,8 @@ static void select_fd(void)
 			if (reseed)
 				process_reseed();
 		}
-		if (FD_ISSET(Random.fd, &wfds)) {
-			dolog(JENT_LOG_VERBOSE, "Wakeup call for select on /dev/random");
+		if (fds[WAIT_RANDOM].revents) {
+			dolog(JENT_LOG_VERBOSE, "Wakeup call for /dev/random");
 			seed_random();
 		}
 	}
@@ -1024,7 +1025,7 @@ void rngd_os_run(void)
 			  UNSEEDED_PERIOD : alarm_period[0]);
 	}
 	daemon_ready();
-	select_fd();
+	wait_fds();
 	/* NOTREACHED */
 	exit(1);
 }

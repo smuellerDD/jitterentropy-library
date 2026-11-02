@@ -198,6 +198,15 @@ machine.succeed(f"{nobody} jitterentropy-rngd --oneshot --unprivileged")
 pid = hardened("jitterentropy-rngd -F --unprivileged", "0000000000004000")
 machine.succeed(f"kill {pid}")
 
+# Past FD_SETSIZE, the numbers below taken by what its parent left open: the
+# signalfd and the timerfd are 1024 and 1025, which no fd_set holds.
+out = machine.succeed(
+    "ulimit -n 2048; for i in $(seq 3 1022); do eval \"exec $i</dev/null\"; done;"
+    " rc=0; timeout -s TERM 4 jitterentropy-rngd -F -vvv -t 1 --unprivileged"
+    " 2>&1 || rc=$?; [ $rc = 124 ]")
+assert "Shutting down cleanly" in out, out
+assert out.count("Wrote 64 bytes to /dev/urandom") >= 3, out
+
 # --oneshot and --generate.
 out = machine.succeed("jitterentropy-rngd --oneshot")
 assert "Seeded the kernel, exiting" in out, out

@@ -84,7 +84,7 @@ static int foreground = 0;
  * a wrapping monitor will pick up the errors and handle it as it sees fit, such
  * as creating audit logs and possibly restart the daemon.
  *
- * This covers failed reads, injections and pselect(2), with the status of
+ * This covers failed reads, injections and the wait, with the status of
  * rngd_exit_status(). Every other failure ends the daemon with RNGD_EXIT_ERROR
  * regardless, and a permanent health test failure with RNGD_EXIT_PERMANENT, for
  * a monitor to tell it from those a restart may mend.
@@ -808,8 +808,8 @@ void process_term(void)
 /*
  * Install a signal handler via sigaction(2) - unlike signal(2) its semantics
  * are unambiguous across systems. SA_RESTART resumes blocking calls rather than
- * failing them with EINTR, but per signal(7) not pselect(2), which is how the
- * wait in rngd_os_run() notices a pending flag.
+ * failing them with EINTR, but per signal(7) neither ppoll(2) nor pselect(2),
+ * which is how the wait in rngd_os_run() notices a pending flag.
  */
 int install_handler(int sig, void (*handler)(int), int flags)
 {
