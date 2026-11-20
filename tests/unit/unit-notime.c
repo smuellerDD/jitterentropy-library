@@ -645,11 +645,13 @@ static void test_notime_failures(void)
 		   "an undiscoverable CPU count is passed through");
 	fi_ncpu = 0;
 
-	/* The context allocation. */
+	/* The context allocation, reached on a single CPU too (issue #232). */
+	fi_ncpu = 2;
 	fi_arm(1);
 	JENT_UT_EQ(jent_notime_init(&ctx), -ENOMEM,
 		   "a denied context allocation is reported");
 	fi_disarm();
+	fi_ncpu = 0;
 
 	/* And a collector that asks for the timer when no thread starts. */
 	fi_fail_thread_create = 1;

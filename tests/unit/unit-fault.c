@@ -746,6 +746,39 @@ static void test_recovery_alloc_failure(void)
 }
 
 /*
+ * The internal timer asked for on a single CPU, where its counting thread
+ * cannot run (issue #232). Forcing it there would leave the process without
+ * any clock, every later collector failing.
+ */
+static void test_notime_single_cpu(void)
+{
+#ifdef JENT_CONF_ENABLE_INTERNAL_TIMER
+	struct rand_data *ec;
+
+	jent_ut_group("the internal timer asked for on a single CPU");
+
+	if (jent_notime_forced()) {
+		JENT_UT_SKIP("the single CPU", "the internal timer is forced");
+		return;
+	}
+
+	fi_ncpu = 1;
+	JENT_UT_EQ(jent_entropy_init_ex(0, JENT_FORCE_INTERNAL_TIMER), ENOTIME,
+		   "a startup forcing it reports no timer, not no memory");
+	ec = jent_entropy_collector_alloc(0, JENT_FORCE_INTERNAL_TIMER);
+	JENT_UT_TRUE(ec == NULL, "no collector asking for it is allocated");
+	jent_entropy_collector_free(ec);
+	fi_ncpu = 0;
+
+	JENT_UT_EQ(jent_notime_forced(), 0,
+		   "and the process is not left on it");
+#else
+	jent_ut_group("the internal timer asked for on a single CPU");
+	JENT_UT_SKIP("the single CPU", "the internal timer is not compiled in");
+#endif
+}
+
+/*
  * The whole point of denying one allocation at a time is that the cleanup path
  * runs. Reading back from a collector allocated afterwards is what says the
  * library is still in a working state rather than merely not having crashed.
@@ -1274,6 +1307,7 @@ int main(void)
 	test_system_fips_mode();
 	test_allocator_bounds();
 	test_alloc_runs_failing_selftest();
+	test_notime_single_cpu();
 	test_still_usable_afterwards();
 
 	/* Last: it forces the internal timer, which cannot be undone. */
