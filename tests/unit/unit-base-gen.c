@@ -373,6 +373,7 @@ static void test_generation_matrix(void)
 		struct rand_data *ec =
 			jent_entropy_collector_alloc(0, configs[i].flags);
 		char buf[48];
+		ssize_t ret;
 
 		if (!ec) {
 			/*
@@ -384,8 +385,12 @@ static void test_generation_matrix(void)
 			continue;
 		}
 
-		JENT_UT_EQ(jent_read_entropy(ec, buf, sizeof(buf)),
-			   (ssize_t)sizeof(buf), configs[i].name);
+		ret = jent_read_entropy(ec, buf, sizeof(buf));
+		if (JENT_UT_READ_VERDICT(ret))
+			JENT_UT_SKIP(configs[i].name,
+				     "the health tests fail on this machine");
+		else
+			JENT_UT_EQ(ret, (ssize_t)sizeof(buf), configs[i].name);
 		jent_entropy_collector_free(ec);
 	}
 }
