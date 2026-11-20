@@ -161,6 +161,22 @@ static inline int jent_ut_strict(void)
 	  ((ret) == EMEM && JENT_UT_SECURE_MEM_FORCED(flags))))
 
 /*
+ * Whether @ret, a read that did not generate, is this machine's verdict: a
+ * health test of the real noise source failing, which a read reports in FIPS
+ * mode only. The NTG.1 cutoffs carry an 8-fold margin that a coarse clock
+ * trips now and then (the macOS arm64 runners). Never a verdict under
+ * JENT_UT_STRICT.
+ */
+#define JENT_UT_READ_VERDICT(ret)					       \
+	(!jent_ut_strict() &&						       \
+	 ((ret) == JENT_ERR_RCT || (ret) == JENT_ERR_APT ||		       \
+	  (ret) == JENT_ERR_LAG || (ret) == JENT_ERR_RCT_MEM ||		       \
+	  (ret) == JENT_ERR_RCT_PERMANENT ||				       \
+	  (ret) == JENT_ERR_APT_PERMANENT ||				       \
+	  (ret) == JENT_ERR_LAG_PERMANENT ||				       \
+	  (ret) == JENT_ERR_RCT_MEM_PERMANENT))
+
+/*
  * A collector allocated with @flags that did not come, and whether that is the
  * machine or a defect. The machine's reasons, each asked of something other
  * than the allocation under test:

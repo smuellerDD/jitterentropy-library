@@ -1125,10 +1125,20 @@ int jent_time_entropy_init(unsigned int osr, unsigned int flags)
 	if (!delta_history)
 		return EMEM;
 
-	if (flags & JENT_FORCE_INTERNAL_TIMER)
+	if (flags & JENT_FORCE_INTERNAL_TIMER) {
+		/*
+		 * Forcing is one-way. Where no counting thread can run (one
+		 * CPU, no thread backend) it would leave the process without
+		 * any clock, and the refused allocation below read as EMEM.
+		 */
+		if (!jent_notime_available()) {
+			ret = ENOTIME;
+			goto out;
+		}
 		jent_notime_force();
-	else
+	} else {
 		flags |= JENT_DISABLE_INTERNAL_TIMER;
+	}
 
 	/*
 	 * Once the internal timer has been forced anywhere in the process -

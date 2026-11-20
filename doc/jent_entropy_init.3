@@ -169,8 +169,10 @@ for
 .B JENT_FORCE_INTERNAL_TIMER
 without the internal timer compiled in or together with
 .BR JENT_NTG1 ,
-and for the test of the hardware timer once the internal timer has been
-forced in the process.
+for the test of the hardware timer once the internal timer has been
+forced in the process, and for the internal timer where the library's own
+counting thread cannot run: fewer than two CPUs or no thread backend. The
+internal timer is then not forced.
 .TP
 .BR ECOARSETIME " (2)"
 The timer is too coarse for the RNG.
@@ -219,8 +221,7 @@ SHAKE-256 or XDRBG-256.
 Memory for the startup could not be allocated - with
 .B JENT_FORCE_SECURE_MEM
 in effect, also memory with the extras it requires - or the internal timer
-could not be set up for it: fewer than two CPUs, no thread backend, or a
-counting thread that could not be started.
+could not be set up for it, e.g. a counting thread that could not be started.
 .TP
 .BR EGCD " (13)"
 The self test of the common timer divisor analysis failed.

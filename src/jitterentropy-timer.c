@@ -54,9 +54,8 @@ static unsigned long jent_notime_cpu = 0;
 # define JENT_NOTIME_BUILTIN_BACKEND	0
 #endif
 
-static int jent_notime_init_flags(void **ctx, unsigned int flags)
+static int jent_notime_builtin_check(void)
 {
-	struct jent_notime_ctx *thread_ctx;
 	long ncpu = jent_ncpu();
 
 	if (ncpu < 0)
@@ -69,6 +68,17 @@ static int jent_notime_init_flags(void **ctx, unsigned int flags)
 	 */
 	if (ncpu < 2 || !JENT_NOTIME_BUILTIN_BACKEND)
 		return -ENOENT;
+
+	return 0;
+}
+
+static int jent_notime_init_flags(void **ctx, unsigned int flags)
+{
+	struct jent_notime_ctx *thread_ctx;
+	int ret = jent_notime_builtin_check();
+
+	if (ret)
+		return ret;
 
 	thread_ctx = jent_zalloc(sizeof(struct jent_notime_ctx), flags);
 	if (!thread_ctx)
@@ -397,6 +407,18 @@ int jent_notime_switch(struct jent_notime_thread *new_thread)
 	jent_notime_thread_external = *new_thread;
 	notime_thread = &jent_notime_thread_external;
 	return 0;
+}
+
+/*
+ * Asked before the one-way jent_notime_force(). A registered handler brings
+ * its own CPU rule and is asked in its init only.
+ */
+int jent_notime_available(void)
+{
+	if (notime_thread != &jent_notime_thread_builtin)
+		return 1;
+
+	return !jent_notime_builtin_check();
 }
 
 void jent_notime_force(void)
